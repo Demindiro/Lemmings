@@ -24,6 +24,28 @@
  .byte (\base >> 24) & 0xff
 .endm
 
+.equ FW_CFG_IOBASE, 0x510
+.equ FW_CFG.RAM_SIZE, 0x0003
+.equ FW_CFG.NB_CPUS , 0x0005
+.equ FW_CFG.MAX_CPUS, 0x000f
+.equ FW_CFG.FILE_DIR, 0x0019
+
+.equ FW_CFG_DMA.ERROR , 1 << 0
+.equ FW_CFG_DMA.READ  , 1 << 1
+.equ FW_CFG_DMA.SKIP  , 1 << 2
+.equ FW_CFG_DMA.SELECT, 1 << 3
+.equ FW_CFG_DMA.WRITE , 1 << 4
+
+
+.macro movimm reg:req, imm:req
+ .if \imm < 128
+	push \imm
+	pop \reg
+ .else
+  .assert 0, "todo"
+ .endif
+.endm
+
 
 .section .text
 . = PML4_BASE
@@ -66,6 +88,46 @@ gdtr:
 . = CODE64_BASE
 .code64
 main64:
+mov esp, 4096
+mov edx, FW_CFG_IOBASE
+xor eax, eax
+out dx, ax
+inc edx
+# for sanity, ensure the machine is QEMU
+	movimm rcx, 4
+2:	shl eax, 8
+	in al, dx
+	loop 2b
+cmp eax, ('Q'<<24) | ('E'<<16) | ('M'<<8) | 'U'
+je is_qemu
+hlt # just halt if not, we can't do anything else
+is_qemu:
+# ensure DMA is available
+mov eax, 1
+dec edx
+out dx, ax
+inc edx
+in al, dx
+test al, 1 << 1
+jnz fwcfg_has_dma
+hlt
+fwcfg_has_dma:
+push 0 # address
+sub esp, 8
+# It's seriously in big endian? What the fuck?
+mov eax, 2048
+bswap eax
+mov dword ptr [rsp+4], eax # length
+mov ebx, (FW_CFG.FILE_DIR << 16) | FW_CFG_DMA.READ | FW_CFG_DMA.SELECT
+#mov ebx, (FW_CFG.RAM_SIZE << 16) | FW_CFG_DMA.READ | FW_CFG_DMA.SELECT
+bswap ebx
+mov dword ptr [rsp+0], ebx # control
+mov eax, esp
+bswap eax
+mov edx, FW_CFG_IOBASE + 8
+out dx, eax
+2:	cmp ebx, [rsp+0]
+	je 2b
 hlt
 
 
