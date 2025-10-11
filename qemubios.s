@@ -57,17 +57,9 @@ segm 0, 0xfffff, 0b10010011, 0b1010 # data64 (access: P, S, RW, A) (flags: G, L)
 segm 0, 0xfffff, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
 segm 0, 0xfffff, 0b10010011, 0b1100 # data32 (access: P, S, RW, A) (flags: G, DS)
 segm 0xffff0000, 16, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
-segm (GDT_BASE + (tss - gdt)), 0, 0b10001001, 0b0010 # TSS (access: P, avail) (flags: L) 
-.quad (GDT_BASE + (tss - gdt)) >> 32             # high part of TSS
-tss:
-.zero 4
-.zero (4 * 2) * 3 # rsp
-.zero 4 * 2
-.zero (4 * 2) * 7 # ist
-.zero 4 * 2 + 2
-.zero . - tss   # iomap base (ALWAYS AT END OF TSS!!)
+gdt_end:
 gdtr:
-.word tss - gdt - 1
+.word gdt_end - gdt - 1
 .long 0xf0000 + GDT_BASE  # I hate segments!
 
 
