@@ -5,6 +5,11 @@
 .intel_syntax noprefix
 .globl _start
 
+.equ SYS_PRINT, 0
+.equ SYS_EXIT, 1
+.equ SYS_OPEN, 2
+.equ SYS_READ, 3
+
 .equ PML4_BASE, 0x0000
 .equ PDPT_BASE, 0x1000
 .equ PD_BASE  , 0x2000
@@ -36,6 +41,9 @@
 .equ FW_CFG_DMA.SELECT, 1 << 3
 .equ FW_CFG_DMA.WRITE , 1 << 4
 
+.equ PORT_PCI_CMD, 0xcf8
+.equ PORT_PCI_DATA, 0xcfc
+
 
 .macro movimm reg:req, imm:req
  .if \imm < 128
@@ -44,6 +52,11 @@
  .else
   .assert 0, "todo"
  .endif
+.endm
+
+.macro movbe32 loc:req, imm:req
+ .set .L\@, \imm
+	mov dword ptr \loc, ((.L\@ & 0xff) << 24) | ((.L\@ & 0xff00) << 8) | ((.L\@ >> 8) & 0xff00) | ((.L\@ >> 24) & 0xff)
 .endm
 
 
@@ -85,6 +98,14 @@ gdtr:
 .long 0xf0000 + GDT_BASE  # I hate segments!
 
 
+filename_boot_notfound:
+filename_boot:
+.ascii "opt/lemmings/boot"
+.equ filename_boot.len, . - filename_boot
+.ascii " not found\n"
+.equ filename_boot_notfound.len, . - filename_boot_notfound
+
+
 . = CODE64_BASE
 .code64
 main64:
@@ -112,23 +133,159 @@ test al, 1 << 1
 jnz fwcfg_has_dma
 hlt
 fwcfg_has_dma:
-push 0 # address
-sub esp, 8
-# It's seriously in big endian? What the fuck?
-mov eax, 2048
-bswap eax
-mov dword ptr [rsp+4], eax # length
-mov ebx, (FW_CFG.FILE_DIR << 16) | FW_CFG_DMA.READ | FW_CFG_DMA.SELECT
-#mov ebx, (FW_CFG.RAM_SIZE << 16) | FW_CFG_DMA.READ | FW_CFG_DMA.SELECT
-bswap ebx
-mov dword ptr [rsp+0], ebx # control
-mov eax, esp
-bswap eax
-mov edx, FW_CFG_IOBASE + 8
-out dx, eax
-2:	cmp ebx, [rsp+0]
-	je 2b
-hlt
+
+	lea rsi, [rip+filename_boot]
+	movimm rcx, filename_boot.len
+	call sys_open
+	test eax, eax
+	js fail_nobootfile
+
+	sub esp, 512
+	mov edi, esp
+	mov ecx, eax
+	push rcx
+	call sys_read
+	pop rcx
+
+	mov esi, esp
+	call sys_print
+	
+	hlt
+	jmp rax
+
+fail_nobootfile:
+	lea rsi, [rip+filename_boot_notfound]
+	movimm rcx, filename_boot_notfound.len
+	call sys_print
+	movimm rdx, 1
+	jmp sys_exit
+
+# IF=0, DF=0
+sys:
+	cmp eax, SYS_PRINT
+	je sys_print
+	cmp eax, SYS_EXIT
+	je sys_exit
+	cmp eax, SYS_OPEN
+	je sys_exit
+	cmp eax, SYS_READ
+	je sys_exit
+	movimm rax, 1
+	ret
+
+# rsi: string base
+# rcx: string length
+sys_print:
+	mov dx, 0x402
+	rep outsb
+	ret
+
+# edx: exit status
+sys_exit:
+	test edx, edx
+	jnz 2f
+	mov dx, 0x604
+	mov ax, 0x2000
+	jmp 3f
+2:	mov dx, 0x501
+	mov ax, 1
+3:	out dx, ax
+	hlt
+
+# rsi: filename base
+# ecx: filename length
+# 256 bytes of stack space available during call
+#
+# eax: size if found, -1 if not found
+sys_open:
+	# name[56] is null-terminated ASCII...
+	# I hate null-terminated strings!
+	cmp ecx, 56
+	jae 4f
+	sub rsp, 56
+	mov rdi, rsp
+	push rcx
+	xor eax, eax
+	movimm rcx, 56/8
+	rep stosq
+	pop rcx
+	mov rdi, rsp
+	rep movsb
+	mov rdi, rsp
+	# prepare DMA
+	sub rsp, 64
+	mov rsi, rsp
+	bswap rsi # I hate big endian!
+	push rsi
+	bswap rsi
+	sub rsp, 8
+	mov rbp, rsp
+	# get count
+	movbe32 [rbp+4], 4
+	movbe32 [rbp+0], (FW_CFG.FILE_DIR << 16) | FW_CFG_DMA.READ | FW_CFG_DMA.SELECT
+	call fw_cfg_dma
+	mov ebx, [rsi]
+	bswap ebx
+	test ebx, ebx
+	jz 4f
+	# iterate entries
+	add rsi, 8 # we only care about the name
+2:	movbe32 [rbp+4], 64
+	movbe32 [rbp+0], FW_CFG_DMA.READ
+	call fw_cfg_dma
+	mov ecx, 56/8
+	push rsi
+	push rdi
+	rep cmpsq
+	pop rdi
+	pop rsi
+	je 3f
+	dec ebx
+	jnz 2b
+4:	movimm rax, -1
+	add rsp, 16 + 64 + 56
+	ret
+3:	mov ax, [rsi-8+4]
+	xchg al, ah
+	mov dx, FW_CFG_IOBASE
+	out dx, ax
+	mov eax, [rsi-8+0]
+	bswap eax
+	add rsp, 16 + 64 + 56
+	ret
+
+# rdi: buffer base
+# ecx: buffer size
+# 32 bytes of stack space available during call
+sys_read:
+	bswap rdi
+	push rdi
+	sub rsp, 8
+	mov rbp, rsp
+	bswap ecx
+	mov [rbp+4], ecx
+	movbe32 [rbp+0], FW_CFG_DMA.READ
+	call fw_cfg_dma
+	add rsp, 16
+	ret
+
+
+# rbp: base
+fw_cfg_dma:
+	# high
+	mov dx, FW_CFG_IOBASE + 4
+	mov rax, rbp
+	bswap rax
+	out dx, eax
+	# low
+	add edx, 4
+	mov eax, ebp
+	bswap eax
+	out dx, eax
+	# wait until complete
+2:	test dword ptr [rbp], ~(1 << 24)
+	jnz 2b
+	ret
 
 
 . = CODE32_BASE

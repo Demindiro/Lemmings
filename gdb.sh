@@ -7,6 +7,21 @@
 #   set architecture i8086
 # ... or at least, that ought to work but it doesn't ...
 
-qemu-system-x86_64 -machine q35 -bios /tmp/qemubios.bin -nographic -S -s -d int,cpu,exec --trace 'fw_cfg*' &
+qemu-system-x86_64 \
+	-machine q35 \
+	-bios /tmp/qemubios.bin \
+	-fw_cfg opt/lemmings/boot,file=run.sh \
+	-device isa-debug-exit \
+	-debugcon file:/dev/stdout \
+	-global isa-debugcon.iobase=0x402 \
+	-nographic \
+	-S -s \
+	&
 gdb -ex 'target remote localhost:1234'
 wait
+exit
+
+	-d int,cpu,exec \
+	--trace 'fw_cfg*' \
+	--trace 'memory_region_*' \
+	-monitor stdio \
