@@ -268,7 +268,7 @@ fw_cfg_dma:
 	ret
 
 
-.section .text32, "ax"
+.section .init32, "ax"
 .code32
 main32:
 # https://wiki.osdev.org/Entering_Long_Mode_Directly
@@ -301,15 +301,10 @@ gdtr:
 .long LDFIX_gdt
 .byte 0xcc
 
-.section .init32, "ax"
-.code32
-main32_trampoline:
-jmp (3*8):main32
-
 .section .init, "ax"
 .code16
 _start:
 lgdt cs:[LDFIX_gdtr]
 mov al, 1 # PE
 mov cr0, eax
-jmp (5*8):LDFIX_main32_trampoline
+jmp (5*8):LDFIX_main32
