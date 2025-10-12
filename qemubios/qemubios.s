@@ -3,22 +3,19 @@
 # Hence, we will first enter protected mode using a segment with corresponding
 # offset, switch to identity segment then enter long mode directly at the proper address.
 .intel_syntax noprefix
-.globl _start
+.globl sys_exit
+.globl sys_open
+.globl sys_print
+.globl sys_read
 
 .equ SYS_PRINT, 0
 .equ SYS_EXIT, 1
 .equ SYS_OPEN, 2
 .equ SYS_READ, 3
 
-.equ PML4_BASE, 0x0000
-.equ PDPT_BASE, 0x1000
-.equ PD_BASE  , 0x2000
-.equ PT_BASE  , 0x3000
-.equ GDT_BASE , 0x4000
-.equ CODE64_BASE, 0x5000
-.equ CODE32_BASE, 0xf000
-
-.equ REAL_BIOS_BASE, 0xffff0000
+.equ PDPT_BASE, 0xffff1000
+.equ PD_BASE  , 0xffff2000
+.equ PT_BASE  , 0xffff3000
 
 .macro segm base:req, limit:req, access:req, flags:req
  .word \limit & 0xffff
@@ -61,42 +58,24 @@
 
 
 .section .text
-. = PML4_BASE
-.quad (REAL_BIOS_BASE + PDPT_BASE) | 0b00100011
+pml4:
+.quad PDPT_BASE | 0b00100011
 .zero 511*8
-
-. = PDPT_BASE
-.quad (REAL_BIOS_BASE + PD_BASE) | 0b00100011   # 0x00000000 = 0<<21
+pdpt:
+.quad PD_BASE | 0b00100011   # 0x00000000 = 0<<21
 .quad 0
 .quad 0
-.quad (REAL_BIOS_BASE + PD_BASE) | 0b00100011   # 0xc0000000 = 3<<21
+.quad PD_BASE | 0b00100011   # 0xc0000000 = 3<<21
 .zero (512-4)*8
-
-. = PD_BASE
+pd:
 .quad 0 | 0b11100011     # 2MiB hugepage to physaddr 0
 .zero (512-2)*8
-.quad (REAL_BIOS_BASE + PT_BASE) | 0b00100011
-
-. = PT_BASE
+.quad PT_BASE | 0b00100011
+pt:
 .zero (512-16)*8
 .rept 16
- .quad (REAL_BIOS_BASE | \+*0x1000) | 0b11100011    # 4KiB page to physaddr 0xfffx000
+ .quad (0xffff0000 | \+*0x1000) | 0b11100011    # 4KiB page to physaddr 0xfffx000
 .endr
-
-
-. = GDT_BASE
-gdt:
-segm 0, 0, 0, 0 # null
-segm 0, 0xfffff, 0b10011011, 0b1010 # code64 (access: P, S, E, RW, A) (flags: G, L)
-segm 0, 0xfffff, 0b10010011, 0b1010 # data64 (access: P, S, RW, A) (flags: G, L)
-segm 0, 0xfffff, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
-segm 0, 0xfffff, 0b10010011, 0b1100 # data32 (access: P, S, RW, A) (flags: G, DS)
-segm 0xffff0000, 16, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
-gdt_end:
-gdtr:
-.word gdt_end - gdt - 1
-.long 0xf0000 + GDT_BASE  # I hate segments!
-
 
 filename_boot_notfound:
 filename_boot:
@@ -106,7 +85,6 @@ filename_boot:
 .equ filename_boot_notfound.len, . - filename_boot_notfound
 
 
-. = CODE64_BASE
 .code64
 main64:
 mov esp, 4096
@@ -149,6 +127,8 @@ fwcfg_has_dma:
 
 	mov esi, esp
 	call sys_print
+
+	call boot
 	
 	hlt
 	jmp rax
@@ -288,13 +268,12 @@ fw_cfg_dma:
 	ret
 
 
-. = CODE32_BASE
+.section .text32, "ax"
 .code32
 main32:
-jmp (3*8):REAL_BIOS_BASE + CODE32_BASE + (main32_s - main32)
-main32_s:
 # https://wiki.osdev.org/Entering_Long_Mode_Directly
-mov eax, REAL_BIOS_BASE + PML4_BASE
+#mov eax, pml4
+mov eax, 0xffff0000
 mov cr3, eax
 mov eax, 0b10100000 # PAE, PGE
 mov cr4, eax
@@ -304,15 +283,33 @@ or eax, (1 << 11) | (1 << 8) | (1 << 0) # NXE, LME, SCE
 wrmsr
 mov eax, 0x80000001 # PG, PE
 mov cr0, eax
-#mov eax, REAL_BIOS_BASE + CODE16_BASE # tss64
-#ltr ax
-jmp (1*8):REAL_BIOS_BASE + CODE64_BASE
+jmp (1*8):main64
 
+.section .gdt, "a"
+gdt:
+segm 0, 0, 0, 0 # null
+segm 0, 0xfffff, 0b10011011, 0b1010 # code64 (access: P, S, E, RW, A) (flags: G, L)
+segm 0, 0xfffff, 0b10010011, 0b1010 # data64 (access: P, S, RW, A) (flags: G, L)
+segm 0, 0xfffff, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
+segm 0, 0xfffff, 0b10010011, 0b1100 # data32 (access: P, S, RW, A) (flags: G, DS)
+segm 0xffff0000, 16, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
+gdt_end:
 
-. = 0xfff0
+.section .gdtr, "a"
+gdtr:
+.word gdt_end - gdt - 1
+.long LDFIX_gdt
+.byte 0xcc
+
+.section .init32, "ax"
+.code32
+main32_trampoline:
+jmp (3*8):main32
+
+.section .init, "ax"
 .code16
 _start:
-lgdt cs:[gdtr]
+lgdt cs:[LDFIX_gdtr]
 mov al, 1 # PE
 mov cr0, eax
-jmp (5*8):CODE32_BASE
+jmp (5*8):LDFIX_main32_trampoline
