@@ -57,6 +57,12 @@
 .endm
 
 
+.section .rodata
+msg_invalidsys:
+.ascii "[QEMUBIOS] Invalid system call! Halting...\n"
+.equ msg_invalidsys.len, . - msg_invalidsys
+
+
 .section .text
 pdpt:
 .quad PD_BASE | 0b00100011   # 0x00000000 = 0<<21
@@ -101,7 +107,9 @@ test al, 1 << 1
 jnz fwcfg_has_dma
 hlt
 fwcfg_has_dma:
-	jmp boot
+	call boot
+	lea rbx, [rip + sys]
+	jmp rax
 
 # IF=0, DF=0
 sys:
@@ -110,11 +118,13 @@ sys:
 	cmp eax, SYS_EXIT
 	je sys_exit
 	cmp eax, SYS_OPEN
-	je sys_exit
+	je sys_open
 	cmp eax, SYS_READ
-	je sys_exit
-	movimm rax, 1
-	ret
+	je sys_read
+	lea rsi, [rip+msg_invalidsys]
+	movimm rcx, msg_invalidsys.len
+	call sys_print
+	hlt
 
 # rsi: string base
 # rcx: string length
