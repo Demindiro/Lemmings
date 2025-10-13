@@ -77,13 +77,6 @@ pt:
  .quad (0xffff0000 | \+*0x1000) | 0b11100011    # 4KiB page to physaddr 0xfffx000
 .endr
 
-filename_boot_notfound:
-filename_boot:
-.ascii "opt/lemmings/boot"
-.equ filename_boot.len, . - filename_boot
-.ascii " not found\n"
-.equ filename_boot_notfound.len, . - filename_boot_notfound
-
 
 .code64
 main64:
@@ -111,34 +104,7 @@ test al, 1 << 1
 jnz fwcfg_has_dma
 hlt
 fwcfg_has_dma:
-
-	lea rsi, [rip+filename_boot]
-	movimm rcx, filename_boot.len
-	call sys_open
-	test eax, eax
-	js fail_nobootfile
-
-	sub esp, 512
-	mov edi, esp
-	mov ecx, eax
-	push rcx
-	call sys_read
-	pop rcx
-
-	mov esi, esp
-	call sys_print
-
-	call boot
-	
-	hlt
-	jmp rax
-
-fail_nobootfile:
-	lea rsi, [rip+filename_boot_notfound]
-	movimm rcx, filename_boot_notfound.len
-	call sys_print
-	movimm rdx, 1
-	jmp sys_exit
+	jmp boot
 
 # IF=0, DF=0
 sys:
@@ -178,6 +144,8 @@ sys_exit:
 #
 # eax: size if found, -1 if not found
 sys_open:
+	push rbp
+	push rbx
 	# name[56] is null-terminated ASCII...
 	# I hate null-terminated strings!
 	cmp ecx, 56
@@ -223,21 +191,23 @@ sys_open:
 	dec ebx
 	jnz 2b
 4:	movimm rax, -1
-	add rsp, 16 + 64 + 56
-	ret
+	jmp 5f
 3:	mov ax, [rsi-8+4]
 	xchg al, ah
 	mov dx, FW_CFG_IOBASE
 	out dx, ax
 	mov eax, [rsi-8+0]
 	bswap eax
-	add rsp, 16 + 64 + 56
+5:	add rsp, 16 + 64 + 56
+	pop rbx
+	pop rbp
 	ret
 
 # rdi: buffer base
 # ecx: buffer size
 # 32 bytes of stack space available during call
 sys_read:
+	push rbp
 	bswap rdi
 	push rdi
 	sub rsp, 8
@@ -247,6 +217,7 @@ sys_read:
 	movbe32 [rbp+0], FW_CFG_DMA.READ
 	call fw_cfg_dma
 	add rsp, 16
+	pop rbp
 	ret
 
 

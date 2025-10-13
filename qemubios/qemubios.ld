@@ -13,7 +13,7 @@ LDFIX_gdt = 0xfffa0;
 LDFIX_gdtr = 0xff98;
 
 SECTIONS {
-	/DISCARD/ : { *(.note .note* .eh_frame) } /* FUCK OFF */
+	/DISCARD/ : { *(.note .note* .eh_frame .gcc_except_table* .data) }
 	.text : AT(0xffff0000) {
 		*(.text .text*)
 		*(.rodata .rodata.*)

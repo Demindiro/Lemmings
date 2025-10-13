@@ -1,10 +1,12 @@
 #!/bin/sh
 
+. ./config.env
+
 set -xe
 exec qemu-system-x86_64 \
 	-machine q35 \
 	-bios /tmp/qemubios.bin \
-	-fw_cfg opt/lemmings/boot,file=run.sh \
+	-fw_cfg opt/lemmings/kernel.elf,file="$RUST_TARGET"/release/kernel \
 	-monitor stdio \
 	-device isa-debug-exit \
 	-debugcon file:/dev/stdout \

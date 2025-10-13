@@ -10,7 +10,7 @@
 qemu-system-x86_64 \
 	-machine q35 \
 	-bios /tmp/qemubios.bin \
-	-fw_cfg opt/lemmings/boot,file=run.sh \
+	-fw_cfg opt/lemmings/kernel.elf,file=/tmp/kernel.elf \
 	-device isa-debug-exit \
 	-debugcon file:/dev/stdout \
 	-global isa-debugcon.iobase=0x402 \
