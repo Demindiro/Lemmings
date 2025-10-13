@@ -13,9 +13,9 @@
 .equ SYS_OPEN, 2
 .equ SYS_READ, 3
 
-.equ PDPT_BASE, 0xffff1000
-.equ PD_BASE  , 0xffff2000
-.equ PT_BASE  , 0xffff3000
+.equ PDPT_BASE, 0xffff0000
+.equ PD_BASE  , 0xffff1000
+.equ PT_BASE  , 0xffff2000
 
 .macro segm base:req, limit:req, access:req, flags:req
  .word \limit & 0xffff
@@ -58,9 +58,6 @@
 
 
 .section .text
-pml4:
-.quad PDPT_BASE | 0b00100011
-.zero 511*8
 pdpt:
 .quad PD_BASE | 0b00100011   # 0x00000000 = 0<<21
 .quad 0
@@ -243,8 +240,8 @@ fw_cfg_dma:
 .code32
 main32:
 # https://wiki.osdev.org/Entering_Long_Mode_Directly
-#mov eax, pml4
-mov eax, 0xffff0000
+mov eax, 0x1000
+mov dword ptr [eax], PDPT_BASE | 0b00100011 # A, R/W, P
 mov cr3, eax
 mov eax, 0b10100000 # PAE, PGE
 mov cr4, eax
