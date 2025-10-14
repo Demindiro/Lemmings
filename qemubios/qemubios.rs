@@ -446,6 +446,50 @@ mod pci {
     }
 }
 
+mod pcie {
+    use crate::*;
+    use core::ptr::NonNull;
+
+    struct Q35 {
+    }
+
+    impl Q35 {
+        const BASE: NonNull<u8> = unsafe { NonNull::new_unchecked(0xb000_0000u32 as _) };
+        const SIZE: usize = 4096 * 8 * 32 * 256;
+        const BDF: pci::BDF = pci::BDF::new(0, 0, 0);
+        const CFG_PCIE_BASE: u8 = 0x60;
+
+        fn enable(&self) {
+            // based on SeaBIOS
+            unsafe {
+                let base = Self::BASE.addr().get() as u64;
+                unsafe fn f<const O: u8>(x: u32) {
+                    // no const generics? :(((
+                    match O {
+                        0 => pci::write32::<{ Q35::CFG_PCIE_BASE + 0 }>(Q35::BDF, x),
+                        4 => pci::write32::<{ Q35::CFG_PCIE_BASE + 4 }>(Q35::BDF, x),
+                        _ => panic!("no const generics! :((((((("),
+                    }
+                }
+                f::<0>(0);
+                f::<4>((base >> 32) as u32);
+                f::<0>(base as u32 | 1);
+            }
+        }
+
+        pub fn configure(&self) {
+            self.enable();
+        }
+    }
+
+    pub fn configure(alloc: &mut alloc::Allocator) {
+        let host = Q35 {};
+        host.configure();
+        unsafe { core::arch::asm!("hlt"); }
+        fail("todo");
+    }
+}
+
 fn fail(reason: &str) -> ! {
     sys::print(reason);
     sys::print("\n");
@@ -474,6 +518,7 @@ fn load_file<'a>(filename: &str, alloc: &mut alloc::Allocator) -> &'a [u8] {
 #[unsafe(no_mangle)]
 extern "sysv64" fn boot() -> NonNull<u8> {
     let alloc = &mut alloc::Allocator::new();
+    let pcie_base = pcie::configure(alloc);
     let file = load_file(KERNEL_FILENAME, alloc);
     elf::load(file, alloc)
 }
