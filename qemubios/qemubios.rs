@@ -170,7 +170,7 @@ mod page {
             #[allow(dead_code)]
             impl $entry {
                 pub fn as_table(&self) -> Option<$table> {
-                    (!self.is_table()).then(|| unsafe { core::mem::transmute(self.addr()) })
+                    self.is_table().then(|| $table(unsafe { NonNull::new_unchecked(self.addr_table_ptr()) }))
                 }
 
                 pub fn set_table(&mut self, table: $table) {
@@ -178,11 +178,23 @@ mod page {
                 }
 
                 fn is_table(&self) -> bool {
-                    self.0 & PAGE_SIZE == 0
+                    self.0 & (PAGE_SIZE | PRESENT) == PRESENT
                 }
 
-                fn addr(&self) -> u64 {
+                fn is_present(&self) -> bool {
+                    self.0 & PRESENT == PRESENT
+                }
+
+                fn addr_table(&self) -> u64 {
+                    self.0 & !0xfff
+                }
+
+                fn addr_page(&self) -> u64 {
                     self.0 & $mask
+                }
+
+                fn addr_table_ptr<T>(&self) -> *mut T {
+                    ptr::with_exposed_provenance_mut(self.addr_table() as usize)
                 }
             }
         };
