@@ -500,6 +500,26 @@ mod pci {
             assert!(dev < 32);
             Self(u16::from_be_bytes([bus, dev << 3 | func]))
         }
+
+        pub const fn with_function(self, function: u8) -> Self {
+            Self::new(self.bus(), self.dev(), function)
+        }
+
+        pub const fn bus(self) -> u8 {
+            (self.0 >> 8) as u8
+        }
+
+        pub const fn dev(self) -> u8 {
+            self.0 as u8 >> 3
+        }
+
+        pub const fn function(self) -> u8 {
+            self.0 as u8 & 7
+        }
+
+        pub const fn index(self) -> u16 {
+            self.0
+        }
     }
 
     const PORTIO_CMD: u16 = 0xcf8;
@@ -524,11 +544,46 @@ mod pcie {
     struct Q35 {
     }
 
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct Header0 {
+        device_id: VolatileCell<u16>,
+        vendor_id: VolatileCell<u16>,
+        status: VolatileCell<u16>,
+        command: VolatileCell<u16>,
+        class_code: VolatileCell<u8>,
+        subclass: VolatileCell<u8>,
+        prog_if: VolatileCell<u8>,
+        revision_id: VolatileCell<u8>,
+        bist: VolatileCell<u8>,
+        header_type: VolatileCell<u8>,
+        latency_timer: VolatileCell<u8>,
+        cache_line_size: VolatileCell<u8>,
+        bar: [VolatileCell<u32>; 6],
+        cardbus_cis_pointer: VolatileCell<u32>,
+        subsystem_id: VolatileCell<u16>,
+        subsystem_vendor_id: VolatileCell<u16>,
+        expansion_rom_address: VolatileCell<u32>,
+        _reserved_0: [u8; 3],
+        capabilities_pointer: VolatileCell<u8>,
+        _reserved_1: [u8; 4],
+        max_latency: VolatileCell<u8>,
+        min_grant: VolatileCell<u8>,
+        interrupt_pin: VolatileCell<u8>,
+        interrupt_line: VolatileCell<u8>,
+    }
+
     impl Q35 {
         const BASE: NonNull<u8> = unsafe { NonNull::new_unchecked(0xb000_0000u32 as _) };
         const SIZE: usize = 4096 * 8 * 32 * 256;
         const BDF: pci::BDF = pci::BDF::new(0, 0, 0);
         const CFG_PCIE_BASE: u8 = 0x60;
+
+        pub fn range(&self) -> core::ops::Range<NonNull<u8>> {
+            let start = Self::BASE;
+            let end = unsafe { Self::BASE.byte_add(Self::SIZE) };
+            start..end
+        }
 
         fn enable(&self) {
             // based on SeaBIOS
@@ -548,8 +603,26 @@ mod pcie {
             }
         }
 
+        fn get_header(&self, bdf: pci::BDF) -> &Header0 {
+            unsafe { Self::BASE.byte_add(4096 * usize::from(bdf.index())).cast::<Header0>().as_ref() }
+        }
+
+        fn configure_device(&self, bdf: pci::BDF) {
+            let hdr = self.get_header(bdf);
+            match hdr.vendor_id.get() {
+                _ => {}
+            }
+        }
+
+        fn configure_bus(&self, bus: u8) {
+            for dev in 0..32 {
+                self.configure_device(pci::BDF::new(bus, dev, 0));
+            }
+        }
+
         pub fn configure(&self) {
             self.enable();
+            self.configure_bus(0);
         }
     }
 
@@ -557,8 +630,21 @@ mod pcie {
         let host = Q35 {};
         page::identity_map_rw(host.range(), alloc);
         host.configure();
-        unsafe { core::arch::asm!("hlt"); }
-        fail("todo");
+    }
+}
+
+struct VolatileCell<T>(UnsafeCell<T>);
+
+impl<T> VolatileCell<T>
+where
+    T: Copy
+{
+    fn get(&self) -> T {
+        unsafe { core::ptr::read_volatile(self.0.get()) }
+    }
+
+    fn set(&self, value: T) {
+        unsafe { core::ptr::write_volatile(self.0.get(), value) }
     }
 }
 

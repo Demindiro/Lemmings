@@ -17,6 +17,8 @@ qemu-system-x86_64 \
 	-debugcon file:/dev/stdout \
 	-global isa-debugcon.iobase=0x402 \
 	-nographic \
+	--trace 'fw_cfg*' \
+	--trace '*pci*' \
 	-S -s \
 	&
 gdb -ex 'target remote localhost:1234'
@@ -24,6 +26,5 @@ wait
 exit
 
 	-d int,cpu,exec \
-	--trace 'fw_cfg*' \
 	--trace 'memory_region_*' \
 	-monitor stdio \
