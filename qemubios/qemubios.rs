@@ -1,6 +1,6 @@
 #![no_std]
 
-use core::ptr::NonNull;
+use core::{cell::UnsafeCell, ptr::NonNull};
 
 const KERNEL_FILENAME: &str = "opt/lemmings/kernel.elf";
 
@@ -173,7 +173,7 @@ mod alloc {
 
 mod page {
     use crate::*;
-    use core::{ptr::NonNull, ops};
+    use core::{ptr::{self, NonNull}, ops};
 
     macro_rules! impl_p {
         (T $table:ident $entry:ident) => {
@@ -214,8 +214,19 @@ mod page {
         (E $entry:ident $table:ident $mask:literal) => {
             #[allow(dead_code)]
             impl $entry {
-                pub fn as_table(&self) -> Option<$table> {
+                pub fn get_table(&self) -> Option<$table> {
                     self.is_table().then(|| $table(unsafe { NonNull::new_unchecked(self.addr_table_ptr()) }))
+                }
+
+                /// # Note
+                ///
+                /// Only inserts a table if not present
+                pub fn get_or_alloc_table(&mut self, alloc: &mut alloc::Allocator) -> Option<$table> {
+                    self.get_table().or_else(|| (!self.is_present()).then(|| {
+                        let Some(table) = $table::new(alloc) else { fail("out of memory") };
+                        self.0 = table.as_u64() | PRESENT;
+                        table
+                    }))
                 }
 
                 pub fn set_table(&mut self, table: $table) {
@@ -279,6 +290,56 @@ mod page {
             self.set(addr, READ_WRITE | PRESENT);
         }
     }
+
+    impl PdEntry {
+        fn set(&mut self, addr: u64, flags: u64) {
+            self.0 = addr | PAGE_SIZE | flags;
+        }
+
+        pub fn set_r(&mut self, addr: u64) {
+            self.set(addr, EXECUTE_DISABLE | PRESENT);
+        }
+
+        pub fn set_rw(&mut self, addr: u64) {
+            self.set(addr, EXECUTE_DISABLE | READ_WRITE | PRESENT);
+        }
+
+        pub fn set_rx(&mut self, addr: u64) {
+            self.set(addr, PRESENT);
+        }
+
+        pub fn set_rwx(&mut self, addr: u64) {
+            self.set(addr, READ_WRITE | PRESENT);
+        }
+    }
+
+    const MASK_4K: u64 = (1<<12)-1;
+    const MASK_2M: u64 = (1<<21)-1;
+
+    pub fn identity_map_rw(range: ops::Range<NonNull<u8>>, alloc: &mut alloc::Allocator) {
+        let mut start = range.start.addr().get() as u64 & !0xfff;
+        let end = (range.end.addr().get() + 0xfff) as u64 & !0xfff;
+        while start < end {
+            let [_, i] = split_bits(start as usize, 12);
+            let [pt_i, i] = split_bits(i, 9);
+            let [pd_i, i] = split_bits(i, 9);
+            let [pdp_i, i] = split_bits(i, 9);
+            let [pml4_i, i] = split_bits(i, 9);
+            assert_eq!(i, 0);
+            let mut pml4 = unsafe { sys::pml4() };
+            let Some(mut pdp) = pml4[pml4_i].get_or_alloc_table(alloc) else { fail("identity map PDP conflict") };
+            let Some(mut pd) = pdp[pdp_i].get_or_alloc_table(alloc) else { fail("identity map PD conflict") };
+            let mut pd: Pd = pd;
+            if start & MASK_2M == 0 && end - start > MASK_2M {
+                pd[pd_i].set_rw(start);
+                start += MASK_2M + 1;
+            } else {
+                let Some(mut pt) = pd[pd_i].get_or_alloc_table(alloc) else { fail("identity map PT conflict") };
+                pt[pt_i].set_rw(start);
+                start += MASK_4K + 1;
+            }
+        }
+    }
 }
 
 mod elf {
@@ -323,10 +384,6 @@ mod elf {
 
     const PH_TY_LOAD: u32 = 1;
     const PH_TY_DYNAMIC: u32 = 2;
-
-    fn split_bits(x: usize, bit: u8) -> [usize; 2] {
-        [x & ((1 << bit) - 1), x >> bit]
-    }
 
     fn slice(data: &[u8], from: usize, len: usize) -> Option<&[u8]> {
         data.get(from..).and_then(|s| s.get(..len))
@@ -498,10 +555,15 @@ mod pcie {
 
     pub fn configure(alloc: &mut alloc::Allocator) {
         let host = Q35 {};
+        page::identity_map_rw(host.range(), alloc);
         host.configure();
         unsafe { core::arch::asm!("hlt"); }
         fail("todo");
     }
+}
+
+fn split_bits(x: usize, bit: u8) -> [usize; 2] {
+    [x & ((1 << bit) - 1), x >> bit]
 }
 
 fn fail(reason: &str) -> ! {
