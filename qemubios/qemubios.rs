@@ -32,10 +32,6 @@ mod sys {
         }
     }
 
-    pub fn exit_ok() -> ! {
-        exit(0)
-    }
-
     pub fn exit_err() -> ! {
         exit(1)
     }
@@ -66,6 +62,33 @@ mod sys {
             }
         }
     }
+
+    pub fn pml4() -> crate::page::Pml4 {
+        let addr: u64;
+        unsafe {
+            asm! {
+                "mov rax, cr3",
+                out("rax") addr,
+            }
+        }
+        unsafe {
+            core::mem::transmute(addr)
+        }
+    }
+
+    /// # Safety
+    ///
+    /// The page mappings must be valid.
+    ///
+    /// In particular: the page with the current IP must be properly mapped.
+    pub unsafe fn set_pml4(pml4: crate::page::Pml4) {
+        unsafe {
+            asm! {
+                "mov cr3, rax",
+                in("rax") pml4.as_u64(),
+            }
+        }
+    }
 }
 
 mod alloc {
@@ -87,10 +110,11 @@ mod alloc {
     impl Allocator {
         pub fn new() -> Self {
             let mut regions: [_; MAX_REGIONS] = Default::default();
-            // intentionally skip 0x0000 because:
+            // intentionally skip 0x0..0x2000 because:
             // - we use 0x0..0x1000 as stack
+            // - we use 0x1000..0x2000 as PML4
             // - we can't safely dereference 0x0 in Rust
-            regions[0] = 0x1000..0xb0000;
+            regions[0] = 0x2000..0xb0000;
             Self { regions }
         }
 
@@ -108,15 +132,118 @@ mod alloc {
     }
 }
 
+mod page {
+    use crate::*;
+    use core::{ptr::NonNull, ops};
+
+    macro_rules! impl_p {
+        (T $table:ident $entry:ident) => {
+            pub struct $table(NonNull<[$entry; 512]>);
+            pub struct $entry(u64);
+
+            #[allow(dead_code)]
+            impl $table {
+                pub fn new(alloc: &mut alloc::Allocator) -> Option<Self> {
+                    alloc.alloc(alloc::PAGE_SIZE).map(NonNull::cast).map(Self)
+                }
+
+                pub fn as_u64(&self) -> u64 {
+                    self.0.addr().get() as u64
+                }
+            }
+
+            impl ops::Deref for $table {
+                type Target = [$entry; 512];
+
+                fn deref(&self) -> &Self::Target {
+                    unsafe { &*self.0.as_ptr() }
+                }
+            }
+
+            impl ops::DerefMut for $table {
+                fn deref_mut(&mut self) -> &mut Self::Target {
+                    unsafe { &mut *self.0.as_ptr() }
+                }
+            }
+        };
+        (E $entry:ident $table:ident $mask:literal) => {
+            #[allow(dead_code)]
+            impl $entry {
+                pub fn as_table(&self) -> Option<$table> {
+                    (!self.is_table()).then(|| unsafe { core::mem::transmute(self.addr()) })
+                }
+
+                pub fn set_table(&mut self, table: $table) {
+                    self.0 = table.as_u64() | PRESENT;
+                }
+
+                fn is_table(&self) -> bool {
+                    self.0 & PAGE_SIZE == 0
+                }
+
+                fn addr(&self) -> u64 {
+                    self.0 & $mask
+                }
+            }
+        };
+    }
+
+    impl_p!(T Pt PtEntry);
+    impl_p!(T Pd PdEntry);
+    impl_p!(T Pdp PdpEntry);
+    impl_p!(T Pml4 Pml4Entry);
+    impl_p!(E Pml4Entry Pdp 0x000fffff_c0000000);
+    impl_p!(E PdpEntry  Pd  0x000fffff_ffe00000);
+    impl_p!(E PdEntry   Pt  0x000fffff_fffff000);
+
+    const PRESENT: u64 = 1 << 0;
+    const READ_WRITE: u64 = 1 << 1;
+    const PAGE_SIZE: u64 = 1 << 7;
+    const EXECUTE_DISABLE: u64 = 1 << 63;
+
+    impl PtEntry {
+        fn set(&mut self, addr: u64, flags: u64) {
+            self.0 = addr | flags;
+        }
+
+        pub fn set_r(&mut self, addr: u64) {
+            self.set(addr, EXECUTE_DISABLE | PRESENT);
+        }
+
+        pub fn set_rw(&mut self, addr: u64) {
+            self.set(addr, EXECUTE_DISABLE | READ_WRITE | PRESENT);
+        }
+
+        pub fn set_rx(&mut self, addr: u64) {
+            self.set(addr, PRESENT);
+        }
+
+        pub fn set_rwx(&mut self, addr: u64) {
+            self.set(addr, READ_WRITE | PRESENT);
+        }
+    }
+}
+
 mod elf {
     use crate::*;
 
     struct Header {
-        program_entry: u64,
+        program_entry: usize,
+        ph_offset: usize,
+        ph_size: u16,
+        ph_count: u16,
     }
 
     fn bytes_to_u64le(b: &[u8]) -> u64 {
         u64::from_le_bytes(b.try_into().expect("b.len() should be 8"))
+    }
+
+    fn bytes_to_u32le(b: &[u8]) -> u32 {
+        u32::from_le_bytes(b.try_into().expect("b.len() should be 4"))
+    }
+
+    fn bytes_to_u16le(b: &[u8]) -> u16 {
+        u16::from_le_bytes(b.try_into().expect("b.len() should be 2"))
     }
 
     fn parse_header(file: &[u8]) -> Header {
@@ -124,28 +251,127 @@ mod elf {
             sys::print("invalid ELF header: ");
             fail(s);
         };
-        if file.len() < 64 {
-            fail("truncated");
+        let assert = |c: bool, s| if !c { fail(s) };
+        assert(file.len() >= 64, "truncated");
+        assert(&file[..4] == b"\x7fELF", "bad magic");
+        assert(file[4] == 2, "not 64 bit");
+        assert(file[5] == 1, "not little endian");
+        assert(file[16] == 3, "not PIE");
+        let program_entry = bytes_to_u64le(&file[24..32]) as usize;
+        let ph_offset = bytes_to_u64le(&file[32..40]) as usize;
+        let ph_size = bytes_to_u16le(&file[54..56]);
+        let ph_count = bytes_to_u16le(&file[56..58]);
+        Header { program_entry, ph_offset, ph_size, ph_count }
+    }
+
+    const PH_TY_LOAD: u32 = 1;
+    const PH_TY_DYNAMIC: u32 = 2;
+
+    fn split_bits(x: usize, bit: u8) -> [usize; 2] {
+        [x & ((1 << bit) - 1), x >> bit]
+    }
+
+    fn slice(data: &[u8], from: usize, len: usize) -> Option<&[u8]> {
+        data.get(from..).and_then(|s| s.get(..len))
+    }
+
+    fn slice_fail<'a>(data: &'a [u8], from: usize, len: usize, msg: &str) -> &'a [u8] {
+        slice(data, from, len).unwrap_or_else(|| fail(msg))
+    }
+
+    fn parse_program_headers(file: &[u8], alloc: &mut alloc::Allocator, header: &Header) -> NonNull<u8> {
+        let fail = |s| -> ! {
+            sys::print("parse_ph: ");
+            fail(s);
+        };
+        let assert = |c: bool, s| if !c { fail(s) };
+        assert(header.ph_size >= 56, "PH entry size smaller than expected");
+        let Some(mut pt) = page::Pt::new(alloc) else {
+            fail("out of memory");
+        };
+        let ph = slice_fail(file, header.ph_offset, usize::from(header.ph_size) * usize::from(header.ph_count), "PH array truncated");
+        for e in ph.chunks_exact(header.ph_size.into()) {
+            let ty = bytes_to_u32le(&e[0..4]);
+            let flags = bytes_to_u32le(&e[4..8]);
+            let offset = bytes_to_u64le(&e[8..16]);
+            let vaddr = bytes_to_u64le(&e[16..24]);
+            let filesz = bytes_to_u64le(&e[32..40]);
+            let memsz = bytes_to_u64le(&e[40..48]);
+            let align = bytes_to_u64le(&e[48..56]);
+            match ty {
+                PH_TY_LOAD => {
+                    assert(align == alloc::PAGE_SIZE as u64, "unsupported alignment");
+                    assert(offset % align == vaddr % align, "segment misaligned");
+                    let mask = align - 1;
+                    let mut va = vaddr & !mask;
+                    let mut pa = file.as_ptr().addr() as u64 + (offset & !mask);
+                    let map_n = (filesz + mask) / align;
+                    let zero_n = (memsz + mask) / align;
+                    for pi in 0..zero_n {
+                        let [_, i] = split_bits(va as usize, 12);
+                        let Some(pte) = pt.get_mut(i) else {
+                            fail("vaddr above 2MiB not supported");
+                        };
+                        let p = if pi < map_n {
+                            pa
+                        } else {
+                            alloc.alloc(alloc::PAGE_SIZE)
+                                .unwrap_or_else(|| fail("ELF: out of memory"))
+                                .addr()
+                                .get() as u64
+                        };
+                        match flags {
+                            0b100 => pte.set_r(p),
+                            0b101 => pte.set_rx(p),
+                            0b110 => pte.set_rw(p),
+                            0b111 => pte.set_rwx(p),
+                            _ => fail("unsupported flags"),
+                        }
+                        va += alloc::PAGE_SIZE as u64;
+                        pa += alloc::PAGE_SIZE as u64;
+                    }
+                }
+                PH_TY_DYNAMIC => {
+                    let dynamic = slice_fail(file, offset as usize, filesz as usize, "dynamic segment truncated");
+                    let mut rela @ mut relasz @ mut relaent = 0;
+                    for e in dynamic.chunks_exact(8 * 3) {
+                        let ty = bytes_to_u64le(&e[0..8]);
+                        let val = bytes_to_u64le(&e[8..16]);
+                        let ptr = bytes_to_u64le(&e[16..24]);
+                        const RELA: u64 = 7;
+                        const RELASZ: u64 = 8;
+                        const RELAENT: u64 = 9;
+                        match ty {
+                            RELA => rela = val,
+                            RELASZ => relasz = val,
+                            RELAENT => relaent = val,
+                            _ => {}
+                        }
+                    }
+                    if relasz != 0 {
+                        fail("TODO: PH_DYNAMIC: RELA\n");
+                    }
+                }
+                _ => {}
+            }
         }
-        if &file[..4] != b"\x7fELF" {
-            fail("bad magic");
-        }
-        let program_entry = bytes_to_u64le(&file[24..32]);
-        if file[4] != 2 {
-        }
-        Header { program_entry }
+        let Some(mut pd) = page::Pd::new(alloc) else { fail("out of memory") };
+        pd[0].set_table(pt);
+        let Some(mut pdp) = page::Pdp::new(alloc) else { fail("out of memory") };
+        pdp[0].set_table(pd);
+        let mut pml4 = sys::pml4();
+        pml4[256].set_table(pdp);
+        unsafe { sys::set_pml4(pml4); }
+        NonNull::new((usize::MAX << (9*4 + 12 - 1)) as *mut _).unwrap()
     }
 
     /// # Returns
     ///
     /// Entry point
-    pub fn load(file: &[u8]) -> NonNull<()> {
-        let h = parse_header(file);
-        fail("TODO map segments");
-        match NonNull::new(h.program_entry as *mut ()) {
-            Some(p) => p,
-            None => fail("invalid ELF: entry point is 0x0?"),
-        }
+    pub fn load(file: &[u8], alloc: &mut alloc::Allocator) -> NonNull<u8> {
+        let hdr = parse_header(file);
+        let base = parse_program_headers(file, alloc, &hdr);
+        unsafe { base.add(hdr.program_entry) }
     }
 }
 
@@ -158,7 +384,7 @@ fn fail(reason: &str) -> ! {
 /// # Note
 ///
 /// Start of file is guaranteed to be aligned to page boundary.
-fn load_file<'a>(alloc: &'a mut alloc::Allocator, filename: &str) -> &'a [u8] {
+fn load_file<'a>(filename: &str, alloc: &mut alloc::Allocator) -> &'a [u8] {
     let len = match sys::open(filename) {
         Ok(x) => x,
         Err(sys::OpenFileError) => {
@@ -175,10 +401,8 @@ fn load_file<'a>(alloc: &'a mut alloc::Allocator, filename: &str) -> &'a [u8] {
 }
 
 #[unsafe(no_mangle)]
-extern "sysv64" fn boot() -> ! {
+extern "sysv64" fn boot() -> NonNull<u8> {
     let alloc = &mut alloc::Allocator::new();
-    let file = load_file(alloc, KERNEL_FILENAME);
-    let entry = elf::load(file);
-    let entry: extern "sysv64" fn() -> ! = unsafe { core::mem::transmute(entry) };
-    (entry)()
+    let file = load_file(KERNEL_FILENAME, alloc);
+    elf::load(file, alloc)
 }

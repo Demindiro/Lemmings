@@ -108,7 +108,7 @@ jnz fwcfg_has_dma
 hlt
 fwcfg_has_dma:
 	call boot
-	lea rbx, [rip + sys]
+	lea rdi, [rip + sys]
 	jmp rax
 
 # IF=0, DF=0

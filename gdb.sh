@@ -7,10 +7,12 @@
 #   set architecture i8086
 # ... or at least, that ought to work but it doesn't ...
 
+. ./config.env
+
 qemu-system-x86_64 \
 	-machine q35 \
 	-bios /tmp/qemubios.bin \
-	-fw_cfg opt/lemmings/kernel.elf,file=/tmp/kernel.elf \
+	-fw_cfg opt/lemmings/kernel.elf,file="$RUST_TARGET"/release/kernel \
 	-device isa-debug-exit \
 	-debugcon file:/dev/stdout \
 	-global isa-debugcon.iobase=0x402 \

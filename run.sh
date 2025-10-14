@@ -11,6 +11,8 @@ exec qemu-system-x86_64 \
 	-device isa-debug-exit \
 	-debugcon file:/dev/stdout \
 	-global isa-debugcon.iobase=0x402 \
+	-no-reboot \
+	-s \
 	--trace 'fw_cfg*' \
 	"$@"
 
