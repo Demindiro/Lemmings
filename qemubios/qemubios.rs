@@ -4,6 +4,36 @@ use core::ptr::NonNull;
 
 const KERNEL_FILENAME: &str = "opt/lemmings/kernel.elf";
 
+mod x86 {
+    pub unsafe fn out8(port: u16, value: u8) {
+        unsafe {
+            core::arch::asm! {
+                "out dx, eax",
+                in("dx") port,
+                in("al") value,
+            }
+        }
+    }
+    pub unsafe fn out16(port: u16, value: u16) {
+        unsafe {
+            core::arch::asm! {
+                "out dx, eax",
+                in("dx") port,
+                in("ax") value,
+            }
+        }
+    }
+    pub unsafe fn out32(port: u16, value: u32) {
+        unsafe {
+            core::arch::asm! {
+                "out dx, eax",
+                in("dx") port,
+                in("eax") value,
+            }
+        }
+    }
+}
+
 mod sys {
     use core::arch::asm;
 
@@ -384,6 +414,35 @@ mod elf {
         let hdr = parse_header(file);
         let base = parse_program_headers(file, alloc, &hdr);
         unsafe { base.add(hdr.program_entry) }
+    }
+}
+
+mod pci {
+    use crate::*;
+
+    #[derive(Clone, Copy)]
+    pub struct BDF(u16);
+
+    impl BDF {
+        pub const fn new(bus: u8, dev: u8, func: u8) -> Self {
+            assert!(func < 8);
+            assert!(dev < 32);
+            Self(u16::from_be_bytes([bus, dev << 3 | func]))
+        }
+    }
+
+    const PORTIO_CMD: u16 = 0xcf8;
+    const PORTIO_DATA: u16 = 0xcfc;
+
+    fn set_target(bdf: BDF, offset: u8) {
+        let addr = 1 << 31 | u32::from(bdf.0) << 8 | u32::from(offset & !3);
+        unsafe { x86::out32(PORTIO_CMD, addr) };
+    }
+
+    pub unsafe fn write32<const OFFSET: u8>(bdf: BDF, value: u32) {
+        const { assert!(OFFSET & 3 == 0, "offset must be a multiple of 4") };
+        set_target(bdf, OFFSET);
+        unsafe { x86::out32(PORTIO_DATA, value) };
     }
 }
 
