@@ -35,7 +35,8 @@ mod x86 {
 }
 
 mod sys {
-    use core::arch::asm;
+    use crate::*;
+    use core::{arch::asm, ptr::{self, NonNull}};
 
     pub struct OpenFileError;
 
@@ -93,16 +94,21 @@ mod sys {
         }
     }
 
-    pub fn pml4() -> crate::page::Pml4 {
-        let addr: u64;
+    /// # Safety
+    ///
+    /// Only one (mutable!) reference to the PML4 may exist at any time.
+    ///
+    /// Care must be taken when updating live entries.
+    pub unsafe fn pml4() -> page::Pml4 {
         unsafe {
+            let addr: usize;
             asm! {
                 "mov rax, cr3",
                 out("rax") addr,
             }
-        }
-        unsafe {
-            core::mem::transmute(addr)
+            let addr = ptr::with_exposed_provenance_mut(addr);
+            let addr = NonNull::new_unchecked(addr);
+            page::Pml4::from_ptr(addr)
         }
     }
 
@@ -111,7 +117,7 @@ mod sys {
     /// The page mappings must be valid.
     ///
     /// In particular: the page with the current IP must be properly mapped.
-    pub unsafe fn set_pml4(pml4: crate::page::Pml4) {
+    pub unsafe fn set_pml4(pml4: page::Pml4) {
         unsafe {
             asm! {
                 "mov cr3, rax",
@@ -181,7 +187,13 @@ mod page {
                 }
 
                 pub fn as_u64(&self) -> u64 {
-                    self.0.addr().get() as u64
+                    //self.0.addr().get() as u64
+                    //self.0.expose_provenance().get() as u64
+                    self.0.as_ptr() as u64
+                }
+
+                pub unsafe fn from_ptr(ptr: NonNull<[$entry; 512]>) -> Self {
+                    Self(ptr)
                 }
             }
 
@@ -404,9 +416,8 @@ mod elf {
         pd[0].set_table(pt);
         let Some(mut pdp) = page::Pdp::new(alloc) else { fail("out of memory") };
         pdp[0].set_table(pd);
-        let mut pml4 = sys::pml4();
+        let mut pml4 = unsafe { sys::pml4() };
         pml4[256].set_table(pdp);
-        unsafe { sys::set_pml4(pml4); }
         NonNull::new((usize::MAX << (9*4 + 12 - 1)) as *mut _).unwrap()
     }
 
