@@ -140,11 +140,14 @@ mod alloc {
     impl Allocator {
         pub fn new() -> Self {
             let mut regions: [_; MAX_REGIONS] = Default::default();
-            // intentionally skip 0x0..0x2000 because:
+            // intentionally skip 0x0..0x3000 because:
             // - we use 0x0..0x1000 as stack
             // - we use 0x1000..0x2000 as PML4
+            // - we use 0x2000..0x3000 as PDPT
+            // - we use 0x3000..0x4000 and 0x4000..0x5000 as PD
+            // - we use 0x5000..0x6000 as PT
             // - we can't safely dereference 0x0 in Rust
-            regions[0] = 0x2000..0xb0000;
+            regions[0] = 0x6000..0xb0000;
             Self { regions }
         }
 
