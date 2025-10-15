@@ -555,8 +555,8 @@ mod pcie {
     #[allow(dead_code)]
     #[repr(C)]
     struct Header0 {
-        id: VolatileCell<[u16; 2]>,
-        control: VolatileCell<CommandStatus>,
+        id: VolatileCell<u32>,
+        command_status: VolatileCell<u32>,
         class_code: VolatileCell<u8>,
         subclass: VolatileCell<u8>,
         prog_if: VolatileCell<u8>,
@@ -581,14 +581,6 @@ mod pcie {
     }
 
     const _: () = assert!(core::mem::size_of::<Header0>() == 4096);
-
-    #[allow(dead_code)]
-    #[derive(Clone, Copy)]
-    #[repr(C)]
-    struct CommandStatus {
-        command: u16,
-        status: u16,
-    }
 
     const COMMAND_BUS: u16 = 1 << 2;
     const COMMAND_MMIO: u16 = 1 << 1;
@@ -721,12 +713,12 @@ mod pcie {
 
         fn configure_device(&mut self, bdf: pci::BDF, alloc: &mut alloc::Allocator) {
             let hdr = Self::get_header(bdf);
-            let id = hdr.id.get();
+            let id = hdr.vendor_device_id();
             if id == [0xffff; 2] {
                 return;
             }
             hdr.configure(self, alloc);
-            match hdr.id.get() {
+            match id {
                 QemuVga::ID => QemuVga::configure(self, &hdr),
                 Ich9Lpc::ID => Ich9Lpc::configure(self, &hdr),
                 _ => {}
@@ -746,11 +738,13 @@ mod pcie {
     }
 
     impl Header0 {
+        fn vendor_device_id(&self) -> [u16; 2] {
+            let id = self.id.get();
+            [id as u16, (id >> 16) as u16]
+        }
+
         fn command(&self, command: u16) {
-            self.control.set(CommandStatus {
-                command,
-                status: 0,
-            });
+            self.command_status.set(u32::from(command));
         }
 
         fn configure(&self, parent: &mut Q35, alloc: &mut alloc::Allocator) {
