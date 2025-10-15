@@ -701,7 +701,6 @@ mod pcie {
                         _ => panic!("no const generics! :((((((("),
                     }
                 }
-                f::<0>(0);
                 f::<4>((base >> 32) as u32);
                 f::<0>(base as u32 | 1);
             }
