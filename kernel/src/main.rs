@@ -61,6 +61,13 @@ fn panic_handler(_: &core::panic::PanicInfo<'_>) -> ! {
 
 fn main() {
     sys::print("Hello, world! I am KERNAL\n");
+    unsafe {
+        for k in 0..200 {
+        for i in 0..200 {
+            *(0xc000_0000 as *mut u32).add(k*1024).add(i) = 0xffffffff - (i + (k << 8)) as u32;
+        }
+        }
+    }
 }
 
 #[unsafe(no_mangle)]

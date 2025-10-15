@@ -548,15 +548,15 @@ mod pcie {
     use core::ptr::NonNull;
 
     struct Q35 {
+        mmio32_base: u32,
+        mmio64_base: u64,
     }
 
     #[allow(dead_code)]
     #[repr(C)]
     struct Header0 {
-        device_id: VolatileCell<u16>,
-        vendor_id: VolatileCell<u16>,
-        status: VolatileCell<u16>,
-        command: VolatileCell<u16>,
+        id: VolatileCell<[u16; 2]>,
+        control: VolatileCell<CommandStatus>,
         class_code: VolatileCell<u8>,
         subclass: VolatileCell<u8>,
         prog_if: VolatileCell<u8>,
@@ -577,6 +577,89 @@ mod pcie {
         min_grant: VolatileCell<u8>,
         interrupt_pin: VolatileCell<u8>,
         interrupt_line: VolatileCell<u8>,
+        extra: [u8; 0x1000 - 0x40],
+    }
+
+    const _: () = assert!(core::mem::size_of::<Header0>() == 4096);
+
+    #[allow(dead_code)]
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    struct CommandStatus {
+        command: u16,
+        status: u16,
+    }
+
+    const COMMAND_BUS: u16 = 1 << 2;
+    const COMMAND_MMIO: u16 = 1 << 1;
+
+    struct QemuVga {
+    }
+
+    /// [From QEMU documentation][0]:
+    ///
+    /// > vga ioports (0x3c0 to 0x3df), remapped 1:1. Word access is supported, bytes are written in little endian order (aka index port first), so indexed registers can be updated with a single mmio write (and thus only one vmexit).
+    ///
+    /// [0]: https://www.qemu.org/docs/master/specs/standard-vga.html
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct Vga {
+        /// 0x3c0
+        att_w: VolatileCell<u8>,
+        /// 0x3c1
+        att_r: VolatileCell<u8>,
+        /// 0x3c2
+        mis_w: VolatileCell<u8>,
+        /// 0x3c3 (?)
+        _missing_0: VolatileCell<u8>,
+        /// 0x3c4, 0x3c5
+        seq: VolatileCell<[u8; 2]>,
+        /// 0x3c6
+        pel_msk: VolatileCell<u8>,
+        /// 0x3c7
+        pel_ir: VolatileCell<u8>,
+        /// 0x3c8
+        pel_iw: VolatileCell<u8>,
+        /// 0x3c9
+        pel_d: VolatileCell<u8>,
+        /// 0x3ca
+        ftc_r: VolatileCell<u8>,
+        /// 0x3cb (?)
+        _missing_1: VolatileCell<u8>,
+        /// 0x3cc
+        mis_r: VolatileCell<u8>,
+        /// 0x3cd (?)
+        _missing_2: VolatileCell<u8>,
+        /// 0x3ce, 0x3cf
+        gfx: VolatileCell<[u8; 2]>,
+        /// 0x3d0, 0x3d1, 0x3d2, 0x3d3 (?)
+        _missing_3: VolatileCell<[u8; 4]>,
+        /// 0x3d4, 0x3d5
+        crt_c: VolatileCell<[u8; 2]>,
+        /// 0x3d6, 0x3d7, 0x3d8, 0x3d9 (?)
+        _missing_4: VolatileCell<[u8; 4]>,
+        /// 0x3da
+        is1_rc: VolatileCell<u8>,
+        /// 0x3db, 0x3dc, 0x3dd, 0x3de, 0x3df (?)
+        _missing_5: VolatileCell<[u8; 5]>,
+    }
+
+    const _: () = assert!(core::mem::size_of::<Vga>() == 32);
+
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct BochsVbe {
+        id: VolatileCell<u16>,
+        xres: VolatileCell<u16>,
+        yres: VolatileCell<u16>,
+        bpp: VolatileCell<u16>,
+        enable: VolatileCell<u16>,
+        bank: VolatileCell<u16>,
+        virt_width: VolatileCell<u16>,
+        virt_height: VolatileCell<u16>,
+        x_offset: VolatileCell<u16>,
+        y_offset: VolatileCell<u16>,
+        nb: VolatileCell<u16>,
     }
 
     impl Q35 {
@@ -585,7 +668,26 @@ mod pcie {
         const BDF: pci::BDF = pci::BDF::new(0, 0, 0);
         const CFG_PCIE_BASE: u8 = 0x60;
 
-        pub fn range(&self) -> core::ops::Range<NonNull<u8>> {
+        fn new() -> Self {
+            Self {
+                mmio32_base: Self::BASE.addr().get() as u32 + Self::SIZE as u32,
+                mmio64_base: 1 << 40,
+            }
+        }
+
+        fn mmio32_alloc(&mut self, mask: u32) -> u32 {
+            let a = (self.mmio32_base + mask) & !mask;
+            self.mmio32_base += mask + 1;
+            a
+        }
+
+        fn mmio64_alloc(&mut self, mask: u64) -> u64 {
+            let a = (self.mmio64_base + mask) & !mask;
+            self.mmio64_base += mask + 1;
+            a
+        }
+
+        fn range(&self) -> core::ops::Range<NonNull<u8>> {
             let start = Self::BASE;
             let end = unsafe { Self::BASE.byte_add(Self::SIZE) };
             start..end
@@ -609,33 +711,109 @@ mod pcie {
             }
         }
 
-        fn get_header(&self, bdf: pci::BDF) -> &Header0 {
+        fn get_header<'a>(bdf: pci::BDF) -> &'a Header0 {
             unsafe { Self::BASE.byte_add(4096 * usize::from(bdf.index())).cast::<Header0>().as_ref() }
         }
 
-        fn configure_device(&self, bdf: pci::BDF) {
-            let hdr = self.get_header(bdf);
-            match hdr.vendor_id.get() {
+        fn configure_device(&mut self, bdf: pci::BDF, alloc: &mut alloc::Allocator) {
+            let hdr = Self::get_header(bdf);
+            let id = hdr.id.get();
+            if id == [0xffff; 2] {
+                return;
+            }
+            hdr.configure(self, alloc);
+            match hdr.id.get() {
+                [0x1234, 0x1111] => QemuVga::configure(self, &hdr),
                 _ => {}
             }
         }
 
-        fn configure_bus(&self, bus: u8) {
+        fn configure_bus(&mut self, bus: u8, alloc: &mut alloc::Allocator) {
             for dev in 0..32 {
-                self.configure_device(pci::BDF::new(bus, dev, 0));
+                self.configure_device(pci::BDF::new(bus, dev, 0), alloc);
             }
         }
 
-        pub fn configure(&self) {
+        fn configure(&mut self, alloc: &mut alloc::Allocator) {
             self.enable();
-            self.configure_bus(0);
+            self.configure_bus(0, alloc);
+        }
+    }
+
+    impl Header0 {
+        fn command(&self, command: u16) {
+            self.control.set(CommandStatus {
+                command,
+                status: 0,
+            });
+        }
+
+        fn configure(&self, parent: &mut Q35, alloc: &mut alloc::Allocator) {
+            let mut bars_iter = self.bar.iter();
+            while let Some(b) = bars_iter.next() {
+                b.set(u32::MAX);
+                let v = b.get();
+                if v == 0 {
+                    // unused
+                    continue;
+                }
+                if v & 1 != 0 {
+                    // IO space, ignore
+                    continue;
+                }
+                match (v >> 1) & 3 {
+                    0 => {
+                        // 32 bit BAR
+                        let mask = !v | 0xf;
+                        let addr = parent.mmio32_alloc(mask);
+                        b.set(addr);
+                        let range = unsafe { NonNull::new_unchecked(addr as *mut u8) };
+                        let range = unsafe { range..range.byte_add(mask as usize + 1) };
+                        page::identity_map_rw(range, alloc);
+                    }
+                    2 => {
+                        // 64 bit BAR
+                        let Some(bh) = bars_iter.next() else {
+                            sys::println("Bogus 64-bit BAR!");
+                            return;
+                        };
+                        bh.set(u32::MAX);
+                        let vh = bh.get();
+                        let mask = !(u64::from(v) | u64::from(vh) << 32) | 0xf;
+                        let addr = parent.mmio64_alloc(mask);
+                        b.set(addr as u32);
+                        bh.set((addr >> 32) as u32);
+                        let range = unsafe { NonNull::new_unchecked(addr as *mut u8) };
+                        let range = unsafe { range..range.byte_add(mask as usize + 1) };
+                        page::identity_map_rw(range, alloc);
+                    }
+                    1 => sys::println("unknown BAR type 1"),
+                    3 => sys::println("unknown BAR type 3"),
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    impl QemuVga {
+        fn configure(parent: &mut Q35, header: &Header0) {
+            sys::println("Found QEMU VGA");
+            header.command(COMMAND_MMIO | COMMAND_BUS);
+            let mmio = header.bar[2].get();
+            let vga = unsafe { &*((mmio + 0x400) as *const Vga) };
+            let vbe = unsafe { &*((mmio + 0x500) as *const BochsVbe) };
+            vga.att_w.set(0x20); // magic incantation stolen from EDK2
+            vbe.xres.set(1024);
+            vbe.yres.set(768);
+            vbe.bpp.set(32);
+            vbe.enable.set(0x41);
         }
     }
 
     pub fn configure(alloc: &mut alloc::Allocator) {
-        let host = Q35 {};
+        let mut host = Q35::new();
         page::identity_map_rw(host.range(), alloc);
-        host.configure();
+        host.configure(alloc);
     }
 }
 
