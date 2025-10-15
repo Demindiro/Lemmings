@@ -330,6 +330,7 @@ mod page {
             let [pd_i, i] = split_bits(i, 9);
             let [pdp_i, i] = split_bits(i, 9);
             let [pml4_i, i] = split_bits(i, 9);
+            if i != 0 { fail("identity_map_rw: out of range") };
             assert_eq!(i, 0);
             let mut pml4 = unsafe { sys::pml4() };
             let Some(mut pdp) = pml4[pml4_i].get_or_alloc_table(alloc) else { fail("identity map PDP conflict") };
