@@ -35,11 +35,26 @@ mod sys {
                 lateout("rdi") _,
             };
             ret
-        }}
+        }};
+        (noreturn $nr:literal ["rdx" $val:expr]) => {{
+            let ret: isize;
+            core::arch::asm! {
+                "call [rip + {}]",
+                sym ENTRY,
+                in("eax") $nr,
+                in("rdx") $val,
+                options(noreturn)
+            };
+            ret
+        }};
     }
 
     pub fn print(s: &str) {
         unsafe { sys!(0 ["rsi" s.as_ptr()] ["rcx" s.len()]); }
+    }
+
+    pub fn exit_ok() -> ! {
+        unsafe { sys!(noreturn 1 ["rdx" 0]); }
     }
 }
 
@@ -76,7 +91,5 @@ fn _start(sys_entry: *const ()) -> ! {
         sys::ENTRY = sys_entry;
     }
     main();
-    unsafe {
-        asm!("2:hlt","jmp 2b",options(noreturn));
-    }
+    sys::exit_ok();
 }

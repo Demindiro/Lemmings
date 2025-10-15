@@ -592,8 +592,12 @@ mod pcie {
 
     const COMMAND_BUS: u16 = 1 << 2;
     const COMMAND_MMIO: u16 = 1 << 1;
+    const COMMAND_PORTIO: u16 = 1 << 0;
 
     struct QemuVga {
+    }
+
+    struct Ich9Lpc {
     }
 
     /// [From QEMU documentation][0]:
@@ -723,7 +727,8 @@ mod pcie {
             }
             hdr.configure(self, alloc);
             match hdr.id.get() {
-                [0x1234, 0x1111] => QemuVga::configure(self, &hdr),
+                QemuVga::ID => QemuVga::configure(self, &hdr),
+                Ich9Lpc::ID => Ich9Lpc::configure(self, &hdr),
                 _ => {}
             }
         }
@@ -793,9 +798,29 @@ mod pcie {
                 }
             }
         }
+
+        unsafe fn refcfg<const O: usize, T>(&self) -> &VolatileCell<T> {
+            const {
+                assert!(O % core::mem::align_of::<T>() == 0);
+                assert!(0x40 <= O && O + core::mem::size_of::<T>() <= 0x1000);
+            }
+            unsafe {
+                NonNull::from(self).cast::<VolatileCell<T>>().byte_add(O).as_ref()
+            }
+        }
+
+        unsafe fn write8<const O: usize>(&self, value: u8) {
+            unsafe { self.refcfg::<O, u8>().set(value) };
+        }
+
+        unsafe fn write32<const O: usize>(&self, value: u32) {
+            unsafe { self.refcfg::<O, u32>().set(value) };
+        }
     }
 
     impl QemuVga {
+        const ID: [u16; 2] = [0x1234, 0x1111];
+
         fn configure(parent: &mut Q35, header: &Header0) {
             sys::println("Found QEMU VGA");
             header.command(COMMAND_MMIO | COMMAND_BUS);
@@ -807,6 +832,33 @@ mod pcie {
             vbe.yres.set(768);
             vbe.bpp.set(32);
             vbe.enable.set(0x41);
+        }
+    }
+
+    impl Ich9Lpc {
+        const ID: [u16; 2] = [0x8086, 0x2918];
+
+        const PMBASE: usize = 0x40;
+        const ACPI_CNTL: usize = 0x44;
+        const GEN_PMCON_1: usize = 0xa0;
+        const GEN_PMCON_2: usize = 0xa2;
+        const GEN_PMCON_3: usize = 0xa0;
+        const PMIR: usize = 0xac;
+        const APM_CNT: usize = 0xb2;
+        const APM_STS: usize = 0xb3;
+
+        const PORTIO_PM1_STS: u16 = 0x00;
+        const PORTIO_PM1_EN: u16 = 0x02;
+        const PORTIO_PM1_CNT: u16 = 0x04;
+        const PORTIO_PM1_TMR: u16 = 0x08;
+
+        const ACPI_EN: u8 = 1 << 7;
+
+        fn configure(parent: &mut Q35, header: &Header0) {
+            sys::println("Found ICH9 LPC");
+            header.command(COMMAND_PORTIO);
+            unsafe { header.write32::<{ Self::PMBASE }>(0x600) };
+            unsafe { header.write8::<{ Self::ACPI_CNTL }>(Self::ACPI_EN) };
         }
     }
 
