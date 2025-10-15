@@ -53,6 +53,11 @@ mod sys {
         }
     }
 
+    pub fn println(s: &str) {
+        print(s);
+        print("\n");
+    }
+
     fn exit(status: i32) -> ! {
         unsafe {
             asm! {
@@ -653,8 +658,7 @@ fn split_bits(x: usize, bit: u8) -> [usize; 2] {
 }
 
 fn fail(reason: &str) -> ! {
-    sys::print(reason);
-    sys::print("\n");
+    sys::println(reason);
     sys::exit_err();
 }
 
