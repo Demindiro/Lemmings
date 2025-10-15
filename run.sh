@@ -14,6 +14,11 @@ exec qemu-system-x86_64 \
 	-no-reboot \
 	-s \
 	--trace 'fw_cfg*' \
+	--trace 'pci_cfg_*' \
+	--trace '*pci*' \
+	--trace '*vbe*' \
+	--trace '*vga*' \
+	-d int \
 	"$@"
 
 	-nographic \
