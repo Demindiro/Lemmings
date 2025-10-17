@@ -5,6 +5,7 @@ mod critical_section;
 mod page;
 mod thread;
 mod time;
+mod sync;
 
 use lemmings_qemubios::{sys, log, dbg};
 
