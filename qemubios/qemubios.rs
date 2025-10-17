@@ -783,7 +783,7 @@ mod pcie {
                     2 => {
                         // 64 bit BAR
                         let Some(bh) = bars_iter.next() else {
-                            sys::println("Bogus 64-bit BAR!");
+                            log("Bogus 64-bit BAR!");
                             return;
                         };
                         bh.set(u32::MAX);
@@ -796,8 +796,8 @@ mod pcie {
                         let range = unsafe { range..range.byte_add(mask as usize + 1) };
                         page::identity_map_rw(range, alloc);
                     }
-                    1 => sys::println("unknown BAR type 1"),
-                    3 => sys::println("unknown BAR type 3"),
+                    1 => log("unknown BAR type 1"),
+                    3 => log("unknown BAR type 3"),
                     _ => unreachable!(),
                 }
             }
@@ -826,7 +826,7 @@ mod pcie {
         const ID: [u16; 2] = [0x1234, 0x1111];
 
         fn configure(parent: &mut Q35, header: &Header0) {
-            sys::println("Found QEMU VGA");
+            log("Found QEMU VGA");
             header.command(COMMAND_MMIO | COMMAND_BUS);
             let mmio = header.bar[2].get();
             let vga = unsafe { &*((mmio + 0x400) as *const Vga) };
@@ -859,7 +859,7 @@ mod pcie {
         const ACPI_EN: u8 = 1 << 7;
 
         fn configure(parent: &mut Q35, header: &Header0) {
-            sys::println("Found ICH9 LPC");
+            log("Found ICH9 LPC");
             header.command(COMMAND_PORTIO);
             unsafe { header.write32::<{ Self::PMBASE }>(0x600) };
             unsafe { header.write8::<{ Self::ACPI_CNTL }>(Self::ACPI_EN) };
@@ -890,6 +890,11 @@ where
 
 fn split_bits(x: usize, bit: u8) -> [usize; 2] {
     [x & ((1 << bit) - 1), x >> bit]
+}
+
+fn log(message: &str) {
+    sys::print("[QEMUBIOS] ");
+    sys::println(message);
 }
 
 fn fail(reason: &str) -> ! {
