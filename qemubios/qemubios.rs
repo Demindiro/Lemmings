@@ -235,7 +235,7 @@ mod page {
                 }
 
                 pub fn set_table(&mut self, table: $table) {
-                    self.0 = table.as_u64() | PRESENT;
+                    self.0 = table.as_u64() | DIRTY | ACCESSED | PRESENT;
                 }
 
                 fn is_table(&self) -> bool {
@@ -271,12 +271,14 @@ mod page {
 
     const PRESENT: u64 = 1 << 0;
     const READ_WRITE: u64 = 1 << 1;
+    const ACCESSED: u64 = 1 << 5;
+    const DIRTY: u64 = 1 << 6;
     const PAGE_SIZE: u64 = 1 << 7;
     const EXECUTE_DISABLE: u64 = 1 << 63;
 
     impl PtEntry {
         fn set(&mut self, addr: u64, flags: u64) {
-            self.0 = addr | flags;
+            self.0 = addr | DIRTY | ACCESSED | flags;
         }
 
         pub fn set_r(&mut self, addr: u64) {
@@ -298,7 +300,7 @@ mod page {
 
     impl PdEntry {
         fn set(&mut self, addr: u64, flags: u64) {
-            self.0 = addr | PAGE_SIZE | flags;
+            self.0 = addr | DIRTY | ACCESSED | PAGE_SIZE | flags;
         }
 
         pub fn set_r(&mut self, addr: u64) {

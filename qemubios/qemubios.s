@@ -235,9 +235,11 @@ fw_cfg_dma:
 main32:
 mov eax, PT_BASE + 8*512
 .rept 16
-mov dword ptr [eax+8*(\+-16)], 0xffff0000 + \+*0x1000 | 0b11100011  # 4KiB page to physaddr 0xfffx000
+mov dword ptr [eax+8*(\+-16)], 0xffff0000 + \+*0x1000 | 0b11100001  # 4KiB page to physaddr 0xfffx000
 .endr
-mov dword ptr [PD_BASE_0 + 8*0], 0 | 0b11100011  # PS, A, R/W, P
+mov eax, PD_BASE_0
+mov dword ptr [eax + 8*0], 0 | 0b11100011 # PS, A, R/W, P
+mov dword ptr [eax + 8*0+4], 1 << 31 # XD
 mov dword ptr [PD_BASE_3 + 8*511], PT_BASE | 0b00100011 # A, R/W, P
 mov eax, PDPT_BASE
 mov dword ptr [eax + 8*0], PD_BASE_0 | 0b00100011 # A, R/W, P
