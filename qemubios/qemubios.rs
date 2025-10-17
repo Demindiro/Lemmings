@@ -168,6 +168,17 @@ mod alloc {
         }
         None
     }
+
+    pub fn memory_map() -> boot::MemoryMap {
+        let start = unsafe { &raw const REGIONS };
+        let end = unsafe { start.add(1) };
+        boot::MemoryMap {
+            list: boot::MemoryRegion {
+                start: boot::Phys(start as u64),
+                end: boot::Phys(end as u64),
+            }
+        }
+    }
 }
 
 mod page {
@@ -867,6 +878,70 @@ mod pcie {
     }
 }
 
+mod boot {
+    // Intentionally separated from the `lemmings-qemubios` crate because you
+    // better have a damn good reason to touch this.
+
+    use crate::*;
+
+    #[used]
+    #[unsafe(export_name = "boot_entry_info")]
+    pub static mut ENTRY: Entry = Entry {
+        memory: MemoryMap { list: MemoryRegion::EMPTY },
+        paging: Paging { zero: [Phys(0); 6] },
+        pcie: Pcie { base: Phys(0) },
+    };
+
+    pub const MAGIC: u64 = u64::from_le_bytes(*b"Lemmings");
+
+    pub struct Sys;
+
+    #[repr(C)]
+    pub struct Entry {
+        memory: MemoryMap,
+        paging: Paging,
+        pcie: Pcie,
+    }
+
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub struct Phys(pub u64);
+
+    #[repr(C)]
+    pub struct MemoryMap {
+        pub list: MemoryRegion,
+    }
+
+    #[repr(C)]
+    pub struct MemoryRegion {
+        /// Inclusive
+        pub start: Phys,
+        /// Exclusive
+        pub end: Phys,
+    }
+
+    #[repr(C)]
+    pub struct Paging {
+        pub zero: [Phys; 6],
+    }
+
+    #[repr(C)]
+    pub struct Pcie {
+        pub base: Phys,
+    }
+
+    impl MemoryRegion {
+        pub const EMPTY: Self = Self { start: Phys(0), end: Phys(0) };
+    }
+
+    pub fn collect_info() {
+        unsafe {
+            ENTRY.memory = alloc::memory_map();
+            ENTRY.pcie.base = Phys(0xb000_0000);
+        }
+    }
+}
+
 struct VolatileCell<T>(UnsafeCell<T>);
 
 impl<T> VolatileCell<T>
@@ -920,5 +995,6 @@ extern "sysv64" fn boot() -> NonNull<u8> {
     alloc::init();
     let pcie_base = pcie::configure();
     let file = load_file(KERNEL_FILENAME);
+    boot::collect_info();
     elf::load(file)
 }
