@@ -5,6 +5,25 @@ mod sys;
 
 use core::arch::asm;
 
+mod private {
+    /// This token MUST ONLY be constructed in [`_start`]!
+    ///
+    /// It is used to indicate a function may only be called during kernel setup.
+    /// This reduced the amount of unsafe annotations required.
+    pub struct KernelEntryToken(());
+
+    impl KernelEntryToken {
+        /// # Safety
+        ///
+        /// May only be called in [`_start`].
+        pub unsafe fn new() -> Self {
+            Self(())
+        }
+    }
+}
+
+pub use private::KernelEntryToken;
+
 fn fail(reason: &str) -> ! {
     sys::print(reason);
     unsafe {
@@ -34,6 +53,8 @@ fn main() {
 
 #[unsafe(no_mangle)]
 fn _start(sys_entry: *const ()) -> ! {
+    // SAFETY: this is the _start function
+    let token = unsafe { KernelEntryToken::new() };
     unsafe {
         sys::ENTRY = sys_entry;
     }
