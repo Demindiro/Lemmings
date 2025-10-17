@@ -36,8 +36,9 @@ fn fail(reason: &str) -> ! {
 }
 
 #[panic_handler]
-fn panic_handler(_: &core::panic::PanicInfo<'_>) -> ! {
-    fail("!!!PANIC!!!");
+fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
+    log!("[KERNEL] PANIC: {info}");
+    sys::halt();
 }
 
 fn main() {
