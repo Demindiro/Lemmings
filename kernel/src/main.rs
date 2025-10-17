@@ -4,6 +4,7 @@
 #[macro_use]
 mod sys;
 mod page;
+mod thread;
 mod time;
 
 use core::arch::asm;
@@ -45,7 +46,6 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 }
 
 fn main() {
-    sys::print("Hello, world! I am KERNAL\n");
     unsafe {
         for k in 0..200 {
         for i in 0..200 {
@@ -62,6 +62,6 @@ extern "sysv64" fn _start(sys_entry: *const ()) -> ! {
     unsafe {
         sys::ENTRY = sys_entry;
     }
-    main();
-    sys::exit_ok();
+    let mut threads = thread::ThreadManager::new();
+    threads.enter(thread::Priority::Regular, main, token);
 }
