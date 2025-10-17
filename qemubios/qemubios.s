@@ -232,22 +232,13 @@ fw_cfg_dma:
 .section .init32, "ax"
 .equ PML4_BASE, 0x1000
 .equ PDPT_BASE, 0x2000
-.equ PD_BASE_0, 0x3000
-.equ PD_BASE_3, 0x4000
-.equ PT_BASE  , 0x5000
+.equ PD_BASE  , 0x3000
 .code32
 main32:
-mov eax, PT_BASE + 8*512
-.rept 16
-mov dword ptr [eax+8*(\+-16)], 0xffff0000 + \+*0x1000 | 0b11100001  # 4KiB page to physaddr 0xfffx000
-.endr
-mov eax, PD_BASE_0
+mov eax, PD_BASE
 mov dword ptr [eax + 8*0], 0 | 0b11100011 # PS, A, R/W, P
-mov dword ptr [eax + 8*0+4], 1 << 31 # XD
-mov dword ptr [PD_BASE_3 + 8*511], PT_BASE | 0b00100011 # A, R/W, P
-mov eax, PDPT_BASE
-mov dword ptr [eax + 8*0], PD_BASE_0 | 0b00100011 # A, R/W, P
-mov dword ptr [eax + 8*3], PD_BASE_3 | 0b00100011 # A, R/W, P
+#mov dword ptr [eax + 8*0+4], 1 << 31 # XD
+mov dword ptr [PDPT_BASE + 8*0], PD_BASE | 0b00100011 # A, R/W, P
 mov eax, PML4_BASE
 mov dword ptr [eax + 8*0], PDPT_BASE | 0b00100011 # A, R/W, P
 mov cr3, eax
@@ -266,14 +257,13 @@ jmp (1*8):main64
 gdt:
 segm 0, 0, 0, 0 # null
 segm 0, 0xfffff, 0b10011011, 0b1010 # code64 (access: P, S, E, RW, A) (flags: G, L)
-segm 0xffff0000, 16, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
+segm 0xf0000, 15, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
 gdt_end:
 
 .section .gdtr, "a"
 gdtr:
 .word gdt_end - gdt - 1
-.long LDFIX_gdt
-.byte 0xcc
+.long gdt
 
 .section .init, "ax"
 .code16
