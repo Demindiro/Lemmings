@@ -1,0 +1,35 @@
+{
+  "arch": "x86_64",
+  "cpu": "x86-64",
+  "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+  "executables": true,
+  "llvm-target": "x86_64-unknown-none",
+  "os": "none",
+  "position-independent-executables": true,
+  "target-c-int-width": "32",
+  "target-endian": "little",
+  "target-pointer-width": "64",
+  "vendor": "unknown",
+  "linker-flavor": "ld.lld",
+  "linker": "ld.lld",
+  "disable-redzone": true,
+  "panic-strategy": "abort",
+  "features": "-mmx,-sse,+soft-float",
+  "dynamic-linking": false,
+  "env": "none",
+  "has-rpath": false,
+  "has-thread-local": false,
+  "max-atomic-width": 64,
+  "metadata": {
+    "description": "Lemmings! (x86-64)",
+    "host_tools": false,
+    "std": false
+  },
+  "plt-by-default": false,
+  "relro-level": "partial",
+  "stack-probes": {
+    "kind": "none"
+  },
+  "relocation-model": "static",
+  "crt-static-respected": true
+}
