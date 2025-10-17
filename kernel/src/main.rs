@@ -3,6 +3,7 @@
 
 #[macro_use]
 mod sys;
+mod page;
 
 use core::arch::asm;
 
