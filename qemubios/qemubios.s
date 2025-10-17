@@ -52,11 +52,14 @@
 	mov dword ptr \loc, ((.L\@ & 0xff) << 24) | ((.L\@ & 0xff00) << 8) | ((.L\@ >> 8) & 0xff00) | ((.L\@ >> 24) & 0xff)
 .endm
 
-
-.section .rodata
-msg_invalidsys:
-.ascii "[QEMUBIOS] Invalid system call! Halting...\n"
-.equ msg_invalidsys.len, . - msg_invalidsys
+.macro string ptr:req, len:req, string:req
+ .pushsection .rodata
+	.L\@: .ascii "\string"
+	.L\@.end:
+ .popsection
+	lea \ptr, [rip + .L\@]
+	movimm \len, (.L\@.end - .L\@)
+.endm
 
 
 .section .text
@@ -100,8 +103,7 @@ sys:
 	je sys_open
 	cmp eax, SYS_READ
 	je sys_read
-	lea rsi, [rip+msg_invalidsys]
-	movimm rcx, msg_invalidsys.len
+	string rsi, rcx, "[QEMUBIOS] Invalid system call! Halting...\n"
 	call sys_print
 	hlt
 
