@@ -90,6 +90,8 @@ jnz fwcfg_has_dma
 hlt
 fwcfg_has_dma:
 	call boot
+	string rsi, rcx, "[QEMUBIOS] Entering kernel\n"
+	call sys_print
 	lea rdi, [rip + sys]
 	jmp rax
 
