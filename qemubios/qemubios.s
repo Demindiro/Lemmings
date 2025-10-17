@@ -255,11 +255,11 @@ mov eax, 0x80000001 # PG, PE
 mov cr0, eax
 jmp (1*8):main64
 
+
 .section .gdt, "a"
 gdt:
 segm 0, 0, 0, 0 # null
 segm 0, 0xfffff, 0b10011011, 0b1010 # code64 (access: P, S, E, RW, A) (flags: G, L)
-segm 0, 0xfffff, 0b10010011, 0b1010 # data64 (access: P, S, RW, A) (flags: G, L)
 segm 0xffff0000, 16, 0b10011011, 0b1100 # code32 (access: P, S, E, RW, A) (flags: G, DS)
 gdt_end:
 
@@ -275,4 +275,4 @@ _start:
 lgdt cs:[LDFIX_gdtr]
 mov al, 1 # PE
 mov cr0, eax
-jmp (3*8):LDFIX_main32
+jmp (2*8):LDFIX_main32
