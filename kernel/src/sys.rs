@@ -97,3 +97,7 @@ pub fn print(s: &str) {
 pub fn exit_ok() -> ! {
     unsafe { sys!(noreturn 1 ["rdx" 0]); }
 }
+
+pub fn halt() -> ! {
+    unsafe { asm!("cli", "2: hlt", "jmp 2b", options(noreturn)) }
+}
