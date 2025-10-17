@@ -402,6 +402,7 @@ mod elf {
     }
 
     fn parse_program_headers(file: &[u8], alloc: &mut alloc::Allocator, header: &Header) -> NonNull<u8> {
+        let virt_base = NonNull::new((usize::MAX << (9*4 + 12 - 1)) as *mut _).unwrap();
         let fail = |s| -> ! {
             sys::print("parse_ph: ");
             fail(s);
@@ -412,6 +413,14 @@ mod elf {
             fail("out of memory");
         };
         let ph = slice_fail(file, header.ph_offset, usize::from(header.ph_size) * usize::from(header.ph_count), "PH array truncated");
+
+        let Some(mut pd) = page::Pd::new(alloc) else { fail("out of memory") };
+        pd[0].set_table(unsafe { core::mem::transmute_copy(&pt) });
+        let Some(mut pdp) = page::Pdp::new(alloc) else { fail("out of memory") };
+        pdp[0].set_table(pd);
+        let mut pml4 = unsafe { sys::pml4() };
+        pml4[256].set_table(pdp);
+
         for e in ph.chunks_exact(header.ph_size.into()) {
             let ty = bytes_to_u32le(&e[0..4]);
             let flags = bytes_to_u32le(&e[4..8]);
@@ -456,10 +465,9 @@ mod elf {
                 PH_TY_DYNAMIC => {
                     let dynamic = slice_fail(file, offset as usize, filesz as usize, "dynamic segment truncated");
                     let mut rela @ mut relasz @ mut relaent = 0;
-                    for e in dynamic.chunks_exact(8 * 3) {
+                    for e in dynamic.chunks_exact(8 * 2) {
                         let ty = bytes_to_u64le(&e[0..8]);
-                        let val = bytes_to_u64le(&e[8..16]);
-                        let ptr = bytes_to_u64le(&e[16..24]);
+                        let val = bytes_to_u64le(&e[8..16]) as usize;
                         const RELA: u64 = 7;
                         const RELASZ: u64 = 8;
                         const RELAENT: u64 = 9;
@@ -470,20 +478,21 @@ mod elf {
                             _ => {}
                         }
                     }
-                    if relasz != 0 {
-                        fail("TODO: PH_DYNAMIC: RELA\n");
+                    assert(relaent == 24, "RELAENT size is not 24");
+                    let rela = slice_fail(file, rela, relasz, "RELA in dynamic segment truncated");
+                    for e in rela.chunks_exact(relaent) {
+                        let offset = bytes_to_u64le(&e[0..8]) as usize;
+                        let addend = bytes_to_u64le(&e[16..24]) as usize;
+                        unsafe {
+                            let p = virt_base.byte_add(offset).cast::<usize>();
+                            p.write_unaligned(virt_base.as_ptr() as usize + addend);
+                        }
                     }
                 }
                 _ => {}
             }
         }
-        let Some(mut pd) = page::Pd::new(alloc) else { fail("out of memory") };
-        pd[0].set_table(pt);
-        let Some(mut pdp) = page::Pdp::new(alloc) else { fail("out of memory") };
-        pdp[0].set_table(pd);
-        let mut pml4 = unsafe { sys::pml4() };
-        pml4[256].set_table(pdp);
-        NonNull::new((usize::MAX << (9*4 + 12 - 1)) as *mut _).unwrap()
+        virt_base
     }
 
     /// # Returns
