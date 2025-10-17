@@ -28,17 +28,6 @@ mod private {
 
 pub use private::KernelEntryToken;
 
-fn fail(reason: &str) -> ! {
-    sys::print(reason);
-    unsafe {
-        asm! {
-            "cli",
-            "hlt",
-            options(noreturn),
-        }
-    }
-}
-
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
     log!("[KERNEL] PANIC: {info}");
