@@ -141,38 +141,32 @@ mod alloc {
     pub const PAGE_SIZE: usize = 4096;
     const MAX_REGIONS: usize = 8;
 
-    pub struct Allocator {
-    }
-
     fn round_p2(x: usize, n: usize) -> usize {
         let mask = n - 1;
         (x + mask) & !mask
     }
 
-    impl Allocator {
-        pub fn new() -> Self {
-            // intentionally skip 0x0..0x3000 because:
-            // - we use 0x0..0x1000 as stack
-            // - we use 0x1000..0x2000 as PML4
-            // - we use 0x2000..0x3000 as PDPT
-            // - we use 0x3000..0x4000 as PD
-            // - we can't safely dereference 0x0 in Rust
-            unsafe { REGIONS[0] = boot::MemoryRegion { start: boot::Phys(0x4000), end: boot::Phys(0xa0000) } }
-            Self { }
-        }
+    pub fn init() {
+        // intentionally skip 0x0..0x3000 because:
+        // - we use 0x0..0x1000 as stack
+        // - we use 0x1000..0x2000 as PML4
+        // - we use 0x2000..0x3000 as PDPT
+        // - we use 0x3000..0x4000 as PD
+        // - we can't safely dereference 0x0 in Rust
+        unsafe { REGIONS[0] = boot::MemoryRegion { start: boot::Phys(0x4000), end: boot::Phys(0xa0000) } }
+    }
 
-        pub fn alloc(&mut self, byte_count: usize) -> Option<NonNull<u8>> {
-            let n = round_p2(byte_count, PAGE_SIZE) as u64;
-            #[allow(static_mut_refs)]
-            for r in unsafe { &mut REGIONS } {
-                if r.end.0 - r.start.0 >= n {
-                    let s = r.start;
-                    r.start.0 += n;
-                    return NonNull::new(s.0 as *mut u8);
-                }
+    pub fn alloc(byte_count: usize) -> Option<NonNull<u8>> {
+        let n = round_p2(byte_count, PAGE_SIZE) as u64;
+        #[allow(static_mut_refs)]
+        for r in unsafe { &mut REGIONS } {
+            if r.end.0 - r.start.0 >= n {
+                let s = r.start;
+                r.start.0 += n;
+                return NonNull::new(s.0 as *mut u8);
             }
-            None
         }
+        None
     }
 }
 
@@ -187,8 +181,8 @@ mod page {
 
             #[allow(dead_code)]
             impl $table {
-                pub fn new(alloc: &mut alloc::Allocator) -> Option<Self> {
-                    alloc.alloc(alloc::PAGE_SIZE).map(NonNull::cast).map(Self)
+                pub fn new() -> Option<Self> {
+                    alloc::alloc(alloc::PAGE_SIZE).map(NonNull::cast).map(Self)
                 }
 
                 pub fn as_u64(&self) -> u64 {
@@ -226,9 +220,9 @@ mod page {
                 /// # Note
                 ///
                 /// Only inserts a table if not present
-                pub fn get_or_alloc_table(&mut self, alloc: &mut alloc::Allocator) -> Option<$table> {
+                pub fn get_or_alloc_table(&mut self) -> Option<$table> {
                     self.get_table().or_else(|| (!self.is_present()).then(|| {
-                        let Some(table) = $table::new(alloc) else { fail("out of memory") };
+                        let Some(table) = $table::new() else { fail("out of memory") };
                         self.0 = table.as_u64() | PRESENT;
                         table
                     }))
@@ -323,7 +317,7 @@ mod page {
     const MASK_4K: u64 = (1<<12)-1;
     const MASK_2M: u64 = (1<<21)-1;
 
-    pub fn identity_map_rw(range: ops::Range<NonNull<u8>>, alloc: &mut alloc::Allocator) {
+    pub fn identity_map_rw(range: ops::Range<NonNull<u8>>) {
         let mut start = range.start.addr().get() as u64 & !0xfff;
         let end = (range.end.addr().get() + 0xfff) as u64 & !0xfff;
         while start < end {
@@ -335,14 +329,14 @@ mod page {
             if i != 0 { fail("identity_map_rw: out of range") };
             assert_eq!(i, 0);
             let mut pml4 = unsafe { sys::pml4() };
-            let Some(mut pdp) = pml4[pml4_i].get_or_alloc_table(alloc) else { fail("identity map PDP conflict") };
-            let Some(mut pd) = pdp[pdp_i].get_or_alloc_table(alloc) else { fail("identity map PD conflict") };
+            let Some(mut pdp) = pml4[pml4_i].get_or_alloc_table() else { fail("identity map PDP conflict") };
+            let Some(mut pd) = pdp[pdp_i].get_or_alloc_table() else { fail("identity map PD conflict") };
             let mut pd: Pd = pd;
             if start & MASK_2M == 0 && end - start > MASK_2M {
                 pd[pd_i].set_rw(start);
                 start += MASK_2M + 1;
             } else {
-                let Some(mut pt) = pd[pd_i].get_or_alloc_table(alloc) else { fail("identity map PT conflict") };
+                let Some(mut pt) = pd[pd_i].get_or_alloc_table() else { fail("identity map PT conflict") };
                 pt[pt_i].set_rw(start);
                 start += MASK_4K + 1;
             }
@@ -401,7 +395,7 @@ mod elf {
         slice(data, from, len).unwrap_or_else(|| fail(msg))
     }
 
-    fn parse_program_headers(file: &[u8], alloc: &mut alloc::Allocator, header: &Header) -> NonNull<u8> {
+    fn parse_program_headers(file: &[u8], header: &Header) -> NonNull<u8> {
         let virt_base = NonNull::new((usize::MAX << (9*4 + 12 - 1)) as *mut _).unwrap();
         let fail = |s| -> ! {
             sys::print("parse_ph: ");
@@ -409,14 +403,14 @@ mod elf {
         };
         let assert = |c: bool, s| if !c { fail(s) };
         assert(header.ph_size >= 56, "PH entry size smaller than expected");
-        let Some(mut pt) = page::Pt::new(alloc) else {
+        let Some(mut pt) = page::Pt::new() else {
             fail("out of memory");
         };
         let ph = slice_fail(file, header.ph_offset, usize::from(header.ph_size) * usize::from(header.ph_count), "PH array truncated");
 
-        let Some(mut pd) = page::Pd::new(alloc) else { fail("out of memory") };
+        let Some(mut pd) = page::Pd::new() else { fail("out of memory") };
         pd[0].set_table(unsafe { core::mem::transmute_copy(&pt) });
-        let Some(mut pdp) = page::Pdp::new(alloc) else { fail("out of memory") };
+        let Some(mut pdp) = page::Pdp::new() else { fail("out of memory") };
         pdp[0].set_table(pd);
         let mut pml4 = unsafe { sys::pml4() };
         pml4[256].set_table(pdp);
@@ -446,7 +440,7 @@ mod elf {
                         let p = if pi < map_n {
                             pa
                         } else {
-                            alloc.alloc(alloc::PAGE_SIZE)
+                            alloc::alloc(alloc::PAGE_SIZE)
                                 .unwrap_or_else(|| fail("ELF: out of memory"))
                                 .addr()
                                 .get() as u64
@@ -498,9 +492,9 @@ mod elf {
     /// # Returns
     ///
     /// Entry point
-    pub fn load(file: &[u8], alloc: &mut alloc::Allocator) -> NonNull<u8> {
+    pub fn load(file: &[u8]) -> NonNull<u8> {
         let hdr = parse_header(file);
-        let base = parse_program_headers(file, alloc, &hdr);
+        let base = parse_program_headers(file, &hdr);
         unsafe { base.add(hdr.program_entry) }
     }
 }
@@ -721,13 +715,13 @@ mod pcie {
             unsafe { Self::BASE.byte_add(4096 * usize::from(bdf.index())).cast::<Header0>().as_ref() }
         }
 
-        fn configure_device(&mut self, bdf: pci::BDF, alloc: &mut alloc::Allocator) {
+        fn configure_device(&mut self, bdf: pci::BDF) {
             let hdr = Self::get_header(bdf);
             let id = hdr.vendor_device_id();
             if id == [0xffff; 2] {
                 return;
             }
-            hdr.configure(self, alloc);
+            hdr.configure(self);
             match id {
                 QemuVga::ID => QemuVga::configure(self, &hdr),
                 Ich9Lpc::ID => Ich9Lpc::configure(self, &hdr),
@@ -735,15 +729,15 @@ mod pcie {
             }
         }
 
-        fn configure_bus(&mut self, bus: u8, alloc: &mut alloc::Allocator) {
+        fn configure_bus(&mut self, bus: u8) {
             for dev in 0..32 {
-                self.configure_device(pci::BDF::new(bus, dev, 0), alloc);
+                self.configure_device(pci::BDF::new(bus, dev, 0));
             }
         }
 
-        fn configure(&mut self, alloc: &mut alloc::Allocator) {
+        fn configure(&mut self) {
             self.enable();
-            self.configure_bus(0, alloc);
+            self.configure_bus(0);
         }
     }
 
@@ -757,7 +751,7 @@ mod pcie {
             self.command_status.set(u32::from(command));
         }
 
-        fn configure(&self, parent: &mut Q35, alloc: &mut alloc::Allocator) {
+        fn configure(&self, parent: &mut Q35) {
             let mut bars_iter = self.bar.iter();
             while let Some(b) = bars_iter.next() {
                 b.set(u32::MAX);
@@ -778,7 +772,7 @@ mod pcie {
                         b.set(addr);
                         let range = unsafe { NonNull::new_unchecked(addr as *mut u8) };
                         let range = unsafe { range..range.byte_add(mask as usize + 1) };
-                        page::identity_map_rw(range, alloc);
+                        page::identity_map_rw(range);
                     }
                     2 => {
                         // 64 bit BAR
@@ -794,7 +788,7 @@ mod pcie {
                         bh.set((addr >> 32) as u32);
                         let range = unsafe { NonNull::new_unchecked(addr as *mut u8) };
                         let range = unsafe { range..range.byte_add(mask as usize + 1) };
-                        page::identity_map_rw(range, alloc);
+                        page::identity_map_rw(range);
                     }
                     1 => log("unknown BAR type 1"),
                     3 => log("unknown BAR type 3"),
@@ -866,10 +860,10 @@ mod pcie {
         }
     }
 
-    pub fn configure(alloc: &mut alloc::Allocator) {
+    pub fn configure() {
         let mut host = Q35::new();
-        page::identity_map_rw(host.range(), alloc);
-        host.configure(alloc);
+        page::identity_map_rw(host.range());
+        host.configure();
     }
 }
 
@@ -905,7 +899,7 @@ fn fail(reason: &str) -> ! {
 /// # Note
 ///
 /// Start of file is guaranteed to be aligned to page boundary.
-fn load_file<'a>(filename: &str, alloc: &mut alloc::Allocator) -> &'a [u8] {
+fn load_file<'a>(filename: &str) -> &'a [u8] {
     let len = match sys::open(filename) {
         Ok(x) => x,
         Err(sys::OpenFileError) => {
@@ -913,7 +907,7 @@ fn load_file<'a>(filename: &str, alloc: &mut alloc::Allocator) -> &'a [u8] {
             fail(filename);
         }
     };
-    let Some(base) = alloc.alloc(len) else {
+    let Some(base) = alloc::alloc(len) else {
         fail("out of memory while reading file")
     };
     let buf: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(base.as_ptr(), len) };
@@ -923,8 +917,8 @@ fn load_file<'a>(filename: &str, alloc: &mut alloc::Allocator) -> &'a [u8] {
 
 #[unsafe(no_mangle)]
 extern "sysv64" fn boot() -> NonNull<u8> {
-    let alloc = &mut alloc::Allocator::new();
-    let pcie_base = pcie::configure(alloc);
-    let file = load_file(KERNEL_FILENAME, alloc);
-    elf::load(file, alloc)
+    alloc::init();
+    let pcie_base = pcie::configure();
+    let file = load_file(KERNEL_FILENAME);
+    elf::load(file)
 }
