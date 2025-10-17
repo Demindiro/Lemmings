@@ -48,6 +48,7 @@ fn main() {
 fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
+    let token = page::init(entry, token);
     let mut threads = thread::ThreadManager::new();
     threads.enter(thread::Priority::Regular, main, token);
 }
