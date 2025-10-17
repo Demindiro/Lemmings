@@ -136,11 +136,12 @@ mod alloc {
     use crate::*;
     use core::ops::Range;
 
+    static mut REGIONS: [boot::MemoryRegion; MAX_REGIONS] = [boot::MemoryRegion::EMPTY; MAX_REGIONS];
+
     pub const PAGE_SIZE: usize = 4096;
     const MAX_REGIONS: usize = 8;
 
     pub struct Allocator {
-        regions: [Range<u64>; MAX_REGIONS],
     }
 
     fn round_p2(x: usize, n: usize) -> usize {
@@ -150,24 +151,24 @@ mod alloc {
 
     impl Allocator {
         pub fn new() -> Self {
-            let mut regions: [_; MAX_REGIONS] = Default::default();
             // intentionally skip 0x0..0x3000 because:
             // - we use 0x0..0x1000 as stack
             // - we use 0x1000..0x2000 as PML4
             // - we use 0x2000..0x3000 as PDPT
             // - we use 0x3000..0x4000 as PD
             // - we can't safely dereference 0x0 in Rust
-            regions[0] = 0x6000..0xb0000;
-            Self { regions }
+            unsafe { REGIONS[0] = boot::MemoryRegion { start: boot::Phys(0x4000), end: boot::Phys(0xa0000) } }
+            Self { }
         }
 
         pub fn alloc(&mut self, byte_count: usize) -> Option<NonNull<u8>> {
             let n = round_p2(byte_count, PAGE_SIZE) as u64;
-            for r in &mut self.regions {
-                if r.end - r.start >= n {
+            #[allow(static_mut_refs)]
+            for r in unsafe { &mut REGIONS } {
+                if r.end.0 - r.start.0 >= n {
                     let s = r.start;
-                    r.start += n;
-                    return NonNull::new(s as *mut u8);
+                    r.start.0 += n;
+                    return NonNull::new(s.0 as *mut u8);
                 }
             }
             None
