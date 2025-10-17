@@ -1,13 +1,11 @@
 #![no_std]
 #![no_main]
 
-#[macro_use]
-mod sys;
 mod page;
 mod thread;
 mod time;
 
-use core::arch::asm;
+use lemmings_qemubios::{sys, log, dbg};
 
 mod private {
     /// This token MUST ONLY be constructed in [`_start`]!
@@ -55,13 +53,12 @@ fn main() {
     }
 }
 
-#[unsafe(no_mangle)]
-extern "sysv64" fn _start(sys_entry: *const ()) -> ! {
+#[inline]
+fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
-    unsafe {
-        sys::ENTRY = sys_entry;
-    }
     let mut threads = thread::ThreadManager::new();
     threads.enter(thread::Priority::Regular, main, token);
 }
+
+lemmings_qemubios::entry!(entry);

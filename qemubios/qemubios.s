@@ -92,7 +92,9 @@ fwcfg_has_dma:
 	call boot
 	string rsi, rcx, "[QEMUBIOS] Entering kernel\n"
 	call sys_print
-	lea rdi, [rip + sys]
+	lea rdi, [rip + boot_entry_info]
+	lea rsi, [rip + sys]
+	movabs rdx, 'L' | ('e' << 8) | ('m' << 16) | ('m' << 24) | ('i' << 32) | ('n' << 40) | ('g' << 48) | ('s' << 56)
 	jmp rax
 
 # IF=0, DF=0
