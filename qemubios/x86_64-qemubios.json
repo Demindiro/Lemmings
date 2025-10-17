@@ -12,7 +12,7 @@
   "vendor": "unknown",
   "linker-flavor": "ld.lld",
   "linker": "ld.lld",
-  "disable-redzone": true,
+  "disable-redzone": false,
   "panic-strategy": "abort",
   "features": "-mmx,-sse,+soft-float",
   "dynamic-linking": false,

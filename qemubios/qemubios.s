@@ -65,7 +65,7 @@
 .section .text
 .code64
 main64:
-mov esp, 4096
+mov esp, 4096 - 128 # red zone
 mov edx, FW_CFG_IOBASE
 xor eax, eax
 out dx, ax
