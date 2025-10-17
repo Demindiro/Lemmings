@@ -53,7 +53,7 @@ fn main() {
 }
 
 #[unsafe(no_mangle)]
-fn _start(sys_entry: *const ()) -> ! {
+extern "sysv64" fn _start(sys_entry: *const ()) -> ! {
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
     unsafe {
