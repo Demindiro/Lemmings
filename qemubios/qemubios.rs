@@ -441,8 +441,14 @@ mod elf {
                     let mask = align - 1;
                     let mut va = vaddr & !mask;
                     let mut pa = file.as_ptr().addr() as u64 + (offset & !mask);
-                    let map_n = (filesz + mask) / align;
-                    let zero_n = (memsz + mask) / align;
+                    let va_map_end = if filesz != 0 {
+                        (vaddr + filesz + mask) & !mask
+                    } else {
+                        va
+                    };
+                    let va_zero_end = (vaddr + memsz + mask) & !mask;
+                    let map_n = (va_map_end - va) / align;
+                    let zero_n = (va_zero_end - va) / align;
                     for pi in 0..zero_n {
                         let [_, i] = split_bits(va as usize, 12);
                         let Some(pte) = pt.get_mut(i) else {
