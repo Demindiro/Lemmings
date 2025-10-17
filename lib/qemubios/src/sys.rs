@@ -87,20 +87,24 @@ pub static mut ENTRY: *const () = core::ptr::null();
 pub struct Log;
 
 impl fmt::Write for Log {
+    #[inline]
     fn write_str(&mut self, s: &str) -> fmt::Result {
         print(s);
         Ok(())
     }
 }
 
+#[inline]
 pub fn print(s: &str) {
     unsafe { sys!(0 ["rsi" s.as_ptr()] ["rcx" s.len()]); }
 }
 
+#[inline]
 pub fn exit_ok() -> ! {
     unsafe { sys!(noreturn 1 ["rdx" 0]); }
 }
 
+#[inline]
 pub fn halt() -> ! {
-    unsafe { asm!("cli", "2: hlt", "jmp 2b", options(noreturn)) }
+    unsafe { asm!("cli", "2: hlt", "jmp 2b", options(noreturn, nostack, nomem)) }
 }
