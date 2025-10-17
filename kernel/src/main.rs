@@ -4,6 +4,7 @@
 #[macro_use]
 mod sys;
 mod page;
+mod time;
 
 use core::arch::asm;
 
