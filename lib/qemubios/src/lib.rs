@@ -12,7 +12,7 @@ macro_rules! entry {
         extern "sysv64" fn _start(entry: &$crate::Entry, sys: $crate::Phys, magic: u64) -> ! {
             if magic != $crate::MAGIC {
                 // halt to be safe
-                unsafe { core::arch::asm!("cli", "2: hlt", "jmp 2b", options(nostack, noreturn)) };
+                $crate::sys::halt();
             }
             unsafe {
                 $crate::sys::ENTRY = sys.0 as _;
