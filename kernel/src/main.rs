@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod critical_section;
 mod page;
 mod thread;
 mod time;
