@@ -1,6 +1,7 @@
 OUTPUT_FORMAT("binary")
 
 MEMORY {
+	bss    (rw) : org = 0x10, l = 512-16
 	rom    (rx) : org = 0xf0000, l = 0x10000
 	init32 (x)  : org = 0xfff00, l = 0xd0
 	gdt    (r)  : org = 0xfffd0, l = 8*3
@@ -13,6 +14,9 @@ LDFIX_gdtr = 0xffe8;
 
 SECTIONS {
 	/DISCARD/ : { *(.note .note* .eh_frame) }
+	.bss : AT(0x10) {
+		*(.bss .bss*)
+	} > bss =0
 	.text : AT(0xf0000) {
 		*(.text .text*)
 		*(.rodata .rodata.*)
