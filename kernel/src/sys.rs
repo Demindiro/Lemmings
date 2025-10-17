@@ -1,9 +1,47 @@
-pub static mut ENTRY: *const () = core::ptr::null();
+use core::{arch::asm, fmt};
+
+macro_rules! log {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        let _ = writeln!($crate::sys::Log, $($arg)*);
+    }};
+}
+
+macro_rules! dbg {
+    // NOTE: We cannot use `concat!` to make a static string as a format argument
+    // of `eprintln!` because `file!` could contain a `{` or
+    // `$val` expression could be a block (`{ .. }`), in which case the `eprintln!`
+    // will be malformed.
+    () => {
+        log!("[{}:{}:{}]", file!(), line!(), column!())
+    };
+    ($val:expr $(,)?) => {
+        // Use of `match` here is intentional because it affects the lifetimes
+        // of temporaries - https://stackoverflow.com/a/48732525/1063961
+        match $val {
+            tmp => {
+                log!("[{}:{}:{}] {} = {:#?}",
+                    file!(),
+                    line!(),
+                    column!(),
+                    stringify!($val),
+                    // The `&T: Debug` check happens here (not in the format literal desugaring)
+                    // to avoid format literal related messages and suggestions.
+                    &&tmp as &dyn core::fmt::Debug,
+                );
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($dbg!($val)),+,)
+    };
+}
 
 macro_rules! sys {
     ($nr:literal ["rsi" $val:expr] ["rcx" $val2:expr]) => {{
         let ret: isize;
-        core::arch::asm! {
+        asm! {
             "call [rip + {}]",
             sym ENTRY,
             in("eax") $nr,
@@ -31,16 +69,25 @@ macro_rules! sys {
         ret
     }};
     (noreturn $nr:literal ["rdx" $val:expr]) => {{
-        let ret: isize;
-        core::arch::asm! {
+        asm! {
             "call [rip + {}]",
             sym ENTRY,
             in("eax") $nr,
             in("rdx") $val,
             options(noreturn)
         };
-        ret
     }};
+}
+
+pub static mut ENTRY: *const () = core::ptr::null();
+
+pub struct Log;
+
+impl fmt::Write for Log {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        print(s);
+        Ok(())
+    }
 }
 
 pub fn print(s: &str) {
