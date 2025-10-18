@@ -1,11 +1,20 @@
+pub use lemmings_x86_64::mmu::PageAttr;
+
 use crate::{KernelEntryToken, sync::SpinLock};
-use core::{mem, ptr::NonNull, slice};
+use core::{mem, num::NonZero, ops, ptr::NonNull, slice};
 use lemmings_qemubios::MemoryRegion;
+use lemmings_x86_64::mmu;
 
 static PAGE: SpinLock<PageManager> = SpinLock::new(PageManager::new());
 static VIRT: SpinLock<VirtManager> = SpinLock::new(VirtManager::new());
 
 pub const PAGE_SIZE: usize = 4096;
+pub const PAGE_MASK: usize = PAGE_SIZE - 1;
+
+const HUGEPAGE_2M_SIZE: usize = 1 << 21;
+const HUGEPAGE_1G_SIZE: usize = 1 << 30;
+const HUGEPAGE_2M_MASK: usize = HUGEPAGE_2M_SIZE - 1;
+const HUGEPAGE_1G_MASK: usize = HUGEPAGE_1G_SIZE - 1;
 
 pub type Phys = lemmings_qemubios::Phys;
 pub type Virt = NonNull<u8>;
@@ -14,6 +23,11 @@ pub struct OutOfMemory;
 pub struct OutOfVirtSpace;
 
 pub enum ReserveRegionError {
+    OutOfMemory,
+    OutOfVirtSpace,
+}
+
+pub enum AllocGuardedError {
     OutOfMemory,
     OutOfVirtSpace,
 }
@@ -29,6 +43,9 @@ struct PageManager {
 struct VirtManager {
     head: Virt,
 }
+
+struct IdentityMapper;
+struct PageAllocator;
 
 impl PageManager {
     pub const fn new() -> Self {
@@ -58,6 +75,48 @@ impl VirtManager {
             Ok(start)
         }
     }
+
+    /// # Safety
+    ///
+    /// The address range must not be actively used.
+    pub unsafe fn map_range(&mut self, range: ops::Range<Virt>, phys: Phys, attr: PageAttr) -> Result<(), OutOfMemory> {
+        let mut va = mmu::Virt::<mmu::A12>::new(range.start.as_ptr() as u64).unwrap();
+        let mut pa = mmu::Phys::<mmu::A12>::new(phys.0).unwrap();
+        let va_end = mmu::Virt::<mmu::A12>::new(range.end.as_ptr() as u64).unwrap();
+        let mut root = unsafe { mmu::current_root::<mmu::L4>() };
+        while va != va_end {
+            /*
+            if va. & HUGEPAGE_1G_MASK == 0 {
+                todo!("1G")
+            }
+            if va.addr().get() & HUGEPAGE_2M_MASK == 0 {
+                todo!("2M")
+            }
+            */
+            unsafe {
+                root.set_4k(&IdentityMapper, &mut PageAllocator, va, pa, attr);
+            }
+            va = va.step_next(1);
+            pa = pa.step_next(1);
+        }
+        Ok(())
+    }
+}
+
+impl mmu::PhysToVirt for IdentityMapper {
+    fn virt<A>(&self, phys: mmu::Phys<A>) -> mmu::Virt<A> {
+        phys.cast()
+    }
+}
+unsafe impl mmu::PhysToPtr for IdentityMapper {}
+
+unsafe impl mmu::PageAllocator for PageAllocator {
+    type Error = OutOfMemory;
+
+    fn alloc(&mut self) -> Result<(NonNull<u8>, mmu::Phys<mmu::A12>), Self::Error> {
+        let virt = alloc_one()?;
+        Ok((virt, mmu::Phys::new(virt_to_phys(virt).0).unwrap()))
+    }
 }
 
 impl From<OutOfMemory> for ReserveRegionError {
@@ -66,9 +125,38 @@ impl From<OutOfMemory> for ReserveRegionError {
     }
 }
 
+impl From<OutOfMemory> for AllocGuardedError {
+    fn from(_: OutOfMemory) -> Self {
+        Self::OutOfMemory
+    }
+}
+
+impl From<ReserveRegionError> for AllocGuardedError {
+    fn from(x: ReserveRegionError) -> Self {
+        match x {
+            ReserveRegionError::OutOfMemory => Self::OutOfMemory,
+            ReserveRegionError::OutOfVirtSpace => Self::OutOfVirtSpace,
+        }
+    }
+}
+
 pub fn alloc_one() -> Result<Virt, OutOfMemory> {
     critical_section::with(|cs| {
         PAGE.lock(cs).alloc_one()
+    })
+}
+
+pub fn alloc_one_guarded(attr: PageAttr) -> Result<Virt, AllocGuardedError> {
+    critical_section::with(|cs| {
+        let page = {
+            PAGE.lock(cs).alloc_one()?
+        };
+        {
+            let mut virt = VIRT.lock(cs);
+            let addr = virt.reserve_region(PAGE_SIZE.try_into().unwrap())?;
+            unsafe { virt.map_range(addr..addr.byte_add(PAGE_SIZE), virt_to_phys(page), attr)? }
+            Ok(addr)
+        }
     })
 }
 
