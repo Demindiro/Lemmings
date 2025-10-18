@@ -3,7 +3,7 @@
 #[macro_use]
 pub mod sys;
 
-use core::fmt;
+use core::{fmt, ptr::NonNull};
 
 #[macro_export]
 macro_rules! entry {
@@ -38,6 +38,10 @@ pub struct Entry {
 #[repr(transparent)]
 pub struct Phys(pub u64);
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Virt(pub NonNull<u8>);
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct MemoryMap {
@@ -53,10 +57,21 @@ pub struct MemoryRegion {
     pub end: Phys,
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct VirtRegion {
+    /// Inclusive
+    pub start: Virt,
+    /// Exclusive
+    pub end: Virt,
+}
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct Paging {
     pub zero: [Phys; 6],
+    pub kernel: VirtRegion,
+    pub stack: Virt,
 }
 
 #[derive(Debug)]
@@ -68,5 +83,11 @@ pub struct Pcie {
 impl fmt::Debug for Phys {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:#x}", self.0)
+    }
+}
+
+impl fmt::Debug for Virt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }

@@ -517,10 +517,14 @@ mod elf {
     /// # Returns
     ///
     /// Entry point
-    pub fn load(file: &[u8]) -> NonNull<u8> {
+    pub fn load(file: &[u8]) -> (NonNull<u8>, boot::VirtRegion) {
         let hdr = parse_header(file);
         let base = parse_program_headers(file, &hdr);
-        unsafe { base.add(hdr.program_entry) }
+        let region = boot::VirtRegion {
+            start: boot::Virt(NonNull::new(0xffff8000_00000000u64 as _).unwrap()),
+            end: boot::Virt(NonNull::new((0xffff8000_00000000u64 + (1<<21)) as _).unwrap()),
+        };
+        (unsafe { base.add(hdr.program_entry) }, region)
     }
 }
 
@@ -895,16 +899,15 @@ mod pcie {
 mod boot {
     // Intentionally separated from the `lemmings-qemubios` crate because you
     // better have a damn good reason to touch this.
+    //
+    // (also because CBA to figure out all this crate stuff)
 
     use crate::*;
+    use core::mem::MaybeUninit;
 
     #[used]
     #[unsafe(export_name = "boot_entry_info")]
-    pub static mut ENTRY: Entry = Entry {
-        memory: MemoryMap { list: MemoryRegion::EMPTY },
-        paging: Paging { zero: [Phys(0); 6] },
-        pcie: Pcie { base: Phys(0) },
-    };
+    pub static mut ENTRY: MaybeUninit<Entry> = MaybeUninit::uninit();
 
     pub const MAGIC: u64 = u64::from_le_bytes(*b"Lemmings");
 
@@ -921,6 +924,10 @@ mod boot {
     #[repr(transparent)]
     pub struct Phys(pub u64);
 
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    pub struct Virt(pub NonNull<u8>);
+
     #[repr(C)]
     pub struct MemoryMap {
         pub list: MemoryRegion,
@@ -935,8 +942,18 @@ mod boot {
     }
 
     #[repr(C)]
+    pub struct VirtRegion {
+        /// Inclusive
+        pub start: Virt,
+        /// Exclusive
+        pub end: Virt,
+    }
+
+    #[repr(C)]
     pub struct Paging {
         pub zero: [Phys; 6],
+        pub kernel: VirtRegion,
+        pub stack: Virt,
     }
 
     #[repr(C)]
@@ -948,10 +965,18 @@ mod boot {
         pub const EMPTY: Self = Self { start: Phys(0), end: Phys(0) };
     }
 
-    pub fn collect_info() {
+    pub fn collect_info(kernel: VirtRegion) {
+        #[allow(static_mut_refs)]
         unsafe {
-            ENTRY.memory = alloc::memory_map();
-            ENTRY.pcie.base = Phys(0xb000_0000);
+            ENTRY.write(Entry {
+                memory: alloc::memory_map(),
+                paging: Paging {
+                    kernel,
+                    stack: Virt(NonNull::new(0x1000 as _).unwrap()),
+                    zero: [Phys(0); 6],
+                },
+                pcie: Pcie { base: Phys(0xb000_0000) },
+            });
         }
     }
 }
@@ -1022,6 +1047,7 @@ extern "sysv64" fn boot() -> NonNull<u8> {
     alloc::init();
     let pcie_base = pcie::configure();
     let file = load_file(KERNEL_FILENAME);
-    boot::collect_info();
-    elf::load(file)
+    let (entry, kernel) = elf::load(file);
+    boot::collect_info(kernel);
+    entry
 }
