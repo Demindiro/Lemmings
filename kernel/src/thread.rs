@@ -3,7 +3,7 @@
 //! If you absolutely need `O(1)` scheduling, avoid having any threads sleep.
 //! The sleep queue is a min-heap, which has `O(log n)` time complexity on all operations.
 
-use crate::{KernelEntryToken, page::{self, PAGE_SIZE}, time::Monotonic};
+use crate::{KernelEntryToken, page::{self, PAGE_SIZE, PageAttr}, time::Monotonic};
 use core::{arch::asm, cell::Cell, fmt, mem, ptr::NonNull, ops};
 
 const PRIORITY_COUNT: usize = 4;
@@ -24,6 +24,7 @@ pub enum Priority {
 
 pub enum ThreadSpawnError {
     OutOfMemory,
+    OutOfVirtSpace,
 }
 
 struct RoundRobinQueue {
@@ -87,7 +88,7 @@ impl ThreadManager {
     }
 
     fn create(&mut self, priority: Priority, entry: fn()) -> Result<ThreadRef, ThreadSpawnError> {
-        let page = page::alloc_one()?.cast::<Thread>();
+        let page = page::alloc_one_guarded(PageAttr::RW)?.cast::<Thread>();
         // SAFETY:
         // - the page we allocated is valid and writeable.
         // - we will initialize it right now.
@@ -205,10 +206,21 @@ impl From<page::OutOfMemory> for ThreadSpawnError {
     }
 }
 
+impl From<page::AllocGuardedError> for ThreadSpawnError {
+    fn from(x: page::AllocGuardedError) -> Self {
+        match x {
+            page::AllocGuardedError::OutOfMemory => Self::OutOfMemory,
+            page::AllocGuardedError::OutOfVirtSpace => Self::OutOfVirtSpace,
+        }
+    }
+}
+
 impl fmt::Debug for ThreadSpawnError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::OutOfMemory => f.write_str("out of memory"),
-        }
+        let s = match self {
+            Self::OutOfMemory => "out of memory",
+            Self::OutOfVirtSpace => "out of virtual memory space",
+        };
+        f.write_str(s)
     }
 }
