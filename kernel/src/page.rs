@@ -11,6 +11,12 @@ pub type Phys = lemmings_qemubios::Phys;
 pub type Virt = NonNull<u8>;
 
 pub struct OutOfMemory;
+pub struct OutOfVirtSpace;
+
+pub enum ReserveRegionError {
+    OutOfMemory,
+    OutOfVirtSpace,
+}
 
 #[repr(align(4096))]
 struct Page;
@@ -21,6 +27,7 @@ struct PageManager {
 }
 
 struct VirtManager {
+    head: Virt,
 }
 
 impl PageManager {
@@ -37,7 +44,25 @@ impl PageManager {
 
 impl VirtManager {
     pub const fn new() -> Self {
-        Self {}
+        Self {
+            head: Virt::dangling(),
+        }
+    }
+
+    /// Automatically puts guard pages of minimum 4K around the region.
+    pub fn reserve_region(&mut self, size: NonZero<usize>) -> Result<Virt, ReserveRegionError> {
+        unsafe {
+            let start = self.head.byte_add(PAGE_SIZE);
+            let end = start.byte_add((size.get() + PAGE_MASK) & !PAGE_MASK);
+            self.head = end.byte_add(PAGE_SIZE);
+            Ok(start)
+        }
+    }
+}
+
+impl From<OutOfMemory> for ReserveRegionError {
+    fn from(_: OutOfMemory) -> Self {
+        Self::OutOfMemory
     }
 }
 
@@ -47,8 +72,19 @@ pub fn alloc_one() -> Result<Virt, OutOfMemory> {
     })
 }
 
+/// Automatically puts guard pages of minimum 4K around the region.
+pub fn reserve_region(size: NonZero<usize>) -> Result<Virt, ReserveRegionError> {
+    critical_section::with(|cs| VIRT.lock(cs).reserve_region(size))
+}
+
 #[inline]
 pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+    let token = init_page(entry, token);
+    let token = init_virt(entry, token);
+    token
+}
+
+fn init_page(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
     let regions = unsafe { region_to_slice::<MemoryRegion>(entry.memory.list) };
     let mut head = None;
     for r in regions {
@@ -69,8 +105,17 @@ pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kernel
     token
 }
 
+fn init_virt(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+    let head = entry.paging.kernel.end.0;
+    let token = VIRT.set(VirtManager { head }, token);
+    token
+}
+
 fn phys_to_virt(p: Phys) -> Virt {
     NonNull::new(p.0 as _).unwrap()
+}
+fn virt_to_phys(v: Virt) -> Phys {
+    lemmings_qemubios::Phys(v.as_ptr() as _)
 }
 
 unsafe fn region_to_slice<T>(region: MemoryRegion) -> &'static [T] {
