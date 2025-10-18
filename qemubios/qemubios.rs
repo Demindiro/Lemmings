@@ -472,6 +472,14 @@ mod elf {
                         va += alloc::PAGE_SIZE as u64;
                         pa += alloc::PAGE_SIZE as u64;
                     }
+                    if flags & 0b010 != 0 {
+                        // ensure extra data is zeroed
+                        // TODO is it fine to zero in-place?
+                        // My interpretation of
+                        // https://refspecs.linuxfoundation.org/ELF/zSeries/lzsabi0_zSeries/c2083.html
+                        // says "yes" but I'm not sure...
+                        unsafe { virt_base.byte_add(vaddr as usize).byte_add(filesz as usize).write_bytes(0, (memsz - filesz) as usize) };
+                    }
                 }
                 PH_TY_DYNAMIC => {
                     let dynamic = slice_fail(file, offset as usize, filesz as usize, "dynamic segment truncated");
@@ -975,6 +983,19 @@ fn log(message: &str) {
 fn fail(reason: &str) -> ! {
     sys::println(reason);
     sys::exit_err();
+}
+
+#[unsafe(no_mangle)]
+unsafe fn memset(mut dst: *mut u8, c: i32, n: usize) -> *mut u8 {
+    unsafe {
+        core::arch::asm! {
+            "rep stosb",
+            in("al") c as u8,
+            inout("rdi") dst => dst,
+            inout("rcx") n => _,
+        }
+    }
+    dst
 }
 
 /// # Note
