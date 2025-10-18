@@ -1,0 +1,9 @@
+[package]
+name = "lemmings-x86_64"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitflags = "2.9.0"
+x86 = "0.52.0"
+vcell = "0.1.3"
