@@ -1000,7 +1000,7 @@ fn fail(reason: &str) -> ! {
 }
 
 #[unsafe(no_mangle)]
-unsafe fn memset(mut dst: *mut u8, c: i32, n: usize) -> *mut u8 {
+unsafe extern "C" fn memset(mut dst: *mut u8, c: i32, n: usize) -> *mut u8 {
     unsafe {
         core::arch::asm! {
             "rep stosb",
