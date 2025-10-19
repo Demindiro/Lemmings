@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod archive;
 mod critical_section;
 mod page;
 mod thread;
@@ -49,6 +50,7 @@ fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
     let token = page::init(entry, token);
+    let token = archive::init(entry, token);
     let mut threads = thread::ThreadManager::new();
     threads.enter(thread::Priority::Regular, main, token);
 }

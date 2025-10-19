@@ -199,7 +199,7 @@ fn init_virt(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kerne
     token
 }
 
-fn phys_to_virt(p: Phys) -> Virt {
+pub fn phys_to_virt(p: Phys) -> Virt {
     NonNull::new(p.0 as _).unwrap()
 }
 fn virt_to_phys(v: Virt) -> Phys {

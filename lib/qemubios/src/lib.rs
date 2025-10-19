@@ -32,6 +32,7 @@ pub struct Entry {
     pub memory: MemoryMap,
     pub paging: Paging,
     pub pcie: Pcie,
+    pub data: MemoryRegion,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

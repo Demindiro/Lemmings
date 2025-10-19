@@ -907,6 +907,7 @@ mod boot {
         memory: MemoryMap,
         paging: Paging,
         pcie: Pcie,
+        data: MemoryRegion,
     }
 
     #[derive(Clone, Copy)]
@@ -954,7 +955,7 @@ mod boot {
         pub const EMPTY: Self = Self { start: Phys(0), end: Phys(0) };
     }
 
-    pub fn collect_info(kernel: VirtRegion) {
+    pub fn collect_info(kernel: VirtRegion, data: &'static [u8]) {
         #[allow(static_mut_refs)]
         unsafe {
             ENTRY.write(Entry {
@@ -965,6 +966,10 @@ mod boot {
                     zero: [Phys(0); 6],
                 },
                 pcie: Pcie { base: Phys(0xb000_0000) },
+                data: MemoryRegion {
+                    start: Phys(data.as_ptr() as _),
+                    end: Phys(data.as_ptr().byte_add(data.len()) as _),
+                }
             });
         }
     }
@@ -1028,8 +1033,9 @@ fn load_file<'a>(file: sys::File) -> &'a [u8] {
 extern "sysv64" fn boot(kernel: sys::File, data: sys::File) -> NonNull<u8> {
     alloc::init();
     let pcie_base = pcie::configure();
-    let file = load_file(kernel);
-    let (entry, kernel) = elf::load(file);
-    boot::collect_info(kernel);
+    let kernel = load_file(kernel);
+    let data = load_file(data);
+    let (entry, kernel) = elf::load(kernel);
+    boot::collect_info(kernel, data);
     entry
 }
