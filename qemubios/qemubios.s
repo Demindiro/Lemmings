@@ -4,14 +4,11 @@
 # offset, switch to identity segment then enter long mode directly at the proper address.
 .intel_syntax noprefix
 .globl sys_exit
-.globl sys_open
 .globl sys_print
-.globl sys_read
+.globl file_read
 
 .equ SYS_PRINT, 0
 .equ SYS_EXIT, 1
-.equ SYS_OPEN, 2
-.equ SYS_READ, 3
 
 .macro segm base:req, limit:req, access:req, flags:req
  .word \limit & 0xffff
@@ -61,6 +58,23 @@
 	movimm \len, (.L\@.end - .L\@)
 .endm
 
+.macro ifeqz x:req, label:req
+	test \x, \x
+	jz \label
+.endm
+.macro ifnez x:req, label:req
+	test \x, \x
+	jnz \label
+.endm
+
+.section .rodata.filenames
+filename.kernel:
+.asciz "opt/lemmings/kernel.elf"
+.equ filename.kernel.qlen, (23 + 1) / 8
+filename.data:
+.asciz "opt/lemmings/data.bin"
+.zero 2
+.equ filename.data.qlen, (21 + 3) / 8
 
 .section .text
 .code64
@@ -89,6 +103,17 @@ test al, 1 << 1
 jnz fwcfg_has_dma
 hlt
 fwcfg_has_dma:
+	call find_standard_files
+	ifnez r8, 2f
+	string rsi, rcx, "[QEMUBIOS] opt/lemmings/kernel.elf not found\n"
+	call sys_print
+2:	ifnez r10, 2f
+	string rsi, rcx, "[QEMUBIOS] opt/lemmings/data.bin not found\n"
+	call sys_print
+2:	mov rdi, r8
+	mov rsi, r9
+	mov rdx, r10
+	mov rcx, r11
 	call boot
 	string rsi, rcx, "[QEMUBIOS] Entering kernel\n"
 	call sys_print
@@ -103,10 +128,6 @@ sys:
 	je sys_print
 	cmp eax, SYS_EXIT
 	je sys_exit
-	cmp eax, SYS_OPEN
-	je sys_open
-	cmp eax, SYS_READ
-	je sys_read
 	string rsi, rcx, "[QEMUBIOS] Invalid system call! Halting...\n"
 	call sys_print
 	hlt
@@ -130,28 +151,13 @@ sys_exit:
 3:	out dx, ax
 	hlt
 
-# rsi: filename base
-# ecx: filename length
-# 256 bytes of stack space available during call
-#
-# eax: size if found, -1 if not found
-sys_open:
+# r8, r9: selector and length of opt/lemmings/kernel.elf, or 0
+# r10, r11: selector and length of opt/lemmings/data.bin, or 0
+find_standard_files:
+	xor r8, r8
+	xor r10, r10
 	push rbp
 	push rbx
-	# name[56] is null-terminated ASCII...
-	# I hate null-terminated strings!
-	cmp ecx, 56
-	jae 4f
-	sub rsp, 56
-	mov rdi, rsp
-	push rcx
-	xor eax, eax
-	movimm rcx, 56/8
-	rep stosq
-	pop rcx
-	mov rdi, rsp
-	rep movsb
-	mov rdi, rsp
 	# prepare DMA
 	sub rsp, 64
 	mov rsi, rsp
@@ -167,38 +173,48 @@ sys_open:
 	mov ebx, [rsi]
 	bswap ebx
 	test ebx, ebx
-	jz 4f
+	jz 3f
 	# iterate entries
-	add rsi, 8 # we only care about the name
 2:	movbe32 [rbp+4], 64
 	movbe32 [rbp+0], FW_CFG_DMA.READ
 	call fw_cfg_dma
-	mov ecx, 56/8
-	push rsi
-	push rdi
+	cmp dword ptr [rsp + 16 + 8], 'o' | ('p' << 8) | ('t' << 16) | ('/' << 24)
+	jne 4f
+	lea rsi, [rsp + 16 + 8]
+	lea rdi, [rip + filename.kernel]
+	mov ecx, filename.kernel.qlen
 	rep cmpsq
-	pop rdi
-	pop rsi
-	je 3f
+	jne 5f
+	mov r8d, [rsp + 16 + 4]
+	mov r9d, [rsp + 16 + 0]
+4:	dec ebx
+	jnz 2b
+	jmp 3f
+5:	lea rsi, [rsp + 16 + 8]
+	lea rdi, [rip + filename.data]
+	mov ecx, filename.data.qlen
+	rep cmpsq
+	cmove r10d, [rsp + 16 + 4]
+	cmove r11d, [rsp + 16 + 0]
 	dec ebx
 	jnz 2b
-4:	movimm rax, -1
-	jmp 5f
-3:	mov ax, [rsi-8+4]
-	xchg al, ah
-	mov dx, FW_CFG_IOBASE
-	out dx, ax
-	mov eax, [rsi-8+0]
-	bswap eax
-5:	add rsp, 16 + 64 + 56
+3:	add rsp, 16 + 64
+	bswap r8d
+	bswap r9d
+	bswap r10d
+	bswap r11d
+	shr r8d, 16
+	shr r10d, 16
 	pop rbx
 	pop rbp
 	ret
 
+# edx: selector
 # rdi: buffer base
 # ecx: buffer size
 # 32 bytes of stack space available during call
-sys_read:
+file_read:
+	ifeqz ecx, 2f
 	push rbp
 	bswap rdi
 	push rdi
@@ -206,11 +222,13 @@ sys_read:
 	mov rbp, rsp
 	bswap ecx
 	mov [rbp+4], ecx
-	movbe32 [rbp+0], FW_CFG_DMA.READ
+	xchg dl, dh
+	or edx, (FW_CFG_DMA.READ | FW_CFG_DMA.SELECT) << 24
+	mov [rbp+0], edx
 	call fw_cfg_dma
 	add rsp, 16
 	pop rbp
-	ret
+2:	ret
 
 
 # rbp: base

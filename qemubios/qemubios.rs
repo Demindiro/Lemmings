@@ -2,8 +2,6 @@
 
 use core::{cell::UnsafeCell, ptr::NonNull};
 
-const KERNEL_FILENAME: &str = "opt/lemmings/kernel.elf";
-
 mod x86 {
     pub unsafe fn out8(port: u16, value: u8) {
         unsafe {
@@ -38,7 +36,13 @@ mod sys {
     use crate::*;
     use core::{arch::asm, ptr::{self, NonNull}};
 
-    pub struct OpenFileError;
+    const FW_CFG_IOBASE: u16 = 0x510;
+
+    #[repr(C)]
+    pub struct File {
+        selector: u16,
+        pub len: usize,
+    }
 
     pub fn print(s: &str) {
         unsafe {
@@ -72,28 +76,13 @@ mod sys {
         exit(1)
     }
 
-    pub fn open(filename: &str) -> Result<usize, OpenFileError> {
-        let len: isize;
+    pub fn read_all(file: File, buf: &mut [u8]) {
         unsafe {
             asm! {
-                "call sys_open",
-                inout("rcx") filename.len() => _,
-                inout("rsi") filename.as_ptr() => _,
-                lateout("rdi") _,
-                lateout("rdx") _,
-                lateout("rax") len,
-            }
-        }
-        usize::try_from(len).map_err(|_| OpenFileError)
-    }
-
-    pub fn read(buf: &mut [u8]) {
-        unsafe {
-            asm! {
-                "call sys_read",
+                "call file_read",
+                inout("rdx") file.selector => _,
                 inout("rcx") buf.len() => _,
                 inout("rdi") buf.as_ptr() => _,
-                out("rdx") _,
                 out("rax") _,
             }
         }
@@ -1026,27 +1015,20 @@ unsafe fn memset(mut dst: *mut u8, c: i32, n: usize) -> *mut u8 {
 /// # Note
 ///
 /// Start of file is guaranteed to be aligned to page boundary.
-fn load_file<'a>(filename: &str) -> &'a [u8] {
-    let len = match sys::open(filename) {
-        Ok(x) => x,
-        Err(sys::OpenFileError) => {
-            sys::print("failed to open ");
-            fail(filename);
-        }
-    };
-    let Some(base) = alloc::alloc(len) else {
+fn load_file<'a>(file: sys::File) -> &'a [u8] {
+    let Some(base) = alloc::alloc(file.len) else {
         fail("out of memory while reading file")
     };
-    let buf: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(base.as_ptr(), len) };
-    sys::read(buf);
+    let buf: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(base.as_ptr(), file.len) };
+    sys::read_all(file, buf);
     buf
 }
 
 #[unsafe(no_mangle)]
-extern "sysv64" fn boot() -> NonNull<u8> {
+extern "sysv64" fn boot(kernel: sys::File, data: sys::File) -> NonNull<u8> {
     alloc::init();
     let pcie_base = pcie::configure();
-    let file = load_file(KERNEL_FILENAME);
+    let file = load_file(kernel);
     let (entry, kernel) = elf::load(file);
     boot::collect_info(kernel);
     entry
