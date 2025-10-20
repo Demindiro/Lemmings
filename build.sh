@@ -12,5 +12,6 @@ mkdir -p "$tmp"
 
 (cd qemubios && ./build.sh)
 (cd kernel && ./build.sh)
+(cd interpreter && ./build.sh)
 
 ./create_archive.py "$out/data.bin" "$databin"
