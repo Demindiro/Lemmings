@@ -1,7 +1,7 @@
 pub use lemmings_x86_64::mmu::PageAttr;
 
 use crate::{KernelEntryToken, sync::SpinLock};
-use core::{mem, num::NonZero, ops, ptr::NonNull, slice};
+use core::{mem, num::NonZero, ops::{self, Range}, ptr::NonNull, slice};
 use lemmings_qemubios::MemoryRegion;
 use lemmings_x86_64::mmu;
 
@@ -16,7 +16,7 @@ const HUGEPAGE_1G_SIZE: usize = 1 << 30;
 const HUGEPAGE_2M_MASK: usize = HUGEPAGE_2M_SIZE - 1;
 const HUGEPAGE_1G_MASK: usize = HUGEPAGE_1G_SIZE - 1;
 
-pub type Phys = lemmings_qemubios::Phys;
+pub use lemmings_qemubios::Phys;
 pub type Virt = NonNull<u8>;
 
 pub struct OutOfMemory;
@@ -33,7 +33,7 @@ pub enum AllocGuardedError {
 }
 
 #[repr(align(4096))]
-struct Page;
+pub struct Page;
 
 struct PageManager {
     /// Just a simple linked list of 4K pages for now.
@@ -101,6 +101,21 @@ impl VirtManager {
         }
         Ok(())
     }
+
+    pub unsafe fn map_range_zero(&mut self, range: Range<Virt>, attr: PageAttr) -> Result<(), OutOfMemory> {
+        let mut va = mmu::Virt::<mmu::A12>::new(range.start.as_ptr() as u64).unwrap();
+        let va_end = mmu::Virt::<mmu::A12>::new(range.end.as_ptr() as u64).unwrap();
+        let mut root = unsafe { mmu::current_root::<mmu::L4>() };
+        while va != va_end {
+            // FIXME deadlock...
+            let pa = mmu::Phys::<mmu::A12>::new(virt_to_phys(alloc_one()?).0).unwrap();
+            unsafe {
+                root.set_4k(&IdentityMapper, &mut PageAllocator, va, pa, attr);
+            }
+            va = va.step_next(1);
+        }
+        Ok(())
+    }
 }
 
 impl mmu::PhysToVirt for IdentityMapper {
@@ -165,6 +180,20 @@ pub fn reserve_region(size: NonZero<usize>) -> Result<Virt, ReserveRegionError> 
     critical_section::with(|cs| VIRT.lock(cs).reserve_region(size))
 }
 
+/// # Safety
+///
+/// The address range must not be actively used.
+pub unsafe fn map_region(region: Range<Virt>, phys_base: Phys, attr: PageAttr) -> Result<(), OutOfMemory> {
+    critical_section::with(|cs| unsafe { VIRT.lock(cs).map_range(region, phys_base, attr) })
+}
+
+/// # Safety
+///
+/// The address range must not be actively used.
+pub unsafe fn map_region_zero(region: Range<Virt>, attr: PageAttr) -> Result<(), OutOfMemory> {
+    critical_section::with(|cs| unsafe { VIRT.lock(cs).map_range_zero(region, attr) })
+}
+
 #[inline]
 pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
     let token = init_page(entry, token);
@@ -202,7 +231,7 @@ fn init_virt(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kerne
 pub fn phys_to_virt(p: Phys) -> Virt {
     NonNull::new(p.0 as _).unwrap()
 }
-fn virt_to_phys(v: Virt) -> Phys {
+pub fn virt_to_phys(v: Virt) -> Phys {
     lemmings_qemubios::Phys(v.as_ptr() as _)
 }
 
