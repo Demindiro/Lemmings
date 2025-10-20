@@ -1,14 +1,19 @@
 #![no_std]
 #![no_main]
+#![feature(slice_as_chunks)] // stabilized in 1.88, but Guix is on 1.85 as of writing
+
+#[macro_use]
+extern crate lemmings_qemubios;
 
 mod archive;
 mod critical_section;
+mod elf;
 mod page;
 mod thread;
 mod time;
 mod sync;
 
-use lemmings_qemubios::{sys, log, dbg};
+use lemmings_qemubios::sys;
 
 mod private {
     /// This token MUST ONLY be constructed in [`_start`]!
@@ -36,13 +41,10 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 }
 
 fn main() {
-    unsafe {
-        for k in 0..200 {
-        for i in 0..200 {
-            *(0xc000_0000 as *mut u32).add(k*1024).add(i) = 0xffffffff - (i + (k << 8)) as u32;
-        }
-        }
-    }
+    let init = archive::root().get("init").expect("no init");
+    let init = init.as_file().expect("init is not a file");
+    let init = elf::load(init.data()).expect("failed to parse init");
+    unsafe { core::mem::transmute::<_, extern "sysv64" fn() -> !>(init)() }
 }
 
 #[inline]
