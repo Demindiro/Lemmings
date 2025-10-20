@@ -525,6 +525,7 @@ impl RawEntry {
     const GLOBAL: u64 = 1 << 8;
     #[allow(dead_code)]
     const AVAILABLE: u64 = 7 << 9;
+    const EXECUTE_DISABLE: u64 = 1 << 63;
 
     #[allow(dead_code)]
     const PAT_4K: u64 = 1 << 7;
@@ -572,16 +573,21 @@ impl RawEntry {
 
     pub fn set_attr_4k(&mut self, attr: PageAttr) {
         self.0 &= !Self::READ_WRITE;
-        if attr.contains(PageAttr::W) {
-            self.0 |= Self::READ_WRITE;
-        }
+        self.set_attr(attr);
     }
 
     pub fn set_attr_2m(&mut self, attr: PageAttr) {
         self.0 &= !Self::READ_WRITE;
         self.0 |= Self::PAGE_SIZE;
+        self.set_attr(attr);
+    }
+
+    fn set_attr(&mut self, attr: PageAttr) {
         if attr.contains(PageAttr::W) {
             self.0 |= Self::READ_WRITE;
+        }
+        if !attr.contains(PageAttr::X) {
+            self.0 |= Self::EXECUTE_DISABLE;
         }
     }
 }
