@@ -1,5 +1,20 @@
 use crate::{KernelEntryToken, page};
 
+pub mod door {
+    door! {
+        [0x5238e0fc_4d60503d_7b357037_d5319ae5 "boot archive"]
+        0 root
+    }
+
+    unsafe extern "sysv64" fn root() {
+        todo!()
+    }
+
+    unsafe extern "sysv64" fn entry() {
+        todo!();
+    }
+}
+
 static mut BASE: &'static [u8] = &[];
 
 const MAGIC: &[u8; 16] = b"Lemmings archive";

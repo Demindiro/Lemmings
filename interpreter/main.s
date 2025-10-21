@@ -94,8 +94,16 @@ f 1 door_list
 f 2 door_register
 .purgem f
 
-.equ API.FRAMEBUFFER.h, 0xd8112085698f85f2
-.equ API.FRAMEBUFFER.l, 0xdceefb6d4758a59f
+.macro find_door name:req, api_h:req, api_l:req
+ .macro find_door_\name
+	movabs rdi, \api_l
+	movabs rsi, \api_h
+	xor edx, edx
+	xor ecx, ecx
+	syscall_door_list
+ .endm
+.endm
+find_door framebuffer, 0xd8112085698f85f2, 0xdceefb6d4758a59f
 
 .section .text
 # rdi: pointer to syscall routine
@@ -104,11 +112,8 @@ f 2 door_register
 routine _start
 	string rdi, rsi, "Greetings from INTERPRETER"
 	syscall_log
-	movabs rdi, API.FRAMEBUFFER.l
-	movabs rsi, API.FRAMEBUFFER.h
-	xor edx, edx
-	xor ecx, ecx
-	syscall_door_list
+
+	find_door_framebuffer
 	ifeqz rax, 4f
 	lea rdi, [rip + disconnect_framebuffer]
 	call [rax]

@@ -45,6 +45,7 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 }
 
 fn main() {
+    archive::door::register();
     framebuffer::door::register();
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
