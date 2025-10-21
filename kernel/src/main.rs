@@ -5,6 +5,9 @@
 #[macro_use]
 extern crate lemmings_qemubios;
 
+#[macro_use]
+mod door;
+
 mod archive;
 mod critical_section;
 mod elf;
