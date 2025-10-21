@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![deny(improper_ctypes_definitions)]
 #![feature(slice_as_chunks)] // stabilized in 1.88, but Guix is on 1.85 as of writing
 
 #[macro_use]
@@ -15,8 +16,7 @@ mod page;
 mod thread;
 mod time;
 mod sync;
-
-use lemmings_qemubios::sys;
+mod sys;
 
 mod private {
     /// This token MUST ONLY be constructed in [`_start`]!
@@ -40,7 +40,7 @@ pub use private::KernelEntryToken;
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
     log!("[KERNEL] PANIC: {info}");
-    sys::halt();
+    lemmings_qemubios::sys::halt();
 }
 
 fn main() {
@@ -66,6 +66,7 @@ fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     let token = unsafe { KernelEntryToken::new() };
     let token = page::init(entry, token);
     let token = archive::init(entry, token);
+    let token = sys::init(entry, token);
     let mut threads = thread::ThreadManager::new();
     threads.enter(thread::Priority::Regular, main, token);
 }
