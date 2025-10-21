@@ -229,7 +229,7 @@ mod page {
                 }
 
                 pub fn set_table(&mut self, table: $table) {
-                    self.0 = table.as_u64() | DIRTY | ACCESSED | PRESENT;
+                    self.0 = table.as_u64() | DIRTY | ACCESSED | READ_WRITE | PRESENT;
                 }
 
                 fn is_table(&self) -> bool {
