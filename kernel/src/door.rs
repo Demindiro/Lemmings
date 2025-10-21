@@ -73,12 +73,12 @@ impl Name {
 
 pub fn list(api: Option<ApiId>, cookie: Cookie) -> Option<(Cookie, Interface<'static>)> {
     unsafe {
-        for id in cookie.0 + 1..COUNT as u64 {
+        for id in cookie.0..COUNT as u64 {
             let i = id as usize;
             if api.is_some_and(|x| API_IDS[i] != Some(x)) {
                 continue;
             }
-            return Some((Cookie(id), Interface {
+            return Some((Cookie(id + 1), Interface {
                 api: API_IDS[i].unwrap(),
                 name: NAMES[i].as_str(),
                 table: TABLES[i].unwrap(),
