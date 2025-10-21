@@ -49,6 +49,16 @@ fn main() {
 
 #[inline]
 fn entry(entry: &lemmings_qemubios::Entry) -> ! {
+    unsafe {
+        const FSGSBASE: u64 = 1 << 16;
+        core::arch::asm! {
+            "mov {0}, cr4",
+            "or {0}, {cap}",
+            "mov cr4, {0}",
+            out(reg) _,
+            cap = const FSGSBASE,
+        }
+    }
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
     let token = page::init(entry, token);

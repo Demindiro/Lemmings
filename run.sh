@@ -5,6 +5,7 @@
 set -xe
 exec qemu-system-x86_64 \
 	-machine q35 \
+	-cpu qemu64-v1,fsgsbase \
 	-bios /tmp/qemubios.bin \
 	-fw_cfg opt/lemmings/kernel.elf,file="$RUST_TARGET"/release/kernel \
 	-fw_cfg opt/lemmings/data.bin,file=/tmp/data.bin \
