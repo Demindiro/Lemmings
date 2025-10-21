@@ -46,11 +46,11 @@
 .set GLOBALS_HEAD,   r12
 
 .section .bss
-sys: .quad 0
 rsp_start: .quad 0
 obj_heap_base: .quad 0
 dict_base: .quad 0
 dict_head: .quad 0
+fn_read: .quad 0
 
 
 .macro f name:req, cc:req
@@ -82,22 +82,39 @@ f gt a
 .endm
 
 .macro f id:req name:req
- .macro sys_\name
-	mov eax, \id
-	call [rip+sys]
+ .macro syscall_\name
+	call gs:[\id * 8]
+ .endm
+ .macro sysjmp_\name
+	jmp gs:[\id * 8]
  .endm
 .endm
-f 0 id
-f 1 readbyte  # eax: -1 if none, >=0 if byte
-f 2 write     # rsi: ptr, rcx: len
+f 0 log
+f 1 door_list
+f 2 door_register
 .purgem f
+
+.equ API.FRAMEBUFFER.h, 0xd8112085698f85f2
+.equ API.FRAMEBUFFER.l, 0xdceefb6d4758a59f
 
 .section .text
 # rdi: pointer to syscall routine
 #
 # This routine does not return
 routine _start
-	mov ebx, 0xc0000000
+	string rdi, rsi, "Greetings from INTERPRETER"
+	syscall_log
+	movabs rdi, API.FRAMEBUFFER.l
+	movabs rsi, API.FRAMEBUFFER.h
+	xor edx, edx
+	xor ecx, ecx
+	syscall_door_list
+	ifeqz rax, 4f
+	lea rdi, [rip + disconnect_framebuffer]
+	call [rax]
+
+	mov [rip+rsp_start], rsp
+	mov ebx, eax
 	mov ecx, 200
 2:	mov edx, 200
 	mov edi, ecx
@@ -111,9 +128,7 @@ routine _start
 	dec edx
 	jnz 3b
 	loop 2b
-	hlt
-	mov [rip+sys], rdi
-	mov [rip+rsp_start], rsp
+4:	hlt
 	jmp parse_input
 
 
@@ -134,22 +149,23 @@ routine parse_input
 routine word_not_found
 	push rsi
 	push rcx
-	string rsi, ecx, "word not found: "
-	call write
+	#string rsi, ecx, "word not found: "
+	#call write
 	pop rcx
 	pop rsi
-	call writeln
+	#call writeln
 	jmp exit
 
 
 routine write
-	mov eax, 2
-	jmp [rip+sys]
+	mov rdi, rsi
+	mov rsi, rcx
+	sysjmp_log
 
 routine writeln
-	call write
-	string rsi, ecx, "\n"
-	jmp write
+	syscall_log
+	string rdi, rsi, "\n"
+	sysjmp_log
 
 
 # Read a word and store it on the heap
@@ -163,7 +179,8 @@ routine read_word
 .Lread_word.loop:
 	ifeq rbx, rbp, .Lread_word.realloc
 .Lread_word.loop.postcheck:
-	sys_readbyte
+	hlt
+	#sys_readbyte
 	ifltz eax, .Lread_word.endword
 	mov [rbx], al
 	inc rbx
@@ -186,6 +203,10 @@ routine find_word
 routine alloc
 	2: hlt
 	jmp 2b
+
+
+routine disconnect_framebuffer
+	ud2
 
 
 .macro def name:req
