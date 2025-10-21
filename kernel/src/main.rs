@@ -12,6 +12,7 @@ mod door;
 mod archive;
 mod critical_section;
 mod elf;
+mod framebuffer;
 mod page;
 mod thread;
 mod time;
@@ -44,6 +45,7 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 }
 
 fn main() {
+    framebuffer::door::register();
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
     let init = elf::load(init.data()).expect("failed to parse init");
