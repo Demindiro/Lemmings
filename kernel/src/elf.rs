@@ -192,7 +192,6 @@ impl<'a> ElfMapper<'a> {
             _ => panic!("unsupported flags"),
         };
 
-        dbg!(va, va_mid, va_end, pa, pa_end  as *const (), ());
         unsafe { page::map_region(va..va_mid, pa, attr) };
         unsafe { page::map_region_zero(va_mid..va_end, attr) };
     }
