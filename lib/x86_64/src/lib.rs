@@ -39,6 +39,69 @@ pub fn current_stack_pointer() -> *mut u8 {
     dst
 }
 
+macro_rules! reg {
+    ([get] $($fn:ident $instr:literal)*) => {
+        $(
+        pub fn $fn() -> u64 {
+            let x;
+            unsafe { core::arch::asm!($instr, out(reg) x, options(nomem, nostack, pure, preserves_flags)) };
+            x
+        }
+        )*
+    };
+    ([set] $($fn:ident $instr:literal)*) => {
+        $(
+        /// # Safety
+        ///
+        /// TODO
+        pub unsafe fn $fn(value: u64) {
+            unsafe { core::arch::asm!($instr, in(reg) value, options(nostack, preserves_flags)) }
+        }
+        )*
+    };
+    ([update] $($fn:ident $get_fn:ident $set_fn:ident)*) => {
+        $(
+        /// # Safety
+        ///
+        /// TODO
+        pub unsafe fn $fn<F>(f: F)
+        where
+            F: FnOnce(u64) -> u64,
+        {
+            unsafe { $set_fn((f)($get_fn())) }
+        }
+        )*
+    };
+    ($([$reg:ident $get_instr:literal $set_instr:literal] $($cst:ident = $val:expr;)*)*) => {$(
+        pub mod $reg {
+            $(pub const $cst: u64 = $val;)*
+
+            pub fn get() -> u64 {
+                let x;
+                unsafe { core::arch::asm!($get_instr, out(reg) x, options(nomem, nostack, pure, preserves_flags)) };
+                x
+            }
+
+            /// # Safety
+            ///
+            /// TODO
+            pub unsafe fn set(value: u64) {
+                unsafe { core::arch::asm!($set_instr, in(reg) value, options(nostack, preserves_flags)) }
+            }
+
+            /// # Safety
+            ///
+            /// TODO
+            pub unsafe fn update<F>(f: F)
+            where
+                F: FnOnce(u64) -> u64,
+            {
+                unsafe { set(f(get())) }
+            }
+        }
+    )*}
+}
+
 /// # Safety
 ///
 /// TODO
@@ -63,4 +126,14 @@ pub fn gs() -> *mut u8 {
     let x;
     unsafe { asm!("rdgsbase {}", out(reg) x, options(nomem, nostack, pure, preserves_flags)) };
     x
+}
+
+reg! {
+    [cr0 "mov {}, cr0" "mov cr0, {}"]
+        WRITE_PROTECT = 1 << 16;
+    [cr2 "mov {}, cr2" "mov cr2, {}"]
+    [cr3 "mov {}, cr3" "mov cr3, {}"]
+    [cr4 "mov {}, cr4" "mov cr4, {}"]
+        FSGSBASE = 1 << 16;
+    [cr8 "mov {}, cr8" "mov cr8, {}"]
 }

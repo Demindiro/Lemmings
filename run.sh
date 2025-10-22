@@ -15,7 +15,6 @@ exec qemu-system-x86_64 \
 	-global isa-debugcon.iobase=0x402 \
 	-no-reboot \
 	-s \
-	--trace 'fw_cfg*' \
 	-d int \
 	"$@"
 
@@ -25,3 +24,4 @@ exec qemu-system-x86_64 \
 	--trace '*pci*' \
 	--trace '*vbe*' \
 	--trace '*vga*' \
+	--trace 'fw_cfg*' \
