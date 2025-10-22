@@ -45,12 +45,19 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
     lemmings_qemubios::sys::halt();
 }
 
-fn main() {
+// do not inline so the stupid compiler frees up stack space before entering init.
+#[inline(never)]
+fn main_init() -> elf::Entry {
     archive::door::register();
     framebuffer::door::register();
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
     let init = elf::load(init.data()).expect("failed to parse init");
+    init
+}
+
+fn main() {
+    let init = main_init();
     unsafe { core::mem::transmute::<_, extern "sysv64" fn()>(init)() }
 }
 
