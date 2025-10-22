@@ -53,7 +53,7 @@ dict_head: .quad 0
 fn_read: .quad 0
 
 
-.macro f name:req, cc:req
+.macro g name:req cc:req
  .macro if\name x:req, y:req, target:req
 	cmp \x, \y
 	j\cc \target
@@ -63,10 +63,17 @@ fn_read: .quad 0
 	j\cc \target
  .endm
 .endm
-f eq e
-f lt b
-f gt a
+.macro f name:req cc:req rev_name:req rev_cc:req
+	g \name \cc
+	g \rev_name \rev_cc
+.endm
+	f eq e ne ne
+	f lt l ge ge
+	f gt g le le
+	f ltu b geu ae
+	f gtu a leu be
 .purgem f
+.purgem g
 
 .macro routine name:req
 \name:
