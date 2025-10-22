@@ -13,8 +13,9 @@ macro_rules! systable {
 
 systable! {
     0 log
-    1 door_list
-    2 door_register
+    1 panic
+    2 door_list
+    3 door_register
 }
 
 struct SysFn(*const ());
@@ -38,6 +39,11 @@ unsafe extern "sysv64" fn log(msg: Slice<u8>) {
     let msg = unsafe { msg.as_str() };
     lemmings_qemubios::sys::print(msg);
     lemmings_qemubios::sys::print("\n");
+}
+
+unsafe extern "sysv64" fn panic(msg: Slice<u8>) -> ! {
+    let msg = unsafe { msg.as_str() };
+    todo!("handle thread panic (message: {msg:?})");
 }
 
 // XXX: u128 ought to be FFI-safe
