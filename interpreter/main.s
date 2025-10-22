@@ -226,3 +226,15 @@ def exit
 	mov rsp, [rip+rsp_start]
 	xor eax, eax
 enddef
+
+
+.macro f name:req size:req
+ .section .\name, "a", @nobits
+	\name: .zero \size
+	\name\().end:
+.endm
+	f num_stack (1 << 12)
+	f obj_stack (1 << 12)
+	f obj_heap  (1 << 16)
+	f word_dict (1 << 12)
+.purgem f

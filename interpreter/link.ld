@@ -7,6 +7,9 @@ PHDRS {
 	text PT_LOAD FILEHDR PHDRS;
 	data PT_LOAD;
 	dynamic PT_DYNAMIC;
+	num_stack PT_LOAD FLAGS(6);
+	obj_stack PT_LOAD FLAGS(6);
+	obj_heap PT_LOAD FLAGS(6);
 }
 
 SECTIONS {
@@ -17,5 +20,14 @@ SECTIONS {
 	. = ALIGN(0x1000);
 	.data    : { *(.data .data.*)     } :data =0
 	.bss     : { *(.bss .bss.*)       } :data =0
-	.dynamic : { *(.dynamic)          } :data :dynamic
+	.dynamic : { *(.dynamic .rela.*)  } :data :dynamic
+	. = ALIGN(0x1000);
+	. += 0x1000;
+	.num_stack : { *(.num_stack) } :num_stack =0
+	. = ALIGN(0x1000);
+	. += 0x1000;
+	.obj_stack : { *(.obj_stack) } :obj_stack =0
+	. = ALIGN(0x1000);
+	. += 0x1000;
+	.obj_heap : { *(.obj_heap) } :obj_heap =0
 }
