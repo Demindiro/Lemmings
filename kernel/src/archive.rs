@@ -40,30 +40,47 @@ struct DirRef {
 
 impl Dir {
     pub fn get(&self, name: &str) -> Option<Item> {
-        let l = self.len();
-        let regions_end = self.offset() + 4 + (4*2*l);
-        let mut strings = self.strings();
-        (0..l).find_map(|i| {
-            let (item_name, len_ty);
-            (len_ty, strings) = strings.split_first().expect("truncated");
-            let len = 1 + usize::from(len_ty & 0x7f);
-            let is_dir = len_ty & 0x80 != 0;
-            (item_name, strings) = strings.split_at(len);
-            (item_name == name.as_bytes()).then_some((i, is_dir))
-        }).map(|(i, is_dir)| {
-            let DirRef { offset, len } = self.refs()
-                .skip(i)
-                .next()
-                .expect("#refs == #strings");
-            match is_dir {
-                true => Item::Dir(Dir { offset }),
-                false => Item::File(File { offset, len }),
-            }
+        self.iter().find(|&(n, _)| n == name).map(|(_, x)| x)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&'static str, Item)> + '_ {
+        let mut cookie = 0;
+        core::iter::from_fn(move || {
+            let x;
+            (cookie, x) = self.iter_next(cookie)?;
+            Some(x)
         })
     }
 
+    fn iter_next(&self, cookie: u64) -> Option<(u64, (&'static str, Item))> {
+        let [i, name_i] = split_u64(cookie);
+        if i >= self.len32() {
+            return None;
+        }
+        let strings = &self.strings()[u32_to_usize(name_i)..];
+        let (len_ty, strings) = strings.split_first().expect("truncated");
+        let namelen = 1 + (len_ty & 0x7f);
+        let is_dir = len_ty & 0x80 != 0;
+        let (name, strings) = strings.split_at(usize::from(namelen));
+        let name = core::str::from_utf8(name).expect("name is not UTF-8");
+        let DirRef { offset, len } = self.refs()
+            .skip(u32_to_usize(i))
+            .next()
+            .expect("#refs == #strings");
+        let item = match is_dir {
+            true => Item::Dir(Dir { offset }),
+            false => Item::File(File { offset, len }),
+        };
+        let (ni, name_ni) = (i + 1, name_i + 1 + u32::from(namelen));
+        Some((merge_u64([ni, name_ni]), (name, item)))
+    }
+
     pub fn len(&self) -> usize {
-        u32_to_usize(u32(self.offset()))
+        u32_to_usize(self.len32())
+    }
+
+    pub fn len32(&self) -> u32 {
+        u32(self.offset())
     }
 
     fn refs(&self) -> impl Iterator<Item = DirRef> {
@@ -156,4 +173,14 @@ fn u32(offset: usize) -> u32 {
 #[inline(always)]
 fn u32_to_usize(n: u32) -> usize {
     n.try_into().expect("u32 smaller than or equal to usize")
+}
+
+#[inline(always)]
+fn split_u64(x: u64) -> [u32; 2] {
+    [x, x >> 32].map(|x| x as u32)
+}
+
+#[inline(always)]
+fn merge_u64([x, y]: [u32; 2]) -> u64 {
+    u64::from(y) << 32 | u64::from(x)
 }
