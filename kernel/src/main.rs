@@ -57,14 +57,9 @@ fn main() {
 #[inline]
 fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     unsafe {
-        const FSGSBASE: u64 = 1 << 16;
-        core::arch::asm! {
-            "mov {0}, cr4",
-            "or {0}, {cap}",
-            "mov cr4, {0}",
-            out(reg) _,
-            cap = const FSGSBASE,
-        }
+        use lemmings_x86_64::{cr0, cr4};
+        cr0::update(|x| x | cr0::WRITE_PROTECT);
+        cr4::update(|x| x | cr4::FSGSBASE);
     }
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
