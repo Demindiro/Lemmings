@@ -52,6 +52,22 @@ dict_base: .quad 0
 dict_head: .quad 0
 fn_read: .quad 0
 
+.macro defpanic label:req, reason:req
+ .pushsection .rodata.panic
+	.byte .L\@.end - .L\@
+	.L\@: .ascii "\reason"
+	.L\@.end:
+ .popsection
+ .pushsection .text.panic
+\label:
+	call _panic
+ .popsection
+.endm
+
+.macro panic reason:req
+	defpanic .L\@, "\reason"
+	jmp .L\@
+.endm
 
 .macro g name:req cc:req
  .macro if\name x:req, y:req, target:req
@@ -112,6 +128,36 @@ f 3 door_register
  .endm
 .endm
 find_door framebuffer, 0xd8112085698f85f2, 0xdceefb6d4758a59f
+
+
+.section .rodata.panic
+_panic_reasons:
+
+
+.section .text.panic
+routine _panic
+	# determine panic ID
+	pop rax
+	lea rdx, [rip + _panic_start + 5]
+	sub rax, rdx
+	# divide by 5: x * 1/5 = x * 204.8/1024
+	imul eax, 205
+	shr eax, 10
+	# find message
+	lea rdi, [rip + _panic_reasons]
+	movzx esi, byte ptr [rdi]
+	inc rdi
+	jmp 3f
+2:	add rdi, rsi
+	movzx esi, byte ptr [rdi]
+	inc rdi
+	dec eax
+3:	ifnez eax, 2b
+	syscall_panic
+	ud2
+_panic_start:
+
+
 
 .section .text
 # rdi: pointer to syscall routine
