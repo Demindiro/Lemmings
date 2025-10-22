@@ -79,17 +79,71 @@ fn_read: .quad 0
 	j\cc \target
  .endm
 .endm
+# \@ doesn't work properly in nested macros :(
+# https://lists.gnu.org/archive/html/bug-binutils/2024-11/msg00160.html
+.macro h name:req rev_name:req
+ .macro assert\name x:req, y:req, reason:req
+	defpanic .L_\@, "\reason"
+	if\rev_name \x, \y, .L\@
+ .endm
+ .macro assert\name\()z x:req, reason:req
+	defpanic .L\@, "\reason"
+	if\rev_name\()z \x, .L\@
+ .endm
+.endm
 .macro f name:req cc:req rev_name:req rev_cc:req
 	g \name \cc
 	g \rev_name \rev_cc
+	#h \name \rev_name
+	#h \rev_name \name
 .endm
 	f eq e ne ne
 	f lt l ge ge
 	f gt g le le
 	f ltu b geu ae
 	f gtu a leu be
+
+ # sad!
+ .macro _assertcc ifcc:req, x:req, y:req, reason:req
+	defpanic .L\@, "\reason"
+	\ifcc \x, \y, .L\@
+ .endm
+ .macro _assertccz ifccz:req, x:req, reason:req
+	defpanic .L\@, "\reason"
+	\ifccz \x, .L\@
+ .endm
+ .macro assertge x:req, y:req, reason:req
+	_assertcc iflt, \x, \y, "\reason"
+ .endm
+ .macro assertne x:req, y:req, reason:req
+	_assertcc ifeq, \x, \y, "\reason"
+ .endm
+ .macro asserteq x:req, y:req, reason:req
+	_assertcc ifne, \x, \y, "\reason"
+ .endm
+ .macro assertgez x:req, reason:req
+	_assertccz ifltz, \x, "\reason"
+ .endm
+ .macro assertnez x:req, reason:req
+	_assertccz ifeqz, \x, "\reason"
+ .endm
+ .macro asserteqz x:req, reason:req
+	_assertccz ifnez, \x, "\reason"
+ .endm
+
 .purgem f
+.purgem h
 .purgem g
+
+.macro f name:req revcond:req
+ .macro panic_\name x:req, y:req, target:req
+ .endm
+ .macro panic_\name\()z x:req, target:req
+	if\name\()z \x, \target
+ .endm
+.endm
+f ne eq
+.purgem f
 
 .macro routine name:req
 \name:
