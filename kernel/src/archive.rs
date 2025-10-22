@@ -1,17 +1,99 @@
 use crate::{KernelEntryToken, page};
 
 pub mod door {
+    use crate::ffi::{Slice, Tuple2};
+    use core::{num::NonZero, mem::MaybeUninit, ptr::NonNull};
+
     door! {
         [0x5238e0fc_4d60503d_7b357037_d5319ae5 "boot archive"]
         0 root
+        1 dir_iter
+        2 dir_find
+        3 file_read
     }
 
-    unsafe extern "sysv64" fn root() {
-        todo!()
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    struct Cookie(u64);
+
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    struct Dir(u64);
+
+    #[derive(Clone, Copy)]
+    #[repr(transparent)]
+    struct File(u64);
+
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    union Item {
+        dir: Dir,
+        file: File,
     }
 
-    unsafe extern "sysv64" fn entry() {
-        todo!();
+    #[repr(isize)]
+    enum FindState {
+        NotFound = -1,
+        IsFile = 0,
+        IsDir = 1,
+    }
+
+    type FindResult = Tuple2<FindState, MaybeUninit<Item>>;
+
+    fn to_dir(dir: super::Dir) -> Dir {
+        Dir(super::merge_u64([dir.offset, 0]))
+    }
+    fn from_dir(dir: Dir) -> super::Dir {
+        let [offset, _] = super::split_u64(dir.0);
+        super::Dir { offset }
+    }
+    fn to_file(file: super::File) -> File {
+        File(super::merge_u64([file.offset, file.len]))
+    }
+    fn from_file(file: File) -> super::File {
+        let [offset, len] = super::split_u64(file.0);
+        super::File { offset, len }
+    }
+
+    unsafe extern "sysv64" fn root() -> Dir {
+        to_dir(super::root())
+    }
+
+    unsafe extern "sysv64" fn dir_iter(dir: Dir, cookie: &mut Cookie, mut name_out: Slice<u8>) -> FindResult {
+        let Some((c, (name, item))) = from_dir(dir).iter_next(cookie.0) else {
+            return Tuple2(FindState::NotFound, MaybeUninit::uninit());
+        };
+        *cookie = Cookie(c);
+        unsafe { name_out.copy_from_slice(name.as_bytes()) }
+        let (state, item) = match item {
+            super::Item::Dir(dir) => (FindState::IsDir, Item { dir: to_dir(dir) }),
+            super::Item::File(file) => (FindState::IsFile, Item { file: to_file(file) }),
+        };
+        Tuple2(state, MaybeUninit::new(item))
+    }
+
+    unsafe extern "sysv64" fn dir_find(dir: Dir, name: Slice<u8>) -> FindResult {
+        let name = unsafe { name.as_str() };
+        let (state, item) = match from_dir(dir).get(name) {
+            None => (FindState::NotFound, None),
+            Some(super::Item::Dir(dir)) => (FindState::IsDir, Some(Item { dir: to_dir(dir) })),
+            Some(super::Item::File(file)) => (FindState::IsFile, Some(Item { file: to_file(file) })),
+        };
+        Tuple2(state, item.map_or_else(MaybeUninit::uninit, MaybeUninit::new))
+    }
+
+    unsafe extern "sysv64" fn file_read(file: File, offset: u64, out: Slice<u8>) -> Tuple2<u64, NonNull<u8>> {
+        let file = from_file(file);
+        let data = file.data().get(offset.try_into().expect("u64 == usize")..).unwrap_or(&[]);
+        if data.is_empty() {
+            return Tuple2(0, out.into());
+        }
+        unsafe {
+            let n = out.len().min(data.len());
+            out.subslice(0..n).copy_from_slice(&data[..n]);
+        }
+        let len = data.len().try_into().expect("u64 == usize");
+        Tuple2(len, out.into())
     }
 }
 
