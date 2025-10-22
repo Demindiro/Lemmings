@@ -51,7 +51,7 @@ fn main() {
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
     let init = elf::load(init.data()).expect("failed to parse init");
-    unsafe { core::mem::transmute::<_, extern "sysv64" fn() -> !>(init)() }
+    unsafe { core::mem::transmute::<_, extern "sysv64" fn()>(init)() }
 }
 
 #[inline]
