@@ -238,12 +238,22 @@ routine _panic
 _panic_start:
 
 
+.macro _start_enter
+	push rbp
+	push rbx
+	mov [rip + rsp_start], rsp
+.endm
+.macro _start_exit
+	mov rsp, [rip + rsp_start]
+	pop rbx
+	pop rbp
+.endm
+
 
 .section .text
 # rdi: pointer to syscall routine
-#
-# This routine does not return
 routine _start
+	_start_enter
 	string rdi, rsi, "Greetings from INTERPRETER"
 	syscall_log
 
