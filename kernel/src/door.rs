@@ -5,7 +5,11 @@ macro_rules! door {
     ([$id:literal $name:literal] $($num:literal $fn:ident)*) => {
         const API: $crate::door::ApiId = $crate::door::ApiId::new($id).expect("non-zero");
         static TABLE: [$crate::door::Routine; 1 + door!(+ $($num)*)] = [
-            $($crate::door::Routine(core::ptr::NonNull::new($fn as *mut ()).expect("function is non-null")),)*
+            $({
+                // TODO verify sysv64 signature
+                let ptr = core::ptr::NonNull::new($fn as *mut ());
+                $crate::door::Routine(ptr.expect("function is non-null"))
+            },)*
         ];
         const _: () = assert!($name.len() >= 1);
         const _: () = assert!($name.len() <= 64);
