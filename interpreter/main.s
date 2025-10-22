@@ -56,7 +56,14 @@ rsp_start: .quad 0
 obj_heap_base: .quad 0
 dict_base: .quad 0
 dict_head: .quad 0
-fn_read: .quad 0
+
+.section .bss.read
+fn_read_word: .quad 0
+
+.section .bss.read_archive
+read_archive.door: .quad 0
+read_archive.file: .quad 0
+read_archive.offset: .quad 0
 
 .macro defpanic label:req, reason:req
  .pushsection .rodata.panic
@@ -283,75 +290,107 @@ routine _start
 
 routine parse_input
 .Lparse_input.loop:
-	call read_word
-	mov ecx, [rsi]
+	call [rip + fn_read_word]
 	ifeqz ecx, .Lparse_input.end
+	movzx eax, byte ptr [rsi]
+	ifeq al, '"', .Lparse_input.string
+	movzx eax, byte ptr [rsi]
+	ifeq al, '\'', .Lparse_input.char
 	call find_word
-	ifeqz rax, word_not_found
+	assertnez rax, "Word not found :("
+	call rax
 	jmp .Lparse_input.loop
 .Lparse_input.end:
 	ret
+.Lparse_input.string:
+	sub ecx, 2
+	inc rsi
+	call str_reserve
+	obj_push rdi
+	rep movsb
+	jmp .Lparse_input.loop
+.Lparse_input.char:
+	panic "TODO char"
 
 
-# rsi: word
-# ecx: word length
-routine word_not_found
-	push rsi
-	push rcx
-	#string rsi, ecx, "word not found: "
-	#call write
-	pop rcx
-	pop rsi
-	#call writeln
-	jmp exit
-
-
-routine write
-	mov rdi, rsi
-	mov rsi, rcx
-	sysjmp_log
-
-routine writeln
-	syscall_log
-	string rdi, rsi, "\n"
-	sysjmp_log
-
-
-# Read a word and store it on the heap
+# Allocates on the string heap
 #
-# rsi: pointer to object
-routine read_word
-.equ .Lread_word.BUFLEN, 64
-	mov ecx, .Lread_word.BUFLEN
-	call alloc
-	lea rbp, [rsi + .Lread_word.BUFLEN]
-.Lread_word.loop:
-	ifeq rbx, rbp, .Lread_word.realloc
-.Lread_word.loop.postcheck:
-	hlt
-	#sys_readbyte
-	ifltz eax, .Lread_word.endword
-	mov [rbx], al
-	inc rbx
-	jmp .Lread_word.loop
-.Lread_word.realloc:
-	int3
-	ud2
-	jmp .Lread_word.loop.postcheck
-.Lread_word.endword:
-	sub rbp, .Lread_word.BUFLEN
-	mov rsi, rbx
+# rsi: word string
+# ecx: word length
+routine read_archive.read_word
+	mov ecx, MAX_WORD_LEN + 1
+	call str_reserve
+	mov rdx, rdi
+	mov rax, [rip + read_archive.door]
+	mov rdi, [rip + read_archive.file]
+	mov rsi, [rip + read_archive.offset]
+	mov ecx, MAX_WORD_LEN + 1
+	call [rax + door.archive.file_read]
+	mov rdi, rdx
+	mov rsi, rdx
+	lea rbp, [rdx + rax]
+	ifeq rdi, rbp, .Lread_archive.read_word.eof
+.Lread_archive.read_word.loop:
+2:	movzx eax, byte ptr [rdi]
+	ifeq al, ' ', .Lread_archive.read_word.end
+	lea ecx, [eax - '\t']  # [0x9;0xd] => \t \n \v \f \r
+	ifleu cl, ('\r' - '\t'), .Lread_archive.read_word.end
+	ifeq al, '"', .Lread_archive.read_word.string
+	ifeq al, ''', .Lread_archive.read_word.string
+	ifeq al, '`', .Lread_archive.read_word.string
+	inc rdi
+	ifne rdi, rbp, 2b
+.Lread_archive.read_word.end:
+	# TODO check if at 128 byte limit
+	mov ecx, edi
+	sub ecx, esi
+	lea edx, [ecx + 1]
+	add [rip + read_archive.offset], rdx
+	mov [rsi - 8], ecx
+	ret
+.Lread_archive.read_word.string:
+	assertne rdi, rbp, "TODO unterminated string"
+	inc rdi
+2:	movzx edx, byte ptr [rdi]
+	inc rdi
+	ifne al, dl, 2b
+	ifeq rdi, rbp, .Lread_archive.read_word.end
+	jmp .Lread_archive.read_word.loop
+.Lread_archive.read_word.eof:
+	panic "TODO read word eof"
+
+# rsi: string
+# ecx: string length
+#
+# rax: routine
+routine find_word
+	lea rdi, [rip + word_dict]
+2:	mov rax, [rdi]
+	add rdi, 8
+	ifeqz rax, .Lfind_word.found
+	movzx edx, byte ptr [rdi]
+	inc rdi
+	ifne ecx, edx, 3f
+	push rdi
+	push rsi
+	rep cmpsb
+	pop rsi
+	pop rdi
+	je .Lfind_word.found
+3:	add rdi, rdx
+	jmp 2b
+.Lfind_word.found:
 	ret
 
-
-routine find_word
-	2: hlt
-	jmp 2b
-
-
-routine alloc
-	2: hlt
-	jmp 2b
+# ecx: byte count
+#
+# rdi: ptr
+routine str_reserve
+	mov rdi, OBJ_HEAP_HEAD
+	mov [rdi], rcx
+	add rdi, 8
+	lea OBJ_HEAP_HEAD, [rdi + rcx]
+	ret
 
 
 routine disconnect_framebuffer
