@@ -189,6 +189,20 @@ f 3 door_register
 .endm
 find_door framebuffer, 0xd8112085698f85f2, 0xdceefb6d4758a59f
 
+.macro f prefix:req PREFIX:req
+ .macro \prefix\()_push x:req
+	sub \PREFIX\()_STACK_HEAD, 8
+	mov qword ptr [\PREFIX\()_STACK_HEAD], \x
+ .endm
+ .macro \prefix\()_pop x:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
+	add \PREFIX\()_STACK_HEAD, 8
+ .endm
+.endm
+	f num NUM
+	f obj OBJ
+.purgem f
+
 
 .section .rodata.panic
 _panic_reasons:
