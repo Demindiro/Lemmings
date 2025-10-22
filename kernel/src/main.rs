@@ -105,3 +105,18 @@ unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
     }
     dst
 }
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memcmp(mut x: *const u8, mut y: *const u8, n: usize) -> i32 {
+    // rep cmpsb is slow, so do a manual loop
+    unsafe {
+        for i in 0..n {
+            if x.read() != y.read() {
+                return i32::from(x.read()) - i32::from(y.read())
+            }
+            x = x.byte_add(1);
+            y = y.byte_add(1);
+        }
+    }
+    0
+}
