@@ -39,6 +39,13 @@
 .intel_syntax noprefix
 .globl _start
 
+# set to 127, which is a sensible line length limit
+# while also corresponding to exactly 2 cache lines
+# minus one byte for word separators (whitespace).
+#
+# if extra long strings are desired: use concatenation.
+.equ MAX_WORD_LEN, 127
+
 
 .set NUM_STACK_HEAD, r15
 .set OBJ_STACK_HEAD, r14
