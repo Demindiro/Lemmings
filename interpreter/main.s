@@ -194,7 +194,6 @@ f 3 door_register
 	syscall_door_list
  .endm
 .endm
-find_door framebuffer, 0xd8112085698f85f2, 0xdceefb6d4758a59f
 find_door archive    , 0x5238e0fc4d60503d, 0x7b357037d5319ae5
 
 .equ door.archive.root, 8 * 0
@@ -261,31 +260,38 @@ _panic_start:
 # rdi: pointer to syscall routine
 routine _start
 	_start_enter
-	string rdi, rsi, "Greetings from INTERPRETER"
-	syscall_log
 
-	find_door_framebuffer
-	ifeqz rax, 4f
-	lea rdi, [rip + disconnect_framebuffer]
-	call [rax]
+	lea NUM_STACK_HEAD, [rip + num_stack.end]
+	lea OBJ_STACK_HEAD, [rip + obj_stack.end]
+	lea OBJ_HEAP_HEAD, [rip + obj_heap]
 
-	mov [rip+rsp_start], rsp
-	mov ebx, eax
-	mov ecx, 200
-2:	mov edx, 200
-	mov edi, ecx
-	shl edi, 12
-	add rdi, rbx
-3:	mov eax, -1
-	sub al, dl
-	sub ah, cl
-	mov [rdi], eax
-	add rdi, 4
-	dec edx
-	jnz 3b
-	loop 2b
-4:	hlt
-	jmp parse_input
+	find_door_archive
+	assertnez rax, "Failed to find door archive"
+	mov [rip + read_archive.door], rax
+	mov rbx, rax
+	call [rbx + door.archive.root]
+	mov rdi, rax
+	string rsi, edx, "interpreter.init"
+	call [rbx + door.archive.dir_find]
+	assertgez rax, "Failed to find interpreter.init"
+	mov [rip + read_archive.file], rdx
+	lea rax, [rip + read_archive.read_word]
+	mov [rip + fn_read_word], rax
+
+.L_start.init_dict:
+	lea rsi, [rip + builtins_dict]
+	lea rdi, [rip + word_dict]
+	lea rbx, [rip + _builtins]
+2:	movzx edx, word ptr [rsi]
+	ifeq dx, -1, parse_input
+	add rsi, 2
+	lea rax, [rbx + rdx]
+	mov [rdi], rax
+	add rdi, 8
+	movzx ecx, byte ptr [rsi]
+	inc ecx
+	rep movsb
+	jmp 2b
 
 
 routine parse_input
@@ -392,9 +398,6 @@ routine str_reserve
 	lea OBJ_HEAP_HEAD, [rdi + rcx]
 	ret
 
-
-routine disconnect_framebuffer
-	ud2
 
 .section .rodata.builtins_dict
 builtins_dict:
