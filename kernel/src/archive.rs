@@ -78,7 +78,7 @@ impl Dir {
             })
     }
 
-    fn strings(&self) -> &[u8] {
+    fn strings(&self) -> &'static [u8] {
         &base()[self.refs_end()..]
     }
 
