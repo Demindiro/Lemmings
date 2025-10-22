@@ -12,6 +12,7 @@ mod door;
 mod archive;
 mod critical_section;
 mod elf;
+mod ffi;
 mod framebuffer;
 mod page;
 mod thread;

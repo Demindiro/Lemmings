@@ -1,4 +1,4 @@
-use crate::{KernelEntryToken, door::{self, ApiId, Cookie, Table}};
+use crate::{KernelEntryToken, door::{self, ApiId, Cookie, Table}, ffi::{Slice, Tuple2}};
 use core::{mem::{self, MaybeUninit}, ptr::NonNull, num::NonZero};
 
 macro_rules! systable {
@@ -25,38 +25,7 @@ struct InterfaceInfo {
     name: Slice<u8>,
 }
 
-#[repr(C)]
-struct Slice<T> {
-    base: NonNull<T>,
-    len: usize,
-}
-
-#[repr(C)]
-struct Tuple2<A, B>(A, B);
-
 unsafe impl Sync for SysFn {}
-
-impl<T> Slice<T> {
-    unsafe fn as_slice(&self) -> &[T] {
-        unsafe { core::slice::from_raw_parts(self.base.as_ptr(), self.len) }
-    }
-}
-
-impl Slice<u8> {
-    unsafe fn as_str(&self) -> &str {
-        unsafe { core::str::from_utf8_unchecked(self.as_slice()) }
-    }
-}
-
-impl From<&'static str> for Slice<u8> {
-    fn from(s: &'static str) -> Self {
-        let s = NonNull::from(s.as_bytes());
-        Self {
-            base: s.cast(),
-            len: s.len(),
-        }
-    }
-}
 
 extern "sysv64" fn invalid(eax: u32) {
     panic!("invalid system call! eax={eax}");
