@@ -90,8 +90,9 @@ f gt a
  .endm
 .endm
 f 0 log
-f 1 door_list
-f 2 door_register
+f 1 panic
+f 2 door_list
+f 3 door_register
 .purgem f
 
 .macro find_door name:req, api_h:req, api_l:req
