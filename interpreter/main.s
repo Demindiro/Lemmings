@@ -347,18 +347,43 @@ routine alloc
 routine disconnect_framebuffer
 	ud2
 
+.section .rodata.builtins_dict
+builtins_dict:
 
 .macro def name:req
-routine \name
+ .pushsection .rodata.builtins_dict
+	.word \name - _builtins
+	.byte .L\@.end - .L\@
+	.L\@: .ascii "\name"
+	.L\@.end:
+ .popsection
+	routine \name
 .endm
 .macro enddef
 	ret
 .endm
 
+.section .text.builtins
+
+_builtins:
+
 def exit
-	mov rsp, [rip+rsp_start]
+	_start_exit
 	xor eax, eax
 enddef
+
+def syslog
+	obj_pop rdi
+	mov esi, [rdi - 8]
+	syscall_log
+enddef
+
+.purgem def
+.purgem enddef
+
+.section .rodata.builtins_dict
+	.word -1
+builtins_dict.end:
 
 
 .macro f name:req size:req
