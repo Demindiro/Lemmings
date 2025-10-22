@@ -188,6 +188,12 @@ f 3 door_register
  .endm
 .endm
 find_door framebuffer, 0xd8112085698f85f2, 0xdceefb6d4758a59f
+find_door archive    , 0x5238e0fc4d60503d, 0x7b357037d5319ae5
+
+.equ door.archive.root, 8 * 0
+.equ door.archive.dir_iter, 8 * 1
+.equ door.archive.dir_find, 8 * 2
+.equ door.archive.file_read, 8 * 3
 
 .macro f prefix:req PREFIX:req
  .macro \prefix\()_push x:req
