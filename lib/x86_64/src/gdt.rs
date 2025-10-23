@@ -1,5 +1,5 @@
 use {
-    super::tss::Tss,
+    crate::{mmu::{self, Phys}, tss::Tss},
     core::{arch::asm, marker::PhantomData, mem, pin::Pin},
 };
 
@@ -162,11 +162,11 @@ impl<'a> Gdt<'a> {
 }
 
 impl GdtPointer {
-    pub fn new(gdt: Pin<&Gdt>) -> Self {
+    pub fn new(gdt: Phys<mmu::A6>) -> Self {
         Self {
             _padding: [0; 3],
             limit: Gdt::SIZE - 1,
-            address: gdt.get_ref() as *const _ as u64,
+            address: gdt.into(),
         }
     }
 
