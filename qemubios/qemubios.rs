@@ -1005,12 +1005,12 @@ fn fail(reason: &str) -> ! {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn memset(mut dst: *mut u8, c: i32, n: usize) -> *mut u8 {
+unsafe extern "C" fn memset(dst: *mut u8, c: i32, n: usize) -> *mut u8 {
     unsafe {
         core::arch::asm! {
             "rep stosb",
             in("al") c as u8,
-            inout("rdi") dst => dst,
+            inout("rdi") dst => _,
             inout("rcx") n => _,
         }
     }
