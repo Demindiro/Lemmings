@@ -496,6 +496,35 @@ impl Root<L4> {
         Ok(())
     }
 
+    /// Translate a single virtual address to a physical address.
+    pub fn translate<M, A>(&self, mapper: &M, addr: Virt<A>) -> Option<Phys<A>>
+    where
+        A12: sealed::AlignedTo<A>,
+        M: PhysToPtr,
+    {
+        let ([l0, l1, l2, l3], _) = Self::indices(addr);
+        let f = (|| unsafe {
+            let entry = &self.table(mapper)[l3];
+            assert!(!entry.is_page());
+            let entry = &entry.table(mapper)?[l2];
+            if entry.is_page() {
+                return Some((entry.phys(), 30));
+            }
+            let entry = &entry.table(mapper)?[l1];
+            if entry.is_page() {
+                return Some((entry.phys(), 21));
+            }
+            let entry = &entry.table(mapper)?[l0];
+            if entry.is_page() {
+                return Some((entry.phys(), 12));
+            }
+            None
+        });
+        let (base, maskbits) = f()?;
+        let mask = (1 << maskbits) - 1;
+        Some(Addr((base.0 & !mask) | (addr.0 & mask), PhantomData))
+    }
+
     fn indices<A>(virt: Virt<A>) -> ([usize; 4], usize) {
         let (virt, offt) = (virt.0 / PAGE_SIZE, virt.0 % PAGE_SIZE);
         let (virt, l0) = (virt / TABLE_SIZE, virt % TABLE_SIZE);
