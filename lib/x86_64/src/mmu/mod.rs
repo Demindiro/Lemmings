@@ -71,12 +71,6 @@ pub struct L3;
 pub struct L4;
 pub struct L5;
 
-pub struct A0;
-pub struct A12;
-pub struct A14;
-pub struct A21;
-pub struct A30;
-
 pub struct PhysSpace;
 pub struct VirtSpace;
 
@@ -250,26 +244,26 @@ impl sealed::Page for L2 {
 impl sealed::Root for L4 {}
 impl sealed::Root for L5 {}
 
-impl sealed::Align for A0 {
-    const BITS: u8 = 0;
+macro_rules! align {
+    ($n:literal $a:ident, $($ns:literal $as:ident,)*) => {
+        pub struct $a;
+        impl sealed::Align for $a {
+            const BITS: u8 = $n;
+        }
+        impl sealed::AlignedTo<$a> for $a {}
+        $(impl sealed::AlignedTo<$a> for $as {})*
+        $(const _: () = { use sealed::Align; assert!((<$a>::BITS) < (<$as>::BITS)) };)*
+        align!($($ns $as,)*);
+    };
+    () => {};
 }
-impl sealed::Align for A12 {
-    const BITS: u8 = 12;
+align! {
+    0 A0,
+    12 A12,
+    14 A14,
+    21 A21,
+    30 A30,
 }
-impl sealed::Align for A14 {
-    const BITS: u8 = 14;
-}
-impl sealed::Align for A21 {
-    const BITS: u8 = 21;
-}
-impl sealed::Align for A30 {
-    const BITS: u8 = 30;
-}
-
-impl sealed::AlignedTo<A12> for A12 {}
-impl sealed::AlignedTo<A12> for A14 {}
-impl sealed::AlignedTo<A12> for A21 {}
-impl sealed::AlignedTo<A12> for A30 {}
 
 impl<Level> Entry<Level>
 where
