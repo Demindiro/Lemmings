@@ -178,6 +178,12 @@ impl<AA, AB, S> PartialEq<Addr<AA, S>> for Addr<AB, S> {
 
 impl<A, S> Eq for Addr<A, S> {}
 
+impl<A, S> From<Addr<A, S>> for u64 {
+    fn from(addr: Addr<A, S>) -> u64 {
+        addr.0
+    }
+}
+
 impl sealed::Level for L0 {
     fn is_page(_: &Entry<L0>) -> bool {
         true
