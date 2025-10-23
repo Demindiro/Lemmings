@@ -259,6 +259,12 @@ macro_rules! align {
 }
 align! {
     0 A0,
+    1 A1,
+    2 A2,
+    3 A3,
+    4 A4,
+    5 A5,
+    6 A6,
     12 A12,
     14 A14,
     21 A21,
