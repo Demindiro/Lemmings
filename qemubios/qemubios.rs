@@ -568,7 +568,8 @@ mod elf {
     /// # Returns
     ///
     /// Entry point
-    pub fn load(file: &[u8]) -> (NonNull<u8>, boot::VirtRegion) {
+    pub fn load(file: sys::File) -> (NonNull<u8>, boot::VirtRegion) {
+        let file = load_file(file);
         let hdr = parse_header(file);
         let base = parse_program_headers(file, &hdr);
         let region = boot::VirtRegion {
@@ -1108,9 +1109,8 @@ fn load_file<'a>(file: sys::File) -> &'a [u8] {
 extern "sysv64" fn boot(kernel: sys::File, data: sys::File) -> NonNull<u8> {
     alloc::init();
     let pcie_base = pcie::configure();
-    let kernel = load_file(kernel);
-    let data = load_file(data);
     let (entry, kernel) = elf::load(kernel);
+    let data = load_file(data);
     boot::collect_info(kernel, data);
     entry
 }
