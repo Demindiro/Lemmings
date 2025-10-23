@@ -1017,6 +1017,19 @@ unsafe extern "C" fn memset(dst: *mut u8, c: i32, n: usize) -> *mut u8 {
     dst
 }
 
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    unsafe {
+        core::arch::asm! {
+            "rep movsb",
+            inout("rdi") dst => _,
+            inout("rsi") src => _,
+            inout("rcx") n => _,
+        }
+    }
+    dst
+}
+
 /// # Note
 ///
 /// Start of file is guaranteed to be aligned to page boundary.
