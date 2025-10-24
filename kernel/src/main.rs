@@ -9,6 +9,7 @@ extern crate lemmings_qemubios;
 #[macro_use]
 mod door;
 
+mod arch;
 mod archive;
 mod critical_section;
 mod elf;
@@ -70,6 +71,7 @@ fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     }
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
+    let token = arch::init(entry, token);
     let token = page::init(entry, token);
     let token = archive::init(entry, token);
     let token = sys::init(entry, token);

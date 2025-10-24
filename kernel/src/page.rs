@@ -44,7 +44,7 @@ struct VirtManager {
     head: Virt,
 }
 
-struct IdentityMapper;
+pub struct IdentityMapper;
 struct PageAllocator;
 
 impl PageManager {
