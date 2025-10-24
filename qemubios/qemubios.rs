@@ -158,6 +158,20 @@ mod alloc {
         None
     }
 
+    pub unsafe fn free(base: NonNull<u8>, byte_count: usize) {
+        let base = base.as_ptr() as u64;
+        #[allow(static_mut_refs)]
+        for r in unsafe { &mut REGIONS } {
+            if r.start.0 == r.end.0 {
+                let mask = PAGE_SIZE - 1;
+                r.start = boot::Phys(base);
+                r.end = boot::Phys(base + ((byte_count + mask) & !mask) as u64);
+                return;
+            }
+        }
+        fail("alloc::free: can't free pages: no free memory regions");
+    }
+
     pub fn memory_map() -> boot::MemoryMap {
         let start = unsafe { &raw const REGIONS };
         let end = unsafe { start.add(1) };
@@ -572,6 +586,9 @@ mod elf {
         let file = load_file(file);
         let hdr = parse_header(file);
         let base = parse_program_headers(file, &hdr);
+        unsafe {
+            alloc::free(NonNull::from(file).cast(), file.len());
+        }
         let region = boot::VirtRegion {
             start: boot::Virt(NonNull::new(0xffff8000_00000000u64 as _).unwrap()),
             end: boot::Virt(NonNull::new((0xffff8000_00000000u64 + (1<<21)) as _).unwrap()),
