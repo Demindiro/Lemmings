@@ -174,13 +174,13 @@ impl GdtPointer {
         unsafe {
             asm! {
                 "lgdt [{ptr}]",
-                "mov ax, {kernel_ss}",
-                "mov ds, ax",
-                "mov es, ax",
-                "mov ss, ax",
+                "mov {scratch:x}, {kernel_ss}",
+                "mov ds, {scratch:x}",
+                "mov es, {scratch:x}",
+                "mov ss, {scratch:x}",
                 // Set TSS
-                "mov ax, {tss}",
-                "ltr ax",
+                "mov {scratch:x}, {tss}",
+                "ltr {scratch:x}",
                 // Do far return
                 "push {kernel_cs}",
                 "lea {scratch}, [rip + 2f]",
