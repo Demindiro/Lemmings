@@ -236,6 +236,22 @@ find_door archive    , 0x5238e0fc4d60503d, 0x7b357037d5319ae5
 .purgem f
 
 
+.macro set_bit reg:req, x:req
+ .if \x < 8
+	or \reg, 1 << (\x)
+ .else
+	bts \reg, \x
+ .endif
+.endm
+.macro clear_bit reg:req, x:req
+ .if \x < 8
+	and \reg, ~(1 << (\x))
+ .else
+	btc \reg, \x
+ .endif
+.endm
+
+
 .section .rodata.panic
 _panic_reasons:
 
