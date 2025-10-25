@@ -730,6 +730,13 @@ dict_begin _
 		string rsi, ecx, "Sys"
 		call dict_parse
 	enddef
+
+	defimm_as "//" comment
+	2:	call read_byte
+		ifltz eax, 3f
+		ifne al, '\n', 2b
+	3:
+	enddef
 dict_end _
 
 
