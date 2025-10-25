@@ -647,8 +647,37 @@ builtins_dict.\namespace\().end:
 .endm
 
 
-
-
+# rdi: dict base
+# rsi: name
+# ecx: namelen
+#
+# eax: offset to routine (or -1)
+# edx: 1 if immediate, 0 if not
+routine dict_find
+	xor ebx, ebx
+.Ldict_find.loop:
+	add rdi, rbx
+	movzx eax, word ptr [rdi]
+	ifeq ax, -1, .Ldict_find.notfound
+	movzx edx, byte ptr [rdi + 2]
+	mov ebx, edx
+	and ebx, 0x7f
+	add rdi, 2 + 1
+	ifne bl, cl .Ldict_find.loop
+	push rdi
+	push rsi
+	rep cmpsb
+	pop rsi
+	pop rdi
+	mov ecx, ebx
+	jne .Ldict_find.loop
+.Ldict_find.found:
+	and edx, 1<<7
+	ret
+.Ldict_find.notfound:
+	push -1
+	pop rax
+	ret
 
 
 dict_begin _
