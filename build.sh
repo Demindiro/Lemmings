@@ -14,6 +14,6 @@ mkdir -p "$tmp"
 (cd kernel && ./build.sh)
 (cd interpreter && ./build.sh)
 
-echo '"Hello interpreter!" syslog exit' >> "$databin/interpreter.init"
+echo '"Hello interpreter!" Sys log Sys exit' > "$databin/interpreter.init"
 
 ./create_archive.py "$out/data.bin" "$databin"

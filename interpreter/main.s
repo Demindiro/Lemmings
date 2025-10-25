@@ -724,17 +724,27 @@ routine dict_parse
 
 
 dict_begin _
+	defimm Sys
+		lea rdi, [rip + builtins_dict.Sys]
+		lea rdx, [rip + builtins.Sys]
+		string rsi, ecx, "Sys"
+		call dict_parse
+	enddef
+dict_end _
+
+
+dict_begin Sys
 	def exit
 		_start_exit
 		xor eax, eax
 	enddef
 
-	def syslog
+	def log
 		obj_pop rdi
 		mov esi, [rdi - 8]
 		syscall_log
 	enddef
-dict_end _
+dict_end Sys
 
 
 .macro f name:req size:req
