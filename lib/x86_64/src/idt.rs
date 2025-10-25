@@ -1,3 +1,4 @@
+use crate::mmu::{A4, Phys};
 use core::{arch::asm, marker::PhantomData, mem};
 
 pub mod nr {
@@ -41,7 +42,7 @@ pub mod nr {
     }
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct IdtEntry {
     offset_low: u16,
     selector: u16,
@@ -99,14 +100,15 @@ impl IdtEntry {
 }
 
 #[repr(transparent)]
-pub struct Idt<const MAX: usize = 256> {
+pub struct Idt<const MAX: usize> {
     descriptors: [IdtEntry; MAX],
 }
 
 impl<const MAX: usize> Idt<MAX> {
-    const _SANE_LIMIT: () = assert!(MAX < 256, "can't support more than 256 entries");
-
     pub const fn new() -> Self {
+        const {
+            assert!(MAX <= 256, "can't support more than 256 entries");
+        }
         Self {
             descriptors: [const { IdtEntry::new(0, 0, Ist::N0) }; MAX],
         }
@@ -119,27 +121,22 @@ impl<const MAX: usize> Idt<MAX> {
 
 #[repr(C)]
 #[repr(packed)]
-pub struct IdtPointer<'a, const MAX: usize> {
+pub struct IdtPointer {
     limit: u16,
     offset: u64,
-    _marker: PhantomData<&'a Idt<MAX>>,
 }
 
-impl<'a, const MAX: usize> IdtPointer<'a, MAX> {
-    pub const fn new() -> Self {
-        const {
-            let limit = mem::size_of::<Idt<MAX>>() - 1;
-            assert!(limit <= u16::MAX as usize);
-            Self {
-                limit: limit as u16,
-                offset: 0,
-                _marker: PhantomData,
-            }
+impl IdtPointer {
+    pub fn new<const MAX: usize>(phys: Phys<A4>) -> Self {
+        let limit = const {
+            let x = mem::size_of::<Idt<MAX>>() - 1;
+            assert!(x <= u16::MAX as usize);
+            x as u16
+        };
+        Self {
+            limit,
+            offset: phys.into(),
         }
-    }
-
-    pub fn set_idt(&mut self, idt: &'a Idt<MAX>) {
-        self.offset = idt as *const _ as u64;
     }
 
     pub unsafe fn activate(&self) {
