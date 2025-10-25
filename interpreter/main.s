@@ -553,6 +553,42 @@ routine find_word
 	and edx, 1<<7
 	ret
 
+# rax: routine
+# rsi: name
+# ecx: name len (< 127!!)
+# edx: 1<<7 if immediate, 0 if not
+routine set_word
+	push rdx
+	lea rdi, [rip + word_dict]
+	ifeq (qword ptr [rdi]), 0, .Lset_word.new # technically not possible, but be defensive
+2:	add rdi, 8
+	movzx edx, byte ptr [rdi]
+	and edx, 0x7f
+	inc rdi
+	ifne ecx, edx, 3f
+	push rdi
+	push rsi
+	rep cmpsb
+	pop rsi
+	pop rdi
+	mov ecx, edx
+	je .Lset_word.update
+3:	add rdi, rdx
+	ifne (qword ptr [rdi]), 0, 2b
+.Lset_word.new:
+	pop rdx
+	mov [rdi], rax
+	add rdi, 8
+	or edx, ecx
+	mov [rdi], dl
+	inc rdi
+	rep movsb
+	ret
+.Lset_word.update:
+	pop rdx
+	mov [rdi - 8], rax
+	ret
+
 # ecx: byte count
 #
 # rdi: ptr
