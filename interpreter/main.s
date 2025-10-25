@@ -342,6 +342,8 @@ routine parse_input
 	movzx eax, byte ptr [rsi]
 	ifeq al, '"', .Lparse_input.string
 	ifeq al, '\'', .Lparse_input.char
+	sub eax, '0'
+	ifltu al, 10, .Lparse_input.number
 	push rsi
 	call find_word
 	pop rsi
@@ -359,6 +361,10 @@ routine parse_input
 	jmp .Lparse_input.loop
 .Lparse_input.char:
 	call parse_char
+	num_push rax
+	jmp .Lparse_input.loop
+.Lparse_input.number:
+	call parse_number
 	num_push rax
 	jmp .Lparse_input.loop
 .Lparse_input.word_not_found:
@@ -395,6 +401,49 @@ routine parse_char
 	asserteq cl, 3, "TODO: non-ascii characters"
 	movzx eax, byte ptr [rsi + 1]
 	assertle al, 127, "Invalid UTF-8"
+	ret
+
+# rsi: string
+# ecx: len
+#
+# rax: number
+routine parse_number
+	mov rdi, rsi
+	add rsi, rcx
+	movzx eax, byte ptr [rdi]
+	inc rdi
+	ifeq rdi, rsi, .Lparse_number.singledigit
+	mov edx, eax
+	xor eax, eax
+	mov ecx, 10
+	ifne dl, '0', .Lparse_number.loop
+	movzx edx, byte ptr [rdi]
+	mov ecx, 16
+	ifeq dl, 'x', .Lparse_number.skipprefix
+	mov ecx, 2
+	ifeq dl, 'b', .Lparse_number.skipprefix
+	mov ecx, 8
+	ifeq dl, 'o', .Lparse_number.skipprefix
+	jmp .Lparse_number.loop
+.Lparse_number.singledigit:
+	sub eax, '0'
+	assertltu al, 10, "decimal out of range"
+	ret
+.Lparse_number.skipprefix:
+	inc rdi
+	assertne rdi, rsi, "expected digits after prefix"
+.Lparse_number.loop:
+	movzx edx, byte ptr [rdi]
+	lea ebx, [edx - '0']
+	ifltu bl, 10, 2f
+	or edx, 040
+	lea ebx, [edx - 'a' + 10]
+2:	assertlt bl, dl, "digit out of range for base"
+	mul ecx
+	add rax, rbx
+	inc rdi
+	ifne rdi, rsi .Lparse_number.loop
+.Lparse_number.end:
 	ret
 
 # Allocates on the string heap
