@@ -342,8 +342,10 @@ routine parse_input
 	movzx eax, byte ptr [rsi]
 	ifeq al, '"', .Lparse_input.string
 	ifeq al, '\'', .Lparse_input.char
+	push rsi
 	call find_word
-	assertnez rax, "Word not found :("
+	pop rsi
+	ifeqz rax, .Lparse_input.word_not_found
 	call rax
 	jmp .Lparse_input.loop
 .Lparse_input.end:
@@ -357,6 +359,30 @@ routine parse_input
 	jmp .Lparse_input.loop
 .Lparse_input.char:
 	panic "TODO char"
+.Lparse_input.word_not_found:
+	string rdi, edx, "undefined word: "
+
+
+# rdi: prefix ptr
+# edx: prefix len
+# rsi: postfix ptr
+# ecx: postfix len
+routine panic_prefix
+	sub rsp, 256
+	push rsi
+	push rcx
+	mov rsi, rdi
+	mov ecx, edx
+	lea rdi, [rsp + 16]
+	rep movsb
+	pop rcx
+	pop rsi
+	rep movsb
+	mov rsi, rdi
+	mov rdi, rsp
+	sub esi, edi
+	syscall_panic
+
 
 # Allocates on the string heap
 #
