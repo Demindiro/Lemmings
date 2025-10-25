@@ -50,6 +50,9 @@
 .set NUM_STACK_HEAD, r15
 .set OBJ_STACK_HEAD, r14
 .set OBJ_HEAP_HEAD,  r13
+.set FLAGS,          r12
+
+.equ FLAG.COMPILE_MODE, 1
 
 .section .bss
 rsp_start: .quad 0
