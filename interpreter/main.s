@@ -319,9 +319,9 @@ routine _start
 	mov [rip + fn_read_byte], rax
 
 .L_start.init_dict:
-	lea rsi, [rip + builtins_dict]
+	lea rsi, [rip + builtins_dict._]
 	lea rdi, [rip + word_dict]
-	lea rbx, [rip + _builtins]
+	lea rbx, [rip + builtins._]
 2:	movzx edx, word ptr [rsi]
 	ifeq dx, -1, parse_input
 	add rsi, 2
@@ -600,43 +600,69 @@ routine str_reserve
 	ret
 
 
-.section .rodata.builtins_dict
-builtins_dict:
+.macro dict_begin namespace:req
+ .section .rodata.builtins_dict.\namespace
+builtins_dict.\namespace:
 
-.macro def name:req
- .pushsection .rodata.builtins_dict
-	.word \name - _builtins
-	.byte .L\@.end - .L\@
-	.L\@: .ascii "\name"
-	.L\@.end:
- .popsection
-	routine \name
-.endm
-.macro enddef
+ .macro _def_as name:req, label:req, imm:req
+  .pushsection .rodata.builtins_dict.\namespace
+	.word \label - builtins.\namespace
+	.byte (1001f - 1000f) | (\imm << 7)
+	1000: .ascii "\name"
+	1001:
+  .popsection
+	routine \label
+ .endm
+ .macro def_as name:req, label:req
+	_def_as "\name", \label, 0
+ .endm
+ .macro defimm_as name:req, label:req
+	_def_as "\name", \label, 1
+ .endm
+ .macro def name:req
+	def_as \name \name
+ .endm
+ .macro defimm name:req
+	defimm_as \name \name
+ .endm
+ .macro enddef
 	ret
+ .endm
+
+ .section .text.builtins.\namespace
+builtins.\namespace:
 .endm
 
-.section .text.builtins
+.macro dict_end namespace:req
+ .purgem def
+ .purgem defimm
+ .purgem def_as
+ .purgem defimm_as
+ .purgem _def_as
+ .purgem enddef
 
-_builtins:
-
-def exit
-	_start_exit
-	xor eax, eax
-enddef
-
-def syslog
-	obj_pop rdi
-	mov esi, [rdi - 8]
-	syscall_log
-enddef
-
-.purgem def
-.purgem enddef
-
-.section .rodata.builtins_dict
+ .section .rodata.builtins_dict.\namespace
 	.word -1
-builtins_dict.end:
+builtins_dict.\namespace\().end:
+.endm
+
+
+
+
+
+
+dict_begin _
+	def exit
+		_start_exit
+		xor eax, eax
+	enddef
+
+	def syslog
+		obj_pop rdi
+		mov esi, [rdi - 8]
+		syscall_log
+	enddef
+dict_end _
 
 
 .macro f name:req size:req
