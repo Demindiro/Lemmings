@@ -758,6 +758,10 @@ dict_begin Sys
 		mov esi, [rdi - 8]
 		syscall_log
 	enddef
+
+	def halt
+		hlt
+	enddef
 dict_end Sys
 
 
