@@ -341,7 +341,6 @@ routine parse_input
 	ifeqz ecx, .Lparse_input.end
 	movzx eax, byte ptr [rsi]
 	ifeq al, '"', .Lparse_input.string
-	movzx eax, byte ptr [rsi]
 	ifeq al, '\'', .Lparse_input.char
 	call find_word
 	assertnez rax, "Word not found :("
