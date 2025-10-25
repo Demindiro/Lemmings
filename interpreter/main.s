@@ -60,6 +60,7 @@ code_head: .quad 0
 
 .section .bss.read
 fn_read_word: .quad 0
+fn_read_byte: .quad 0
 
 .section .bss.read_archive
 read_archive.door: .quad 0
@@ -280,6 +281,8 @@ routine _start
 	mov [rip + read_archive.file], rdx
 	lea rax, [rip + read_archive.read_word]
 	mov [rip + fn_read_word], rax
+	lea rax, [rip + read_archive.read_byte]
+	mov [rip + fn_read_byte], rax
 
 .L_start.init_dict:
 	lea rsi, [rip + builtins_dict]
@@ -367,6 +370,21 @@ routine read_archive.read_word
 	jmp .Lread_archive.read_word.loop
 .Lread_archive.read_word.eof:
 	panic "TODO read word eof"
+
+# eax: character (-1 if EOF)
+routine read_archive.read_byte
+	push -1
+	mov rax, [rip + read_archive.door]
+	mov rdi, [rip + read_archive.file]
+	mov rsi, [rip + read_archive.offset]
+	mov ecx, 1
+	mov rdx, rsp
+	call [rax + door.archive.file_read]
+	pop rax
+	ifeqz rdx, 2f
+	inc qword ptr [rip + read_archive.offset]
+	movzx eax, al
+2:	ret
 
 # rsi: string
 # ecx: string length
