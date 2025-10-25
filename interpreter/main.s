@@ -60,6 +60,8 @@ obj_heap_base: .quad 0
 dict_base: .quad 0
 dict_head: .quad 0
 code_head: .quad 0
+define_cur_routine: .quad 0
+define_cur_name: .quad 0
 
 .section .bss.read
 fn_read_word: .quad 0
@@ -870,6 +872,30 @@ dict_begin _
 		ifltz eax, 3f
 		ifne al, '\n', 2b
 	3:
+	enddef
+
+	defimm_as ":" define
+		bts FLAGS, FLAG.COMPILE_MODE
+		defpanic .Ldefine.nested_define, "(:) nested defines are forbidden"
+		jc .Ldefine.nested_define
+		mov rax, [rip + code_head]
+		mov [rip + define_cur_routine], rax
+		call read_word
+		mov [rip + define_cur_name], rsi
+	enddef
+
+	defimm_as ";" end_define
+		btc FLAGS, FLAG.COMPILE_MODE
+		defpanic .Lend_define.nodefine, "(;) not inside definition"
+		jnc .Lend_define.nodefine
+		ASM_BEGIN rdx
+		ASM_ret
+		ASM_END
+		mov rsi, [rip + define_cur_name]
+		mov rax, [rip + define_cur_routine]
+		mov ecx, [rsi - 8]
+		xor edx, edx
+		call set_word
 	enddef
 dict_end _
 
