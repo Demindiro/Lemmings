@@ -453,28 +453,42 @@ routine parse_input
 	ifeq al, '\'', .Lparse_input.char
 	sub eax, '0'
 	ifltu al, 10, .Lparse_input.number
+.Lparse_input.word:
 	push rsi
 	call find_word
 	pop rsi
 	ifeqz rax, .Lparse_input.word_not_found
-	call rax
+	ifnez edx, 2f
+	if_bit_clear FLAGS, FLAG.COMPILE_MODE, 2f
+	call asm_call_rel32
+	jmp .Lparse_input.loop
+2:	call rax
 	jmp .Lparse_input.loop
 .Lparse_input.end:
+	defpanic .Lparse_input.inside_definition, "unterminated definition"
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, .Lparse_input.inside_definition
 	ret
 .Lparse_input.string:
 	sub ecx, 2
 	inc rsi
 	call str_reserve
-	obj_push rdi
+	mov rax, rdi
 	rep movsb
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, 2f
+	obj_push rax
+	jmp .Lparse_input.loop
+2:	call asm_obj_push
 	jmp .Lparse_input.loop
 .Lparse_input.char:
 	call parse_char
-	num_push rax
-	jmp .Lparse_input.loop
+	jmp .Lparse_input.num_push
 .Lparse_input.number:
 	call parse_number
+.Lparse_input.num_push:
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, 2f
 	num_push rax
+	jmp .Lparse_input.loop
+2:	call asm_num_push
 	jmp .Lparse_input.loop
 .Lparse_input.word_not_found:
 	string rdi, edx, "undefined word: "
@@ -807,6 +821,11 @@ routine dict_parse
 	add rsp, 8 * 4
 	pop rbx
 	add rax, rbx
+	test FLAGS, 1 << FLAG.COMPILE_MODE
+	jz .Ldict_parse.interpret_mode
+	test edx, edx
+	jz asm_call_rel32
+.Ldict_parse.interpret_mode:
 	jmp rax
 .Ldict_parse.not_found:
 	pop rdx
