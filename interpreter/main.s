@@ -680,6 +680,49 @@ routine dict_find
 	ret
 
 
+# rdi: dict base
+# rdx: code base
+# rsi: prefix ptr
+# ecx: prefix len
+routine dict_parse
+	push rdx
+	push rsi
+	push rcx
+	push rdi
+	call read_word
+	pop rdi
+	push rsi
+	push rcx
+	call dict_find
+	ifeq eax, -1, .Ldict_parse.not_found
+.Ldict_parse.found:
+	add rsp, 8 * 4
+	pop rbx
+	add rax, rbx
+	jmp rax
+.Ldict_parse.not_found:
+	pop rdx
+	pop rdi
+	pop rcx
+	pop rsi
+	pop rbx
+	sub rsp, 256 - 8
+	push '('
+	push rdi
+	push rdx
+	lea rdi, [rsp + 16 + 1]
+	rep movsb
+	string rsi, ecx, ") word not found: "
+	rep movsb
+	pop rcx
+	pop rsi
+	rep movsb
+	mov rsi, rdi
+	mov rdi, rsp
+	sub esi, edi
+	syscall_panic
+
+
 dict_begin _
 	def exit
 		_start_exit
