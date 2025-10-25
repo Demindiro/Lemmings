@@ -337,7 +337,7 @@ routine _start
 
 routine parse_input
 .Lparse_input.loop:
-	call [rip + fn_read_word]
+	call read_word
 	ifeqz ecx, .Lparse_input.end
 	movzx eax, byte ptr [rsi]
 	ifeq al, '"', .Lparse_input.string
@@ -358,8 +358,24 @@ routine parse_input
 .Lparse_input.char:
 	panic "TODO char"
 
+# Allocates on the string heap
+#
+# Never returns an empty string.
+#
+# rsi: word string (0 if EOF)
+# ecx: word length
+routine read_word
+3:	call [rip + fn_read_word]
+	ifeqz rsi, 2f
+	ifeqz ecx, 3b
+2:	ret
+
+routine read_byte
+	jmp [rip + fn_read_byte]
 
 # Allocates on the string heap
+#
+# May return empty strings.
 #
 # rsi: word string
 # ecx: word length
@@ -372,10 +388,10 @@ routine read_archive.read_word
 	mov rsi, [rip + read_archive.offset]
 	mov ecx, MAX_WORD_LEN + 1
 	call [rax + door.archive.file_read]
+	ifeqz rax, .Lread_archive.eof
 	mov rdi, rdx
 	mov rsi, rdx
 	lea rbp, [rdx + rax]
-	ifeq rdi, rbp, .Lread_archive.read_word.eof
 .Lread_archive.read_word.loop:
 2:	movzx eax, byte ptr [rdi]
 	ifeq al, ' ', .Lread_archive.read_word.end
@@ -402,8 +418,9 @@ routine read_archive.read_word
 	ifne al, dl, 2b
 	ifeq rdi, rbp, .Lread_archive.read_word.end
 	jmp .Lread_archive.read_word.loop
-.Lread_archive.read_word.eof:
-	panic "TODO read word eof"
+.Lread_archive.eof:
+	xor esi, esi
+	ret
 
 # eax: character (-1 if EOF)
 routine read_archive.read_byte
