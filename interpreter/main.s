@@ -371,6 +371,18 @@ routine asm_call_rel32
 	ASM_END
 	ret
 
+# rax: number
+routine asm_num_push
+	ASM_BEGIN rdx
+	ifgtu rax, ((1 << 31) - 1), 2f
+	ASM_num_push_imm32 eax
+	ASM_END
+	ret
+2:	ASM_mov_rax_imm64 rax
+	ASM_num_push_rax
+	ASM_END
+	ret
+
 
 # rdi: pointer to syscall routine
 routine _start
