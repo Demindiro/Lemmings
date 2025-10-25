@@ -52,7 +52,7 @@
 .set OBJ_HEAP_HEAD,  r13
 .set FLAGS,          r12
 
-.equ FLAG.COMPILE_MODE, 1
+.equ FLAG.COMPILE_MODE, 0
 
 .section .bss
 rsp_start: .quad 0
