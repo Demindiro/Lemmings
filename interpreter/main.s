@@ -731,6 +731,13 @@ dict_begin _
 		call dict_parse
 	enddef
 
+	defimm X86
+		lea rdi, [rip + builtins_dict.X86]
+		lea rdx, [rip + builtins.X86]
+		string rsi, ecx, "X86"
+		call dict_parse
+	enddef
+
 	defimm_as "//" comment
 	2:	call read_byte
 		ifltz eax, 3f
@@ -752,6 +759,36 @@ dict_begin Sys
 		syscall_log
 	enddef
 dict_end Sys
+
+
+dict_begin X86
+	defimm Io
+		lea rdi, [rip + builtins_dict.X86.Io]
+		lea rdx, [rip + builtins.X86.Io]
+		string rsi, ecx, "X86 Io"
+		call dict_parse
+	enddef
+dict_end X86
+
+
+dict_begin X86.Io
+.macro f x:req a:req
+	def in\x
+		num_pop rdx
+		in \a, dx
+		num_push rax
+	enddef
+	def out\x
+		num_pop rdx
+		num_pop rax
+		out dx, \a
+	enddef
+.endm
+	f  8  al
+	f 16  ax
+	f 32 eax
+.purgem f
+dict_end X86.Io
 
 
 .macro f name:req size:req
