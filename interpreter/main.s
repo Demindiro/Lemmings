@@ -329,6 +329,7 @@ routine _start
 	mov [rdi], rax
 	add rdi, 8
 	movzx ecx, byte ptr [rsi]
+	and ecx, 0x7f
 	inc ecx
 	rep movsb
 	jmp 2b
@@ -423,24 +424,29 @@ routine read_archive.read_byte
 # rsi: string
 # ecx: string length
 #
-# rax: routine
+# rax: routine (0 if not found)
+# edx: 1<<7 if immediate, 0 if not
 routine find_word
 	lea rdi, [rip + word_dict]
 2:	mov rax, [rdi]
 	add rdi, 8
-	ifeqz rax, .Lfind_word.found
+	ifeqz rax, .Lfind_word.found # ... or not
 	movzx edx, byte ptr [rdi]
+	mov ebx, edx
+	and ebx, 0x7f
 	inc rdi
-	ifne ecx, edx, 3f
+	ifne ecx, ebx, 3f
 	push rdi
 	push rsi
 	rep cmpsb
 	pop rsi
 	pop rdi
+	mov ecx, ebx
 	je .Lfind_word.found
-3:	add rdi, rdx
+3:	add rdi, rbx
 	jmp 2b
 .Lfind_word.found:
+	and edx, 1<<7
 	ret
 
 # ecx: byte count
