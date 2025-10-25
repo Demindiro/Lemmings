@@ -293,6 +293,76 @@ _panic_start:
 
 
 .section .text
+
+.macro ASM_BEGIN ptr:req
+ .set .LASM_PTR, \ptr
+	mov .LASM_PTR, qword ptr [rip + code_head]
+.endm
+.macro ASM_END
+	mov qword ptr [rip + code_head], .LASM_PTR
+.endm
+
+.macro ASM_PUSH8 x:req
+	mov byte ptr [.LASM_PTR], \x
+	inc .LASM_PTR
+.endm
+.macro ASM_PUSH16 x:req
+	mov word ptr [.LASM_PTR], \x
+	add .LASM_PTR, 2
+.endm
+.macro ASM_PUSH24 x:req
+	mov dword ptr [.LASM_PTR], \x
+	add .LASM_PTR, 3
+.endm
+.macro ASM_PUSH32 x:req
+	mov dword ptr [.LASM_PTR], \x
+	add .LASM_PTR, 4
+.endm
+.macro ASM_PUSH64 x:req
+	mov qword ptr [.LASM_PTR], \x
+	add .LASM_PTR, 8
+.endm
+
+.macro ASM_ret
+	ASM_PUSH8 0xc3
+.endm
+.macro ASM_call_rel32 rel:req
+	ASM_PUSH8 0xe8
+	ASM_PUSH32 \rel
+.endm
+.macro ASM_mov_rax_imm64 x:req
+	ASM_PUSH16 0xb848
+	ASM_PUSH64 \x
+.endm
+.macro ASM_sub_r15_imm8_c x:req
+	ASM_PUSH32 0xef8349 | (\x << 24)
+.endm
+.macro ASM_store_r15_rax
+	ASM_PUSH24 0x078949
+.endm
+.macro ASM_store_r15_imm32 x:req
+	ASM_PUSH24 0x07c749
+	ASM_PUSH32 \x
+.endm
+.macro ASM_num_push_rax
+	ASM_sub_r15_imm8_c 8
+	ASM_store_r15_rax
+.endm
+.macro ASM_num_push_imm32 x:req
+	ASM_sub_r15_imm8_c 8
+	ASM_store_r15_imm32 \x
+.endm
+
+# rax: routine
+routine asm_call_rel32
+	ASM_BEGIN rdx
+	sub eax, 5
+	sub eax, edx
+	ASM_call_rel32 eax
+	ASM_END
+	ret
+
+
 # rdi: pointer to syscall routine
 routine _start
 	_start_enter
@@ -678,7 +748,6 @@ routine dict_find
 	push -1
 	pop rax
 	ret
-
 
 # rdi: dict base
 # rdx: code base
