@@ -250,6 +250,15 @@ find_door archive    , 0x5238e0fc4d60503d, 0x7b357037d5319ae5
 	btc \reg, \x
  .endif
 .endm
+.macro f name:req cc_bt:req
+ .macro if_bit_\name reg:req, x:req, label:req
+	bt \reg, \x
+	j\cc_bt \label
+ .endm
+.endm
+	f set   c
+	f clear nc
+.purgem f
 
 
 .section .rodata.panic
