@@ -358,7 +358,9 @@ routine parse_input
 	rep movsb
 	jmp .Lparse_input.loop
 .Lparse_input.char:
-	panic "TODO char"
+	call parse_char
+	num_push rax
+	jmp .Lparse_input.loop
 .Lparse_input.word_not_found:
 	string rdi, edx, "undefined word: "
 
@@ -383,6 +385,17 @@ routine panic_prefix
 	sub esi, edi
 	syscall_panic
 
+
+# rsi: string (must start with a "'" !)
+# ecx: len
+#
+# rax: char
+routine parse_char
+	asserteq (byte ptr [rsi + rcx - 1]), '\'', "char doesn't end with a '"
+	asserteq cl, 3, "TODO: non-ascii characters"
+	movzx eax, byte ptr [rsi + 1]
+	assertle al, 127, "Invalid UTF-8"
+	ret
 
 # Allocates on the string heap
 #
