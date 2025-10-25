@@ -130,17 +130,32 @@ read_archive.offset: .quad 0
 	defpanic .L\@, "\reason"
 	\ifccz \x, .L\@
  .endm
- .macro assertge x:req, y:req, reason:req
-	_assertcc iflt, \x, \y, "\reason"
- .endm
  .macro assertne x:req, y:req, reason:req
 	_assertcc ifeq, \x, \y, "\reason"
  .endm
  .macro asserteq x:req, y:req, reason:req
 	_assertcc ifne, \x, \y, "\reason"
  .endm
+ .macro assertgt x:req, y:req, reason:req
+	_assertcc ifle, \x, \y, "\reason"
+ .endm
+ .macro assertlt x:req, y:req, reason:req
+	_assertcc ifge, \x, \y, "\reason"
+ .endm
+ .macro assertge x:req, y:req, reason:req
+	_assertcc iflt, \x, \y, "\reason"
+ .endm
+ .macro assertle x:req, y:req, reason:req
+	_assertcc ifgt, \x, \y, "\reason"
+ .endm
+ .macro assertltu x:req, y:req, reason:req
+	_assertcc ifgeu, \x, \y, "\reason"
+ .endm
  .macro assertgez x:req, reason:req
 	_assertccz ifltz, \x, "\reason"
+ .endm
+ .macro assertlez x:req, reason:req
+	_assertccz ifgtz, \x, "\reason"
  .endm
  .macro assertnez x:req, reason:req
 	_assertccz ifeqz, \x, "\reason"
