@@ -346,8 +346,14 @@ _panic_start:
 .macro ASM_sub_r15_imm8_c x:req
 	ASM_PUSH32 0xef8349 | (\x << 24)
 .endm
+.macro ASM_sub_r14_imm8_c x:req
+	ASM_PUSH32 0xee8349 | (\x << 24)
+.endm
 .macro ASM_store_r15_rax
 	ASM_PUSH24 0x078949
+.endm
+.macro ASM_store_r14_rax
+	ASM_PUSH24 0x068949
 .endm
 .macro ASM_store_r15_imm32 x:req
 	ASM_PUSH24 0x07c749
@@ -360,6 +366,10 @@ _panic_start:
 .macro ASM_num_push_imm32 x:req
 	ASM_sub_r15_imm8_c 8
 	ASM_store_r15_imm32 \x
+.endm
+.macro ASM_obj_push_rax
+	ASM_sub_r14_imm8_c 8
+	ASM_store_r14_rax
 .endm
 
 # rax: routine
@@ -380,6 +390,14 @@ routine asm_num_push
 	ret
 2:	ASM_mov_rax_imm64 rax
 	ASM_num_push_rax
+	ASM_END
+	ret
+
+# rax: pointer
+routine asm_obj_push
+	ASM_BEGIN rdx
+	ASM_mov_rax_imm64 rax
+	ASM_obj_push_rax
 	ASM_END
 	ret
 
