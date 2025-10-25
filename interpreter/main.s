@@ -56,6 +56,7 @@ rsp_start: .quad 0
 obj_heap_base: .quad 0
 dict_base: .quad 0
 dict_head: .quad 0
+code_head: .quad 0
 
 .section .bss.read
 fn_read_word: .quad 0
@@ -264,6 +265,8 @@ routine _start
 	lea NUM_STACK_HEAD, [rip + num_stack.end]
 	lea OBJ_STACK_HEAD, [rip + obj_stack.end]
 	lea OBJ_HEAP_HEAD, [rip + obj_heap]
+	lea rax, [rip + code_heap]
+	mov [rip + code_head], rax
 
 	find_door_archive
 	assertnez rax, "Failed to find door archive"
@@ -447,4 +450,5 @@ builtins_dict.end:
 	f obj_stack (1 << 12)
 	f obj_heap  (1 << 16)
 	f word_dict (1 << 12)
+	f code_heap (1 << 16)
 .purgem f
