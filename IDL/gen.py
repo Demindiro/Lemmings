@@ -209,7 +209,7 @@ def parse_idl(text) -> Door:
             except ValueError:
                 start = int(num, 0)
                 until = start + 1
-            door.add_type(name, Ty(start, until))
+            return name, Ty(start, until)
         return f
 
     def parse_pointer(line):
@@ -220,7 +220,7 @@ def parse_idl(text) -> Door:
             'shared': SharedPointerType,
             'unique': UniquePointerType,
         }[access](ty)
-        door.add_type(name, ty)
+        return name, ty
 
     def parse_record(line):
         name, scope = strip_split(line, ' ')
@@ -231,19 +231,19 @@ def parse_idl(text) -> Door:
                 break
             member_name, member_ty = strip_split(l, '=')
             ty.add_member(member_name, member_ty)
-        door.add_type(name, ty)
+        return name, ty
 
     def parse_sum(line):
         name, variants = strip_split(line, '=')
         ty = SumType()
         for variant in strip_split(variants, '|'):
             ty.add_variant(variant)
-        door.add_type(name, ty)
+        return name, ty
 
     def parse_unit(line):
         name = line.strip()
         ty = UnitType(name)
-        door.add_type(name, ty)
+        return name, ty
 
     vtbl = {
         'door': parse_door,
@@ -261,7 +261,11 @@ def parse_idl(text) -> Door:
 
     for l in lines:
         keyword, l = l.split(' ', 1)
-        vtbl[keyword](l)
+        if keyword == 'door':
+            parse_door(l)
+        else:
+            name, ty = vtbl[keyword](l)
+            door.add_type(name, ty)
 
     door.validate()
     #door.resolve_types()
