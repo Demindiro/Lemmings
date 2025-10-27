@@ -391,6 +391,7 @@ def main(idl_path, out_path):
     with open(idl_path, 'r') as f:
         idl = f.read()
     idl = gen.parse_idl(idl)
+    print(idl.name, '->', hex(idl.api_id))
 
     fix_builtin_ident_collisions(idl)
     sysv64 = types_to_sysv64(idl)
