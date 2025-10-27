@@ -10,18 +10,6 @@ _ensure_minversion()
 del _ensure_minversion
 
 
-class Routine:
-    __slots__ = 'input', 'output'
-
-    def __init__(self, input: str, output: str):
-        assert type(input) is str
-        assert type(output) is str
-        self.input = input
-        self.output = output
-
-    def __repr__(self):
-        return f'{self.input} -> {self.output}'
-
 class Type:
     __slots__ = ()
 
@@ -102,6 +90,19 @@ class RecordType(Type):
     def __repr__(self):
         return f'{{ {", ".join(f"{k} = {v}" for k, v in self.members.items())} }}'
 
+class RoutineType(Type):
+    __slots__ = 'input', 'output'
+
+    def __init__(self, input: str, output: str):
+        assert type(input) is str
+        assert type(output) is str
+        super().__init__()
+        self.input = input
+        self.output = output
+
+    def __repr__(self):
+        return f'{self.input} -> {self.output}'
+
 class SumType(Type):
     __slots__ = 'variants'
 
@@ -154,9 +155,9 @@ class Door:
         for t in self.types.values():
             t.resolve_types(lambda x: self.types[x])
 
-    def add_routine(self, name: str, routine: Routine):
+    def add_routine(self, name: str, routine: RoutineType):
         assert type(name) is str
-        assert type(routine) is Routine
+        assert type(routine) is RoutineType
         assert name not in self.routines
         self.routines[name] = routine
 
@@ -192,7 +193,7 @@ def parse_idl(text) -> Door:
                 break
             name, l = l.split(' ', 1)
             inp, outp = strip_split(l, '->')
-            door.add_routine(name, Routine(inp, outp))
+            door.add_routine(name, RoutineType(inp, outp))
 
     def parse_integer(Ty):
         def f(line):
