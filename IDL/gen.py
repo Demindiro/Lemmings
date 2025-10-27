@@ -235,6 +235,11 @@ def parse_idl(text) -> Door:
             ty.add_member(member_name, member_ty)
         return name, ty
 
+    def parse_routine(line):
+        name, f = strip_split(line, '=')
+        arg, ret = strip_split(f, '->')
+        return name, RoutineType(arg, ret)
+
     def parse_sum(line):
         name, variants = strip_split(line, '=')
         ty = SumType()
@@ -251,6 +256,7 @@ def parse_idl(text) -> Door:
         'door': parse_door,
         'pointer': parse_pointer,
         'record': parse_record,
+        'routine': parse_routine,
         'sum': parse_sum,
         'unit': parse_unit,
         'uptr': parse_integer(UPtrType),

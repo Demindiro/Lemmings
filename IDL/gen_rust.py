@@ -75,6 +75,9 @@ def types_to_sysv64(idl):
             sysv.memory_size += m_sysv.memory_size
         return sysv
 
+    def from_routine(ty):
+        return Sysv64Type(1, 8, 8)
+
     def from_sum(ty):
         sysv = Sysv64Type(0, 0, 0)
         for v_ty in ty.variants:
@@ -93,6 +96,7 @@ def types_to_sysv64(idl):
         gen.SumType: from_sum,
         gen.UPtrType: from_integer(False, None),
         gen.SPtrType: from_integer(True, None),
+        gen.RoutineType: from_routine,
     }
     for x in ('Constant', 'Shared', 'Unique'):
         vtbl[gen.__dict__[f'{x}PointerType']] = from_pointer
@@ -300,6 +304,17 @@ def emit(outf, idl, sysv):
                 out(VARS[0] if i == 1 else f'({", ".join(VARS[:i])})')
                 del i
 
+    def emit_routine(name, ty, sysv_ty):
+        out(f'pub struct {name}(pub unsafe extern "sysv64" fn());')
+        with Impl(name):
+            with Fn('is_valid', 'x: usize', 'bool', dead_code = True):
+                out('x != 0')
+            with Fn('from_ffi', 'x: usize', 'Self'):
+                out('assert_ne!(x, 0, "Function pointer is null");')
+                out('Self(unsafe { core::mem::transmute(x) })')
+            with Fn('to_ffi', 'self', 'usize'):
+                out('self.0 as _')
+
     def emit_sum(name, ty, sysv_ty):
         if len(ty.variants) == 1:
             # FIXME no worky!
@@ -340,6 +355,7 @@ def emit(outf, idl, sysv):
         gen.UnitType: emit_unit,
         gen.UPtrType: emit_integer(False, None),
         gen.SPtrType: emit_integer(True, None),
+        gen.RoutineType: emit_routine,
     }
     for x in ('Constant', 'Shared', 'Unique'):
         vtbl[gen.__dict__[f'{x}PointerType']] = emit_pointer
