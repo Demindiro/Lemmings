@@ -184,17 +184,15 @@ def emit(outf, idl, sysv):
             outputs = f'$crate::{outputs}'
         return outputs and f' -> {outputs}'
 
-    for door in idl.doors.values():
-        out(f'#[repr(C)]')
-        out(f'pub struct {door.name.replace("_", "")} {{')
-        for name, routine in door.routines.items():
-            args = regn_to_usizes_args(sysv.get(routine.input))
-            ret = regn_to_usizes_ret(sysv.get(routine.output))
-            out(f'\tpub {name}: unsafe extern "sysv64" fn({args}){ret},')
-            del name, routine, args, ret
-        out('}')
-        out('')
-        del door
+    out(f'#[repr(C)]')
+    out(f'pub struct {idl.name.replace("_", "")} {{')
+    for name, routine in idl.routines.items():
+        args = regn_to_usizes_args(sysv.get(routine.input))
+        ret = regn_to_usizes_ret(sysv.get(routine.output))
+        out(f'\tpub {name}: unsafe extern "sysv64" fn({args}){ret},')
+        del name, routine, args, ret
+    out('}')
+    out('')
 
     def emit_integer(signed, bits):
         x = f'{"ui"[signed]}{bits or "size"}'
@@ -353,47 +351,46 @@ def emit(outf, idl, sysv):
         vtbl[type(ty)](name, ty, sysv[name])
         out('')
 
-    for door in idl.doors.values():
-        with Impl(door.name):
-            out(f'pub const ID: core::num::NonZero<u128> = core::num::NonZero::new({door.api_id:#x}).unwrap();')
-            out('')
-            for name, routine in door.routines.items():
-                with Fn(name, f'&self, x: {routine.input}', routine.output, public = True):
-                    n = sysv[routine.input].register_count
-                    y = f'({", ".join(VARS[:n])})' if n > 1 else VARS[0]
-                    out(f'let {y} = x.to_ffi();')
-                    out(f'let x = unsafe {{ (self.{name})({", ".join(VARS[:n])}).into() }};')
-                    out(f'{routine.output}::from_ffi(x)')
-                    del n, y
-            del door, name, routine
+    with Impl(idl.name):
+        out(f'pub const ID: core::num::NonZero<u128> = core::num::NonZero::new({idl.api_id:#x}).unwrap();')
+        out('')
+        for name, routine in idl.routines.items():
+            with Fn(name, f'&self, x: {routine.input}', routine.output, public = True):
+                n = sysv[routine.input].register_count
+                y = f'({", ".join(VARS[:n])})' if n > 1 else VARS[0]
+                out(f'let {y} = x.to_ffi();')
+                out(f'let x = unsafe {{ (self.{name})({", ".join(VARS[:n])}).into() }};')
+                out(f'{routine.output}::from_ffi(x)')
+                del n, y
+        del name, routine
 
     out('')
     out('#[macro_export]')
     with Scope('macro_rules! imp'):
-        for door in idl.doors.values():
-            with Scope('', suffix = ' =>'):
-                out(f'[{door.name}]')
-                for name, routine in door.routines.items():
-                    out(f'{name} = $impl_{name}:expr,')
-            with Scope('', suffix = ';'):
-                with Scope(f'$crate::{door.name}'):
-                    for name, routine in door.routines.items():
-                        sysv_in = sysv[routine.input]
-                        sysv_out = sysv[routine.output]
-                        args = regn_to_usizes_args(sysv_in)
-                        ret = regn_to_usizes_ret(sysv_out, macro = True)
-                        with Scope(f'{name}:', suffix = ','):
-                            with Scope(f'unsafe extern "sysv64" fn ffi({args}){ret}'):
-                                out(f'let x = {routine.input}::from_ffi({regn_to_usizes_vars(sysv_in)});')
-                                out(f'$impl_{name}(x).to_ffi().into()')
-                            out(f'ffi')
-            del door, name, routine
+        with Scope('', suffix = ' =>'):
+            out(f'[{idl.name}]')
+            for name, routine in idl.routines.items():
+                out(f'{name} = $impl_{name}:expr,')
+        with Scope('', suffix = ';'):
+            with Scope(f'$crate::{idl.name}'):
+                for name, routine in idl.routines.items():
+                    sysv_in = sysv[routine.input]
+                    sysv_out = sysv[routine.output]
+                    args = regn_to_usizes_args(sysv_in)
+                    ret = regn_to_usizes_ret(sysv_out, macro = True)
+                    with Scope(f'{name}:', suffix = ','):
+                        with Scope(f'unsafe extern "sysv64" fn ffi({args}){ret}'):
+                            out(f'let x = {routine.input}::from_ffi({regn_to_usizes_vars(sysv_in)});')
+                            out(f'$impl_{name}(x).to_ffi().into()')
+                        out(f'ffi')
+        del name, routine
 
 def main(idl_path, out_path):
     import gen
     from pathlib import Path
     with open(idl_path, 'r') as f:
-        idl = gen.parse_module(f)
+        idl = f.read()
+    idl = gen.parse_idl(idl)
 
     fix_builtin_ident_collisions(idl)
     sysv64 = types_to_sysv64(idl)

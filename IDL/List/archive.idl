@@ -1,4 +1,4 @@
-door 5238e0fc-4d60503d-7b357037-d5319ae5 Archive {
+door Archive {
 	root Root -> Dir
 	dir_iter DirIter -> FindResult
 	dir_find DirFind -> FindResult

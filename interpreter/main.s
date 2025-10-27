@@ -216,7 +216,7 @@ f 3 door_register
 	syscall_door_list
  .endm
 .endm
-find_door archive    , 0x5238e0fc4d60503d, 0x7b357037d5319ae5
+find_door archive 0x46c583822c795463, 0x32a09c480ed9758d
 
 .equ door.archive.root, 8 * 0
 .equ door.archive.dir_iter, 8 * 1

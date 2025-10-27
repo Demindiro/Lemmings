@@ -22,30 +22,6 @@ class Routine:
     def __repr__(self):
         return f'{self.input} -> {self.output}'
 
-
-class Door:
-    __slots__ = 'api_id', 'name', 'routines'
-
-    def __init__(self, api_id: int, name: str):
-        assert type(api_id) is int
-        assert type(name) is str
-        assert 1 <= api_id <= 2**128
-        assert 1 <= len(name) <= 64
-        self.api_id = api_id
-        self.name = name
-        # OOTE: we rely on insertion order (only guaranteed in Python 3.7+)
-        self.routines = {}
-
-    def add_routine(self, name: str, routine: Routine):
-        assert type(name) is str
-        assert type(routine) is Routine
-        assert name not in self.routines
-        self.routines[name] = routine
-
-    def __repr__(self):
-        x = '; '.join(f'{k} {v}' for k, v in self.routines.items())
-        return f'door {self.api_id:x} {self.name} {{ {x} }}'
-
 class Type:
     __slots__ = ()
 
@@ -146,17 +122,26 @@ class SumType(Type):
         return ' | '.join(self.variants)
 
 
-class Module:
-    __slots__ = 'doors', 'types'
+class Door:
+    __slots__ = 'api_id', 'name', 'routines', 'types'
 
-    def __init__(self):
-        self.doors = {}
+    def __init__(self, api_id: int):
+        assert type(api_id) is int
+        assert 1 <= api_id <= 2**128
+        self.api_id = api_id
         self.types = {}
+        # NOTE: we rely on insertion order (only guaranteed in Python 3.7+)
+        self.routines = {}
 
-    def add_door(self, door: Door):
-        assert type(door) is Door
-        assert door.name not in self.doors
-        self.doors[door.name] = door
+    def set_name(self, name: str):
+        try:
+            self.name
+            raise Exception('attempt to define Door name multiple times')
+        except AttributeError:
+            pass
+        assert type(name) is str
+        assert 1 <= len(name) <= 64
+        self.name = name
 
     def add_type(self, name: str, ty: Type):
         assert type(name) is str
@@ -168,37 +153,45 @@ class Module:
         for t in self.types.values():
             t.resolve_types(lambda x: self.types[x])
 
+    def add_routine(self, name: str, routine: Routine):
+        assert type(name) is str
+        assert type(routine) is Routine
+        assert name not in self.routines
+        self.routines[name] = routine
+
+    def validate(self):
+        self.name
 
     def __repr__(self):
         return repr({
-            'doors': self.doors,
+            'name': self.name,
+            'api_id': self.api_id,
+            'routines': self.routines,
             'types': self.types,
         })
 
 
-def parse_module(lines) -> Module:
-    lines = filter(None, map(str.strip, lines))
-    strip_split = lambda s, c: map(str.strip, s.split(c))
+def parse_idl(text) -> Door:
+    from blake3 import blake3
 
-    module = Module()
+    door = Door(int.from_bytes(blake3(text.encode('utf-8')).digest()[:16], byteorder='little'))
+
+    lines = filter(None, map(str.strip, text.split('\n')))
+    strip_split = lambda s, c: map(str.strip, s.split(c))
 
     def parse_door(line):
         def parse_id_part(s):
             assert len(s) == 8, s
             return int(s, 16)
-        api_id, name, scope = filter(None, line.split())
-        a, b, c, d = map(parse_id_part, api_id.split('-'))
-        api_id = (a << 96) | (b << 64) | (c << 32) | (d << 0)
+        name, scope = filter(None, line.split())
+        door.set_name(name)
         assert scope == '{'
-        door = Door(api_id, name)
-        del api_id, name
         for l in lines:
             if l == '}':
                 break
             name, l = l.split(' ', 1)
             inp, outp = strip_split(l, '->')
             door.add_routine(name, Routine(inp, outp))
-        module.add_door(door)
 
     def parse_integer(Ty):
         def f(line):
@@ -216,7 +209,7 @@ def parse_module(lines) -> Module:
             except ValueError:
                 start = int(num, 0)
                 until = start + 1
-            module.add_type(name, Ty(start, until))
+            door.add_type(name, Ty(start, until))
         return f
 
     def parse_pointer(line):
@@ -227,7 +220,7 @@ def parse_module(lines) -> Module:
             'shared': SharedPointerType,
             'unique': UniquePointerType,
         }[access](ty)
-        module.add_type(name, ty)
+        door.add_type(name, ty)
 
     def parse_record(line):
         name, scope = strip_split(line, ' ')
@@ -238,19 +231,19 @@ def parse_module(lines) -> Module:
                 break
             member_name, member_ty = strip_split(l, '=')
             ty.add_member(member_name, member_ty)
-        module.add_type(name, ty)
+        door.add_type(name, ty)
 
     def parse_sum(line):
         name, variants = strip_split(line, '=')
         ty = SumType()
         for variant in strip_split(variants, '|'):
             ty.add_variant(variant)
-        module.add_type(name, ty)
+        door.add_type(name, ty)
 
     def parse_unit(line):
         name = line.strip()
         ty = UnitType(name)
-        module.add_type(name, ty)
+        door.add_type(name, ty)
 
     vtbl = {
         'door': parse_door,
@@ -270,14 +263,16 @@ def parse_module(lines) -> Module:
         keyword, l = l.split(' ', 1)
         vtbl[keyword](l)
 
-    #module.resolve_types()
+    door.validate()
+    #door.resolve_types()
 
-    return module
+    return door
 
 
 def main(idl_path):
     with open(idl_path, 'r') as f:
-        idl = parse_module(f)
+        text = f.read()
+    idl = parse_idl(text)
     print('Doors:')
     for name in sorted(idl.doors):
         door = idl.doors[name]
