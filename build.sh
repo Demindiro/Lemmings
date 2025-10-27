@@ -10,6 +10,8 @@ rm -rf "$databin"
 mkdir -p "$databin"
 mkdir -p "$tmp"
 
+make -C IDL
+
 (cd qemubios && ./build.sh)
 (cd kernel && ./build.sh)
 (cd interpreter && ./build.sh)
