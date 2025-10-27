@@ -112,7 +112,8 @@ class SumType(Type):
 
     def add_variant(self, ty: str):
         assert type(ty) is str
-        assert ty not in self.variants
+        if ty in self.variants:
+            raise Exception(f'{ty} already defined in sum type')
         self.variants[ty] = None
 
     def resolve_types(self, resolve):
