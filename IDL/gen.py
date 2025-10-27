@@ -188,12 +188,12 @@ def parse_idl(text) -> Door:
         name, scope = filter(None, line.split())
         door.set_name(name)
         assert scope == '{'
+        del name, scope
         for l in lines:
             if l == '}':
                 break
-            name, l = l.split(' ', 1)
-            inp, outp = strip_split(l, '->')
-            door.add_routine(name, RoutineType(inp, outp))
+            name, r = parse_routine(l)
+            door.add_routine(name, r)
 
     def parse_integer(Ty):
         def f(line):

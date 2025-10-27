@@ -1,8 +1,8 @@
 door Archive {
-	root Root -> Dir
-	dir_iter DirIter -> FindResult
-	dir_find DirFind -> FindResult
-	file_read FileRead -> ReadResult
+	root = Root -> Dir
+	dir_iter = DirIter -> FindResult
+	dir_find = DirFind -> FindResult
+	file_read = FileRead -> ReadResult
 }
 
 record Root {
