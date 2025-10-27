@@ -1,0 +1,77 @@
+door 5238e0fc-4d60503d-7b357037-d5319ae5 Archive {
+	root Root -> Dir
+	dir_iter DirIter -> FindResult
+	dir_find DirFind -> FindResult
+	file_read FileRead -> ReadResult
+}
+
+record Root {
+}
+record DirIter {
+	dir = Dir
+	cookie = CookieRef
+	name = NameOut
+}
+record DirFind {
+	dir = Dir
+	name = Name
+}
+record FileRead {
+	file = File
+	offset = Offset
+	out = DataOut
+}
+
+u64 Cookie = 0 to 0xffff_ffff_ffff_ffff
+u64 File   = 0 to 0xffff_ffff_ffff_ffff
+u64 Dir    = 0 to 0xffff_ffff_ffff_ffff
+u64 Stub   = 0 to 0xffff_ffff_ffff_ffff
+
+pointer CookieRef = unique Cookie
+
+u8 Byte = 0 to 0xff
+pointer NameBase = constant Byte
+pointer NameBaseMut = unique Byte
+uptr NameLen = 0 to address_max
+record Name {
+	base = NameBase
+	len = NameLen
+}
+record NameOut {
+	base = NameBaseMut
+	len = NameLen
+}
+
+pointer DataBaseMut = unique Byte
+uptr DataLen = 0 to address_max
+record DataOut {
+	base = DataBaseMut
+	len = DataLen
+}
+
+s8 NotFound = -1
+s8 IsFile   =  0
+s8 IsDir    =  1
+
+record ItemNone {
+	type = NotFound
+	stub = Stub
+}
+record ItemFile {
+	type = IsFile
+	file = File
+}
+record ItemDir {
+	type = IsDir
+	dir = Dir
+}
+sum Item = ItemDir | ItemFile
+sum FindResult = ItemNone | ItemDir | ItemFile
+
+u64 FileLen = 0 to 0xffff_ffff_ffff_ffff
+u64 Offset = 0 to 0xffff_ffff_ffff_ffff
+
+record ReadResult {
+	bytes_to_end = FileLen
+	out_base = DataBaseMut
+}
