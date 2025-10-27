@@ -31,8 +31,20 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "critical-section",
+ "lemmings-idl-archive",
  "lemmings-qemubios",
  "lemmings-x86_64",
+]
+
+[[package]]
+name = "lemmings-idl"
+version = "0.1.0"
+
+[[package]]
+name = "lemmings-idl-archive"
+version = "0.1.0"
+dependencies = [
+ "lemmings-idl",
 ]
 
 [[package]]
