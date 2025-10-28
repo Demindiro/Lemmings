@@ -153,7 +153,7 @@ def emit(outf, idl, sysv):
         def __init__(self, trait, name):
             super().__init__(f'{trait} for {name}')
     class Fn(Scope):
-        def __init__(self, name, args, ret, *, public = False, macro_public = False):
+        def __init__(self, name, args, ret, *, public = False, macro_public = False, dead_code = False):
             nonlocal prev_fn
             if prev_fn:
                 out('')
@@ -162,6 +162,8 @@ def emit(outf, idl, sysv):
             if macro_public:
                 public = True
                 out('#[doc(hidden)]')
+            if dead_code:
+                out('#[allow(dead_code)]')
             public = 'pub ' if public else ''
             super().__init__(f'{public}fn {name}({args}){ret}')
 
@@ -205,7 +207,7 @@ def emit(outf, idl, sysv):
             out(f'pub struct {name}({x});')
             with Impl(name):
                 always_true = ty.start == 0 and ty.until in (gen.IntegerType.ADDRESS_MAX_EXCL, 1 << 64)
-                with Fn('is_valid', f'{"x_"[always_true]}: usize', 'bool'):
+                with Fn('is_valid', f'{"x_"[always_true]}: usize', 'bool', dead_code = True):
                     if always_true:
                         out('true')
                     elif ty.start == 0:
@@ -250,7 +252,7 @@ def emit(outf, idl, sysv):
     def emit_pointer(name, ty, sysv):
         out(f'pub struct {name}(pub core::ptr::NonNull<{ty.deref_type}>);')
         with Impl(name):
-            with Fn('is_valid', 'x: usize', 'bool'):
+            with Fn('is_valid', 'x: usize', 'bool', dead_code = True):
                 out('x != 0')
             with Fn('from_ffi', 'x: usize', 'Self', macro_public = True):
                 out('Self(core::ptr::NonNull::new(x as *mut _).expect("pointer is null"))')
@@ -271,7 +273,7 @@ def emit(outf, idl, sysv):
         vals = regn_to_usizes(sysv_ty)
         args = vals and f'x: {vals}'
         with Impl(name):
-            with Fn('is_valid', args, 'bool'):
+            with Fn('is_valid', args, 'bool', dead_code = True):
                 i = 0
                 if not ty.members:
                     out('true')
@@ -329,7 +331,7 @@ def emit(outf, idl, sysv):
         with Impl(name):
             vals = regn_to_usizes(sysv_ty)
             args = f'x: {vals}'
-            with Fn('is_valid', args, 'bool'):
+            with Fn('is_valid', args, 'bool', dead_code = True):
                 prefix = ''
                 for m_ty in ty.variants:
                     out(f'{prefix}{m_ty}::is_valid(x)')
