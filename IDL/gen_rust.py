@@ -413,7 +413,8 @@ def emit(outf, idl, sysv):
                             else:
                                 out(f'let x = {routine.input};')
                             if sysv[routine.output].register_count > 0:
-                                out(f'$impl_{name}(x).to_ffi().into()')
+                                out(f'let x: {routine.output} = $impl_{name}(x);')
+                                out(f'x.to_ffi().into()')
                             else:
                                 out(f'let _: {routine.output} = $impl_{name}(x);')
                         out(f'ffi')
