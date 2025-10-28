@@ -270,13 +270,13 @@ def emit(outf, idl, sysv):
             for m_name, m_ty in ty.members.items():
                 out(f'pub {tr(m_name)}: {m_ty},')
         out('')
+        if sysv_ty.register_count == 0:
+            return
         vals = regn_to_usizes(sysv_ty)
         args = vals and f'x: {vals}'
         with Impl(name):
             with Fn('is_valid', args, 'bool', dead_code = True):
                 i = 0
-                if not ty.members:
-                    out('true')
                 for m_name, m_ty in ty.members.items():
                     prefix = '' if i == 0 else '&& '
                     n = sysv[m_ty].register_count
@@ -328,6 +328,8 @@ def emit(outf, idl, sysv):
                     out(f'{v},')
                 else:
                     out(f'{v}({v}),')
+        if sysv_ty.register_count == 0:
+            return
         with Impl(name):
             vals = regn_to_usizes(sysv_ty)
             args = f'x: {vals}'
@@ -339,9 +341,8 @@ def emit(outf, idl, sysv):
             with Fn('from_ffi', args, 'Self', macro_public = True):
                 with Scope('match x'):
                     for v in ty.variants:
-                        x = 'x' if sysv[v].register_count > 0 else ''
-                        out(f'x if {v}::is_valid(x) => Self::{v}({v}::from_ffi({x})),')
-                        del x, v
+                        out(f'x if {v}::is_valid(x) => Self::{v}({v}::from_ffi(x)),')
+                        del v
                     out('_ => panic!("invalid variant"),')
             with Fn('to_ffi', 'self', vals, macro_public = True):
                 with Scope('match self'):
@@ -377,14 +378,17 @@ def emit(outf, idl, sysv):
         for name, routine in idl.routines.items():
             with Fn(name, f'&self, x: {routine.input}', routine.output, public = True):
                 n = sysv[routine.input].register_count
-                y = f'({", ".join(VARS[:n])})' if n > 1 else VARS[0]
-                out(f'let {y} = x.to_ffi();')
+                args = ", ".join(VARS[:n])
+                if n > 0:
+                    y = f'({args})' if n > 1 else args
+                    out(f'let {y} = x.to_ffi();')
                 if sysv[routine.output].register_count > 0:
-                    out(f'let x = unsafe {{ (self.{name})({", ".join(VARS[:n])}).into() }};')
+                    out(f'let x = unsafe {{ (self.{name})({args}).into() }};')
                     out(f'{routine.output}::from_ffi(x)')
                 else:
-                    out(f'{routine.output}::from_ffi()')
-                del n, y
+                    out(f'unsafe {{ (self.{name})({args}) }};')
+                    out(f'{routine.output} {{}}')
+                del n, args
         del name, routine
 
     out('')
@@ -403,8 +407,15 @@ def emit(outf, idl, sysv):
                     ret = regn_to_usizes_ret(sysv_out, macro = True)
                     with Scope(f'{name}:', suffix = ','):
                         with Scope(f'unsafe extern "sysv64" fn ffi({args}){ret}'):
-                            out(f'let x = {routine.input}::from_ffi({regn_to_usizes_vars(sysv_in)});')
-                            out(f'$impl_{name}(x).to_ffi().into()')
+                            if sysv[routine.input].register_count > 0:
+                                out(f'let x = {routine.input}::from_ffi({regn_to_usizes_vars(sysv_in)});')
+                            else:
+                                out(f'let x = {routine.input} {{}};')
+                            if sysv[routine.output].register_count > 0:
+                                out(f'$impl_{name}(x).to_ffi().into()')
+                            else:
+                                out(f'$impl_{name}(x);')
+                                out(f'{routine.output}')
                         out(f'ffi')
         del name, routine
 
