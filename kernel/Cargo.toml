@@ -8,6 +8,7 @@ critical-section = { version = "1.2.0", features = ["restore-state-u32"] }
 lemmings-qemubios = { path = "../lib/qemubios" }
 lemmings-x86_64 = { path = "../lib/x86_64" }
 lemmings-idl-archive = { path = "../IDL/rust/archive" }
+lemmings-idl-x86-64-interrupt = { path = "../IDL/rust/x86-64-interrupt" }
 
 [profile.release]
 lto = "fat"
