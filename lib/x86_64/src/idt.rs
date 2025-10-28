@@ -77,7 +77,20 @@ impl IdtEntry {
     const ATTRIBUTE_PRESENT: u8 = 0x80;
     const ATTRIBUTE_DPL: u8 = 0x00;
 
-    pub const fn new(selector: u16, handler: u64, ist: Ist) -> Self {
+    pub const fn zero() -> Self {
+        Self {
+            offset_low: 0,
+            selector: 0,
+            ist: 0,
+            type_attributes: 0,
+            offset_high: 0,
+            offset_higher: 0,
+            _unused_1: 0,
+        }
+    }
+
+    pub fn new(selector: u16, handler: *const (), ist: Ist) -> Self {
+        let handler = handler as u64;
         Self {
             offset_low: (handler >> 0) as u16,
             selector,
@@ -89,13 +102,6 @@ impl IdtEntry {
             offset_higher: (handler >> 32) as u32,
             _unused_1: 0,
         }
-    }
-
-    pub fn set_handler(&mut self, handler: *const ()) {
-        let handler = handler as u64;
-        self.offset_low = (handler >> 0) as u16;
-        self.offset_high = (handler >> 16) as u16;
-        self.offset_higher = (handler >> 32) as u32;
     }
 }
 
@@ -110,7 +116,7 @@ impl<const MAX: usize> Idt<MAX> {
             assert!(MAX <= 256, "can't support more than 256 entries");
         }
         Self {
-            descriptors: [const { IdtEntry::new(0, 0, Ist::N0) }; MAX],
+            descriptors: [const { IdtEntry::zero() }; MAX],
         }
     }
 
