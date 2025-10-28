@@ -337,7 +337,9 @@ def emit(outf, idl, sysv):
             with Fn('from_ffi', args, 'Self', macro_public = True):
                 with Scope('match x'):
                     for v in ty.variants:
-                        out(f'x if {v}::is_valid(x) => Self::{v}({v}::from_ffi(x)),')
+                        x = 'x' if sysv[v].register_count > 0 else ''
+                        out(f'x if {v}::is_valid(x) => Self::{v}({v}::from_ffi({x})),')
+                        del x, v
                     out('_ => panic!("invalid variant"),')
             with Fn('to_ffi', 'self', vals, macro_public = True):
                 with Scope('match self'):
@@ -375,8 +377,11 @@ def emit(outf, idl, sysv):
                 n = sysv[routine.input].register_count
                 y = f'({", ".join(VARS[:n])})' if n > 1 else VARS[0]
                 out(f'let {y} = x.to_ffi();')
-                out(f'let x = unsafe {{ (self.{name})({", ".join(VARS[:n])}).into() }};')
-                out(f'{routine.output}::from_ffi(x)')
+                if sysv[routine.output].register_count > 0:
+                    out(f'let x = unsafe {{ (self.{name})({", ".join(VARS[:n])}).into() }};')
+                    out(f'{routine.output}::from_ffi(x)')
+                else:
+                    out(f'{routine.output}::from_ffi()')
                 del n, y
         del name, routine
 
