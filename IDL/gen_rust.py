@@ -266,12 +266,13 @@ def emit(outf, idl, sysv):
 
     def emit_record(name, ty, sysv_ty):
         tr = lambda x: f'r#{x}' if x in RESERVED_KEYWORDS else x
+        if sysv_ty.register_count == 0:
+            out(f'pub struct {name};')
+            return
         with Scope(f'pub struct {name}'):
             for m_name, m_ty in ty.members.items():
                 out(f'pub {tr(m_name)}: {m_ty},')
         out('')
-        if sysv_ty.register_count == 0:
-            return
         vals = regn_to_usizes(sysv_ty)
         args = vals and f'x: {vals}'
         with Impl(name):
@@ -387,7 +388,7 @@ def emit(outf, idl, sysv):
                     out(f'{routine.output}::from_ffi(x)')
                 else:
                     out(f'unsafe {{ (self.{name})({args}) }};')
-                    out(f'{routine.output} {{}}')
+                    out(f'{routine.output}')
                 del n, args
         del name, routine
 
@@ -410,12 +411,11 @@ def emit(outf, idl, sysv):
                             if sysv[routine.input].register_count > 0:
                                 out(f'let x = {routine.input}::from_ffi({regn_to_usizes_vars(sysv_in)});')
                             else:
-                                out(f'let x = {routine.input} {{}};')
+                                out(f'let x = {routine.input};')
                             if sysv[routine.output].register_count > 0:
                                 out(f'$impl_{name}(x).to_ffi().into()')
                             else:
-                                out(f'$impl_{name}(x);')
-                                out(f'{routine.output}')
+                                out(f'let _: {routine.output} = $impl_{name}(x);')
                         out(f'ffi')
         del name, routine
 
