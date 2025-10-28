@@ -117,6 +117,18 @@ impl<const MAX: usize> Idt<MAX> {
     pub const fn set(&mut self, index: u8, entry: IdtEntry) {
         self.descriptors[index as usize] = entry;
     }
+
+    /// Set a handler for a particular IRQ.
+    ///
+    /// This will always use the interrupt gatetype, which disables interrupts on entry.
+    ///
+    /// It uses [`Ist::N0`], i.e. no switching of the stack.
+    ///
+    /// It uses the standard GDT layout. See [`crate::gdt`] for more information.
+    pub fn set_handler(&mut self, index: u8, handler: *const ()) {
+        let entry = IdtEntry::new(crate::gdt::Gdt::KERNEL_CS, handler as _, Ist::N0);
+        self.set(index, entry);
+    }
 }
 
 #[repr(C)]
