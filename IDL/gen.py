@@ -127,10 +127,19 @@ class SumType(Type):
 class Door:
     __slots__ = 'api_id', 'name', 'routines', 'types'
 
-    def __init__(self, api_id: int):
-        assert type(api_id) is int
-        assert 1 <= api_id <= 2**128
-        self.api_id = api_id
+    def __repr__(self):
+        return repr({
+            'name': self.name,
+            'api_id': self.api_id,
+            'routines': self.routines,
+            'types': self.types,
+        })
+
+
+class DoorBuilder:
+    __slots__ = 'name', 'routines', 'types'
+
+    def __init__(self):
         self.types = {}
         # NOTE: we rely on insertion order (only guaranteed in Python 3.7+)
         self.routines = {}
@@ -161,22 +170,115 @@ class Door:
         assert name not in self.routines
         self.routines[name] = routine
 
-    def validate(self):
-        self.name
+    def finish(self) -> Door:
+        door = Door()
+        door.name = self.name
+        door.routines = self.routines
+        door.types = self.types
 
-    def __repr__(self):
-        return repr({
-            'name': self.name,
-            'api_id': self.api_id,
-            'routines': self.routines,
-            'types': self.types,
-        })
+        ser = Serializer()
+
+        ser.section(0x0, len(self.routines))
+        for name, r in self.routines.items():
+            ser.pushstr(name)
+            ser.pushstr(r.input)
+            ser.pushstr(r.output)
+
+        ser.section(0x1, len(self.types))
+        def ser_intptr(ty):
+            # uptr is variable size, which is annoying
+            # we will assume the only sensible type of limit is a lower bound,
+            # as we can't predetermine the absolute maximum upper bound.
+            # we don't expect to run on any 8-bit architectures. The next step up is 16-bit then.
+            assert ty.until is IntegerType.ADDRESS_MAX_EXCL
+            ser.push16(ty.start & 0xffff)
+        def ser_int(bits):
+            m = (1 << bits) - 1
+            def f(ty):
+                assert ty.start < ty.until
+                ser.pushN(ty.start & m, bits)
+                ser.pushN((ty.until - 1) & m, bits)
+            return f
+        def ser_ptr(ty):
+            ser.pushstr(ty.deref_type)
+        def ser_record(ty):
+            for k, v in ty.members.items():
+                ser.pushstr(k)
+                ser.pushstr(v)
+        def ser_sum(ty):
+            for v in sorted(ty.variants):
+                ser.pushstr(v)
+        def ser_routine(ty):
+            ser.pushstr(ty.input)
+            ser.pushstr(ty.output)
+        tbl = {
+            UPtrType: (0x00, ser_intptr),
+            U8Type:   (0x01, ser_int(8)),
+            U16Type:  (0x02, ser_int(16)),
+            U32Type:  (0x03, ser_int(32)),
+            U64Type:  (0x04, ser_int(64)),
+            SPtrType: (0x10, lambda _: "todo" + 0), # TODO how to handle sptr best?
+            S8Type:   (0x11, ser_int(8)),
+            S16Type:  (0x12, ser_int(16)),
+            S32Type:  (0x13, ser_int(32)),
+            S64Type:  (0x14, ser_int(64)),
+            ConstantPointerType: (0x20, ser_ptr),
+            SharedPointerType:   (0x21, ser_ptr),
+            UniquePointerType:   (0x22, ser_ptr),
+            RecordType: (0x30, ser_record),
+            SumType:    (0x31, ser_sum),
+            RoutineType: (0x40, ser_routine),
+        }
+        for name in sorted(self.types):
+            ty = self.types[name]
+            ser.pushstr(name)
+            i, f = tbl[type(ty)]
+            ser.push8(i)
+            f(ty)
+
+        door.api_id = ser.finish()
+        return door
+
+
+class Serializer:
+    def __init__(self):
+        from blake3 import blake3
+        self.hasher = blake3()
+
+    def pushN(self, x: int, n: int):
+        assert type(x) is int
+        assert 0 <= x < 1 << n
+        self.hasher.update(x.to_bytes(n // 8, byteorder='little'))
+
+    def push8(self, x: int):
+        self.pushN(x, 8)
+
+    def push16(self, x: int):
+        self.pushN(x, 16)
+
+    def push32(self, x: int):
+        self.pushN(x, 32)
+
+    def push64(self, x: int):
+        self.pushN(x, 64)
+
+    def pushstr(self, s: str):
+        assert type(s) is str
+        s = s.encode('utf-8')
+        self.push8(len(s))
+        self.hasher.update(s)
+
+    def section(self, id: int, num_entries: int):
+        self.push32(id)
+        self.push32(num_entries)
+
+    def finish(self):
+        return int.from_bytes(self.hasher.digest()[:16], byteorder='little')
 
 
 def parse_idl(text) -> Door:
-    from blake3 import blake3
 
-    door = Door(int.from_bytes(blake3(text.encode('utf-8')).digest()[:16], byteorder='little'))
+    door = DoorBuilder()
 
     lines = filter(None, map(str.strip, text.split('\n')))
     strip_split = lambda s, c: map(str.strip, s.split(c))
@@ -275,10 +377,7 @@ def parse_idl(text) -> Door:
             name, ty = vtbl[keyword](l)
             door.add_type(name, ty)
 
-    door.validate()
-    #door.resolve_types()
-
-    return door
+    return door.finish()
 
 
 def main(idl_path):
