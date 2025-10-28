@@ -1,6 +1,6 @@
 use core::ptr::NonNull;
 use crate::{KernelEntryToken, page};
-use lemmings_x86_64::{idt::{Idt, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
+use lemmings_x86_64::{idt::{self, Idt, Ist, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
 
 static mut GDT: Gdt = Gdt::new();
 static mut TSS: Tss = Tss::new();
@@ -28,8 +28,16 @@ fn init_gdt(root: &mmu::Root<mmu::L4>) {
 
 #[inline(always)]
 fn init_idt(root: &mmu::Root<mmu::L4>) {
+    let idt = unsafe { &mut *(&raw mut IDT) };
+
+    idt.set_handler(idt::nr::DOUBLE_FAULT, double_fault as _);
+
     let idtp = (&raw const IDT).addr() as u64;
     let idtp = mmu::Virt::new(idtp).expect("IDT should be in valid virtual space");
     let idtp = root.translate(&page::IdentityMapper, idtp).expect("IDT should be mapped");
     unsafe { IdtPointer::new::<IDT_NR>(idtp).activate() };
+}
+
+extern "sysv64" fn double_fault() {
+    panic!("Double fault!");
 }
