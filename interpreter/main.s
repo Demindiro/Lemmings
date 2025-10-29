@@ -908,6 +908,15 @@ dict_end _
 
 
 dict_begin Sys
+	def door
+		num_pop rsi # high
+		num_peek rdi # low
+		xor edx, edx
+		xor ecx, ecx
+		syscall_door_list
+		num_replace rax
+	enddef
+
 	def exit
 		_start_exit
 		xor eax, eax
