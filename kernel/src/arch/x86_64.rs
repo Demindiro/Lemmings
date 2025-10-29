@@ -1,15 +1,58 @@
 use core::ptr::NonNull;
-use crate::{KernelEntryToken, page};
+use crate::{KernelEntryToken, page, sync::SpinLock, thread::{self, RoundRobinQueue}};
+use critical_section::CriticalSection;
 use lemmings_x86_64::{idt::{self, Idt, Ist, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
 
 static mut GDT: Gdt = Gdt::new();
 static mut TSS: Tss = Tss::new();
 static mut IDT: Idt<IDT_NR> = Idt::new();
 
+static IRQ_HANDLERS: SpinLock<IrqHandlers> = SpinLock::new(IrqHandlers::new());
+
 const IDT_NR: usize = 256;
 // 32 reserved + 1 for timer
 const IRQ_STUB_OFFSET: u8 = 33;
 const IRQ_TIMER: u8 = 32;
+const IRQ_NR: usize = IDT_NR - IRQ_STUB_OFFSET as usize;
+
+struct IrqHandlers {
+    queues: [RoundRobinQueue; IRQ_NR],
+    allocated: [u32; (IRQ_NR + 32) / 32],
+}
+
+impl IrqHandlers {
+    const fn new() -> Self {
+        Self {
+            queues: [const { RoundRobinQueue::new() }; IRQ_NR],
+            allocated: [0; (IRQ_NR + 32) / 32],
+        }
+    }
+
+    fn wait(&mut self, irq: u8, cs: CriticalSection<'_>) {
+        let irq = usize::from(irq) - IRQ_NR;
+        self.queues[irq].enqueue_last(thread::current());
+        thread::park(cs);
+    }
+
+    fn reserve(&mut self) -> Option<u8> {
+        for (i, n) in self.allocated.iter_mut().enumerate() {
+            if *n == u32::MAX {
+                continue;
+            }
+            let b = n.trailing_ones() as usize;
+            *n |= 1 << b;
+            return Some((IRQ_NR + i * 32 + b) as u8)
+        }
+        None
+    }
+
+    fn release(&mut self, irq: u8) {
+        let irq = usize::from(irq) - IRQ_NR;
+        let [i, b] = [irq / 32, irq % 32];
+        self.allocated[i] &= !(1 << b);
+        todo!();
+    }
+}
 
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {
     unsafe { pic::init() };

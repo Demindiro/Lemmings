@@ -28,7 +28,7 @@ pub enum ThreadSpawnError {
     OutOfVirtSpace,
 }
 
-struct RoundRobinQueue {
+pub struct RoundRobinQueue {
     cur: Option<ThreadRef>,
 }
 
