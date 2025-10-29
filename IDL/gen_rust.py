@@ -237,6 +237,12 @@ def emit(outf, idl, sysv):
                 with ImplFor(f'From<{x}>', name):
                     with Fn('from', f'x: {x}', 'Self'):
                         out('Self(x)')
+            else:
+                with ImplFor(f'TryFrom<{x}>', name):
+                    out('type Error = ();')
+                    with Fn('try_from', f'x: {x}', 'Result<Self, Self::Error>'):
+                        # FIXME this usize nonsense is making things way too hard
+                        out('Self::is_valid(x as _).then_some(Self(x)).ok_or(())')
             if type(ty.until) is int and ty.start == ty.until - 1:
                 with ImplFor('Default', name):
                     with Fn('default', '', 'Self'):
