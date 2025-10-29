@@ -90,7 +90,7 @@ impl IdtEntry {
     }
 
     pub fn new(selector: u16, handler: *const (), ist: Ist) -> Self {
-        let handler = handler as u64;
+        let handler = handler.addr();
         Self {
             offset_low: (handler >> 0) as u16,
             selector,
