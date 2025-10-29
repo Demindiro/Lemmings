@@ -1,5 +1,12 @@
 "Hello interpreter!" Sys log
 
+: interrupt-door 0xa3691cc8b5ec1fad 0x9566d3fc16c2b763 Sys door ;
+
+interrupt-door
+if dup 0 = then
+	"Failed to find interrupt door" Sys panic
+end
+
 : IO_DATA    0x60 ;
 : IO_STATUS  0x64 ;
 : IO_COMMAND 0x64 ;

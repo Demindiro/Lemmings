@@ -233,6 +233,12 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
 	add \PREFIX\()_STACK_HEAD, 8
  .endm
+ .macro \prefix\()_peek x:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
+ .endm
+ .macro \prefix\()_replace x:req
+	mov qword ptr [\PREFIX\()_STACK_HEAD], \x
+ .endm
 .endm
 	f num NUM
 	f obj OBJ
