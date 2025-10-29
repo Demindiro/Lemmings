@@ -31,6 +31,8 @@ struct RoundRobinQueue {
     cur: Option<ThreadRef>,
 }
 
+pub struct ThreadHandle(ThreadRef);
+
 struct TimeQueue {
     head: Option<ThreadRef>,
 }
@@ -72,7 +74,7 @@ impl ThreadManager {
     /// Create a new thread and put it at the *end* of the queue.
     pub fn spawn(&mut self, priority: Priority, entry: fn()) -> Result<(), ThreadSpawnError> {
         let thread = self.create(priority, entry)?;
-        self.pending[priority as usize].enqueue_last(thread);
+        self.pending[priority as usize].enqueue_last(ThreadHandle(thread));
         Ok(())
     }
 
@@ -117,7 +119,7 @@ impl RoundRobinQueue {
         }
     }
 
-    pub fn enqueue_last(&mut self, thread: ThreadRef) {
+    pub fn enqueue_last(&mut self, ThreadHandle(thread): ThreadHandle) {
         let Some(cur) = self.cur else {
             self.cur = Some(thread);
             return;
@@ -128,7 +130,7 @@ impl RoundRobinQueue {
         cur.right.set(thread);
     }
 
-    pub fn dequeue_first(&mut self) -> Option<ThreadRef> {
+    pub fn dequeue_first(&mut self) -> Option<ThreadHandle> {
         let cur = self.cur.take()?;
         if cur != cur.right.get() {
             // L <-> cur <-> R ==> L <-> R
@@ -137,7 +139,7 @@ impl RoundRobinQueue {
             r.left.set(l);
             self.cur = Some(l);
         }
-        Some(cur)
+        Some(ThreadHandle(cur))
     }
 }
 
