@@ -904,6 +904,26 @@ dict_begin _
 		xor edx, edx
 		call set_word
 	enddef
+
+	defimm "if"
+		panic "TODO (if)"
+	enddef
+
+	defimm "then"
+		panic "TODO (then)"
+	enddef
+
+	defimm "else"
+		panic "TODO (else)"
+	enddef
+
+	defimm "end"
+		panic "TODO (end)"
+	enddef
+
+	defimm "repeat"
+		panic "TODO (repeat)"
+	enddef
 dict_end _
 
 
