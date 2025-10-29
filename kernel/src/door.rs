@@ -12,7 +12,7 @@ macro_rules! door {
             const _: () = assert!($name.len() >= 1);
             const _: () = assert!($name.len() <= 64);
             let table = const {
-                $crate::door::Table(NonNull::new(&T as *const T as *mut T).unwrap().cast())
+                $crate::door::Table(core::ptr::NonNull::new(&T as *const T as *mut T).unwrap().cast())
             };
             unsafe { $crate::door::register_internal(T::ID, $name, table) };
         }
