@@ -11,7 +11,7 @@
   "target-pointer-width": "64",
   "vendor": "unknown",
   "linker-flavor": "ld.lld",
-  "linker": "ld.lld",
+  "linker": "rust-lld",
   "disable-redzone": true,
   "panic-strategy": "abort", 
   "eh-frame-header": false,

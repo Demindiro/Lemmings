@@ -1,0 +1,5 @@
+[toolchain]
+channel = "1.85-x86_64-unknown-linux-gnu"
+components = [ "rust-src" ]
+targets = [ ]
+profile = "minimal"
