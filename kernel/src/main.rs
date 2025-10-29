@@ -49,6 +49,7 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 // do not inline so the stupid compiler frees up stack space before entering init.
 #[inline(never)]
 fn main_init() -> elf::Entry {
+    arch::door::register();
     archive::door::register();
     //framebuffer::door::register();
     let init = archive::root().get("init").expect("no init");

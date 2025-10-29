@@ -15,6 +15,39 @@ const IRQ_STUB_OFFSET: u8 = 33;
 const IRQ_TIMER: u8 = 32;
 const IRQ_NR: usize = IDT_NR - IRQ_STUB_OFFSET as usize;
 
+pub mod door {
+    use lemmings_idl_x86_64_interrupt::*;
+
+    door! {
+        [lemmings_idl_x86_64_interrupt Interrupt "x86-64 interrupt"]
+        wait
+        reserve_irq
+        release_irq
+    }
+
+    fn wait(x: IrqN) -> Void {
+        todo!();
+    }
+
+    fn reserve_irq(_: Void) -> MaybeIrqN {
+        critical_section::with(|cs| {
+            super::IRQ_HANDLERS
+                .lock(cs)
+                .reserve()
+                .map_or(MaybeIrqN::None(None::default()), |x| MaybeIrqN::IrqN(IrqN::try_from(x).unwrap()))
+        })
+    }
+
+    fn release_irq(x: IrqN) -> Void {
+        critical_section::with(|cs| {
+            super::IRQ_HANDLERS
+                 .lock(cs)
+                 .release(x.into());
+            Void
+        })
+    }
+}
+
 struct IrqHandlers {
     queues: [RoundRobinQueue; IRQ_NR],
     allocated: [u32; (IRQ_NR + 32) / 32],
