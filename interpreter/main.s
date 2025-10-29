@@ -931,6 +931,12 @@ dict_begin Sys
 	def halt
 		hlt
 	enddef
+
+	def panic
+		obj_pop rdi
+		mov esi, [rdi - 8]
+		syscall_panic
+	enddef
 dict_end Sys
 
 
