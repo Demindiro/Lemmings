@@ -5,6 +5,7 @@
 
 use crate::{KernelEntryToken, page::{self, PAGE_SIZE, PageAttr}, time::Monotonic};
 use core::{arch::asm, cell::Cell, fmt, mem, ptr::NonNull, ops};
+use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
 
@@ -225,4 +226,12 @@ impl fmt::Debug for ThreadSpawnError {
         };
         f.write_str(s)
     }
+}
+
+pub fn current() -> ThreadHandle {
+    todo!();
+}
+
+pub fn park(cs: CriticalSection<'_>) {
+    todo!();
 }
