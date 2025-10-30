@@ -571,7 +571,7 @@ routine parse_number
 	or edx, 040
 	lea ebx, [edx - 'a' + 10]
 2:	assertlt bl, dl, "digit out of range for base"
-	mul ecx
+	mul rcx
 	add rax, rbx
 	inc rdi
 	ifne rdi, rsi .Lparse_number.loop
