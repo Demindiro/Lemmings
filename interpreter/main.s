@@ -239,6 +239,9 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
  .macro \prefix\()_replace x:req
 	mov qword ptr [\PREFIX\()_STACK_HEAD], \x
  .endm
+ .macro \prefix\()_drop
+	add \PREFIX\()_STACK_HEAD, 8
+ .endm
 .endm
 	f num NUM
 	f obj OBJ
@@ -923,6 +926,15 @@ dict_begin _
 
 	defimm "repeat"
 		panic "TODO (repeat)"
+	enddef
+
+	def dup
+		num_peek rax
+		num_push rax
+	enddef
+
+	def drop
+		num_drop
 	enddef
 dict_end _
 
