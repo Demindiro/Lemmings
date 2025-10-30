@@ -323,6 +323,10 @@ _panic_start:
 	mov qword ptr [rip + code_head], .LASM_PTR
 .endm
 
+.macro ASM_ADVANCE32
+	add .LASM_PTR, 4
+.endm
+
 .macro ASM_PUSH8 x:req
 	mov byte ptr [.LASM_PTR], \x
 	inc .LASM_PTR
@@ -350,6 +354,14 @@ _panic_start:
 .macro ASM_call_rel32 rel:req
 	ASM_PUSH8 0xe8
 	ASM_PUSH32 \rel
+.endm
+.macro ASM_jmp_rel32 rel:req
+	ASM_PUSH8 0xe9
+	ASM_PUSH32 \rel
+.endm
+.macro ASM_jmp_rel32_stub
+	ASM_PUSH8 0xe9
+	ASM_ADVANCE32
 .endm
 .macro ASM_mov_rax_imm64 x:req
 	ASM_PUSH16 0xb848
