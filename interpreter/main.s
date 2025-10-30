@@ -1053,6 +1053,25 @@ dict_begin _
 		setne al
 		num_replace rax
 	enddef
+
+	def_as "#sl" int_sl
+		num_pop rcx
+		shl qword ptr [NUM_STACK_HEAD], cl
+	enddef
+
+	def_as "#or" int_or
+		num_pop rax
+		or qword ptr [NUM_STACK_HEAD], rax
+	enddef
+
+	def_as "#and" int_and
+		num_pop rax
+		and qword ptr [NUM_STACK_HEAD], rax
+	enddef
+
+	def_as "#not" int_not
+		not qword ptr [NUM_STACK_HEAD]
+	enddef
 dict_end _
 
 
