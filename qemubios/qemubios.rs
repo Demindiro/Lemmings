@@ -237,13 +237,17 @@ mod page {
                 pub fn get_or_alloc_table(&mut self) -> Option<$table> {
                     self.get_table().or_else(|| (!self.is_present()).then(|| {
                         let Some(table) = $table::new() else { fail("out of memory") };
-                        self.0 = table.as_u64() | PRESENT;
+                        self.set_table_raw(table.as_u64());
                         table
                     }))
                 }
 
                 pub fn set_table(&mut self, table: $table) {
-                    self.0 = table.as_u64() | DIRTY | ACCESSED | READ_WRITE | PRESENT;
+                    self.set_table_raw(table.as_u64());
+                }
+
+                fn set_table_raw(&mut self, table: u64) {
+                    self.0 = table | DIRTY | ACCESSED | READ_WRITE | PRESENT;
                 }
 
                 fn is_table(&self) -> bool {
