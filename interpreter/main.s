@@ -1096,6 +1096,29 @@ dict_begin Sys.Door
 		syscall_door_list
 		num_replace rax
 	enddef
+
+	def_as "call:0->0" call_0_0
+		num_pop rbx
+		num_pop rax
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:0->1" call_0_1
+		call call_0_0
+		num_push rax
+	enddef
+
+	def_as "call:0->2" call_0_2
+		call call_0_1
+		num_push rdx
+	enddef
+
+	def_as "call:1->0" call_1_0
+		num_pop rbx
+		num_pop rax
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
 dict_end Sys.Door
 
 
