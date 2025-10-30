@@ -252,11 +252,11 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 	bts \reg, \x
  .endif
 .endm
-.macro clear_bit reg:req, x:req
+.macro reset_bit reg:req, x:req
  .if \x < 8
 	and \reg, ~(1 << (\x))
  .else
-	btc \reg, \x
+	btr \reg, \x
  .endif
 .endm
 .macro f name:req cc_bt:req
@@ -266,7 +266,7 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
  .endm
 .endm
 	f set   c
-	f clear nc
+	f reset nc
 .purgem f
 
 
@@ -468,7 +468,7 @@ routine parse_input
 	pop rsi
 	ifeqz rax, .Lparse_input.word_not_found
 	ifnez edx, 2f
-	if_bit_clear FLAGS, FLAG.COMPILE_MODE, 2f
+	if_bit_reset FLAGS, FLAG.COMPILE_MODE, 2f
 	call asm_call_rel32
 	jmp .Lparse_input.loop
 2:	call rax
@@ -892,7 +892,7 @@ dict_begin _
 	enddef
 
 	defimm_as ";" end_define
-		btc FLAGS, FLAG.COMPILE_MODE
+		btr FLAGS, FLAG.COMPILE_MODE
 		defpanic .Lend_define.nodefine, "(;) not inside definition"
 		jnc .Lend_define.nodefine
 		ASM_BEGIN rdx
