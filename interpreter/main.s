@@ -770,7 +770,7 @@ routine set_word
 	ret
 .Lset_word.update:
 	pop rdx
-	mov [rdi - 8], rax
+	mov [rdi - 8 - 1], rax
 	ret
 
 # ecx: byte count
