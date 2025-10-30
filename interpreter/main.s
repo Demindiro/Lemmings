@@ -946,6 +946,13 @@ dict_begin _
 		call dict_parse
 	enddef
 
+	defimm_as "!" Immediate
+		lea rdi, [rip + builtins_dict.Immediate]
+		lea rdx, [rip + builtins.Immediate]
+		string rsi, ecx, "!"
+		call dict_parse
+	enddef
+
 	defimm_as "//" comment
 	2:	call read_byte
 		ifltz eax, 3f
@@ -1090,6 +1097,16 @@ dict_begin X86
 		call dict_parse
 	enddef
 dict_end X86
+
+
+dict_begin Immediate
+	defimm const
+		defpanic .LImmediate.const.assertfail, "(! const) only works in compile mode"
+		if_bit_reset FLAGS, FLAG.COMPILE_MODE, .LImmediate.const.assertfail
+		num_pop rax
+		call asm_num_push
+	enddef
+dict_end Immediate
 
 
 dict_begin String
