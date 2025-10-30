@@ -1,11 +1,13 @@
-use core::ptr::NonNull;
+use core::{mem::MaybeUninit, ptr::NonNull};
 use crate::{KernelEntryToken, page, sync::SpinLock, thread::{self, RoundRobinQueue}};
 use critical_section::CriticalSection;
-use lemmings_x86_64::{idt::{self, Idt, Ist, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
+use lemmings_x86_64::{apic::{self, local::LocalApicHelper, io::{IoApicHelper, TriggerMode}}, idt::{self, Idt, Ist, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
 
 static mut GDT: Gdt = Gdt::new();
 static mut TSS: Tss = Tss::new();
 static mut IDT: Idt<IDT_NR> = Idt::new();
+
+static mut LOCAL_APIC: MaybeUninit<LocalApicHelper<'static>> = MaybeUninit::uninit();
 
 static IRQ_HANDLERS: SpinLock<IrqHandlers> = SpinLock::new(IrqHandlers::new());
 
@@ -26,6 +28,14 @@ pub mod door {
     }
 
     fn wait(x: IrqN) -> Void {
+        unsafe {
+            core::arch::asm! {
+                "pushf",
+                "sti",
+                "hlt",
+                "popf",
+            }
+        }
         todo!();
     }
 
@@ -92,6 +102,7 @@ pub fn init(token: KernelEntryToken) -> KernelEntryToken {
     let root = unsafe { mmu::current_root::<mmu::L4>() };
     init_gdt(&root);
     init_idt(&root);
+    init_apic(&root);
     token
 }
 
@@ -123,6 +134,27 @@ fn init_idt(root: &mmu::Root<mmu::L4>) {
     let idtp = mmu::Virt::new(idtp).expect("IDT should be in valid virtual space");
     let idtp = root.translate(&page::IdentityMapper, idtp).expect("IDT should be mapped");
     unsafe { IdtPointer::new::<IDT_NR>(idtp).activate() };
+}
+
+#[inline(always)]
+fn init_apic(root: &mmu::Root<mmu::L4>) {
+    let apic = apic::local_address();
+    let apic = unsafe { page::phys_to_virt(page::Phys(apic.into())) };
+    let apic = unsafe { apic.cast::<apic::local::LocalApic>().as_ref() };
+    let apic = LocalApicHelper::new(apic);
+    let apic = unsafe { (&mut *(&raw mut LOCAL_APIC)).write(apic) };
+    apic.enable();
+
+    let io = {
+        let io = apic::io::DEFAULT_ADDR;
+        let io = unsafe { page::phys_to_virt(page::Phys(io.into())) };
+        let io = unsafe { io.cast::<apic::io::IoApic>().as_ref() };
+        let io = IoApicHelper::new(io);
+        io
+    };
+
+    // FIXME no hardcoding!
+    unsafe { io.set_irq(1, 0, 33, TriggerMode::Level, false) }
 }
 
 extern "sysv64" fn double_fault() {
