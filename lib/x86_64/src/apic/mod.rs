@@ -12,7 +12,7 @@ pub fn local_address() -> mmu::Phys<mmu::A12> {
     mmu::Phys::new_masked(base)
 }
 
-pub unsafe fn enable_apic() {
-    let v = unsafe { local_address().get() } | IA32_APIC_BASE_MSR_ENABLE;
+pub unsafe fn enable_local_apic(addr: mmu::Phys<mmu::A12>) {
+    let v = addr.get() | IA32_APIC_BASE_MSR_ENABLE;
     unsafe { msr::wrmsr(msr::IA32_APIC_BASE, v) };
 }
