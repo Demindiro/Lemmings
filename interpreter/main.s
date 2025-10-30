@@ -363,9 +363,16 @@ _panic_start:
 	ASM_PUSH8 0xe9
 	ASM_ADVANCE32
 .endm
+.macro ASM_jz_rel32_stub
+	ASM_PUSH16 0x840f
+	ASM_ADVANCE32
+.endm
 .macro ASM_mov_rax_imm64 x:req
 	ASM_PUSH16 0xb848
 	ASM_PUSH64 \x
+.endm
+.macro ASM_test_rax_rax
+	ASM_PUSH24 0xc08548
 .endm
 .macro ASM_sub_r15_imm8_c x:req
 	ASM_PUSH32 0xef8349 | (\x << 24)
@@ -414,6 +421,10 @@ _panic_start:
 .macro ASM_obj_pop_rax
 	ASM_load_r14_rax
 	ASM_add_r14_imm8_c 8
+.endm
+.macro ASM_ifeqz_rax_rel32_stub
+	ASM_test_rax_rax
+	ASM_jz_rel32_stub
 .endm
 
 # rax: routine
