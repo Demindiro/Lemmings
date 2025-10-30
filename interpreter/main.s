@@ -72,6 +72,12 @@ read_archive.door: .quad 0
 read_archive.file: .quad 0
 read_archive.offset: .quad 0
 
+.section .bss.branch
+branch.pre_cond: .quad 0
+branch.post_cond: .quad 0
+# we need to save/restore flags as conditionals may occur inside definitions
+branch.og_flags: .quad 0
+
 .macro defpanic label:req, reason:req
  .pushsection .rodata.panic
 	.byte .L\@.end - .L\@
@@ -777,6 +783,19 @@ routine str_reserve
 	lea OBJ_HEAP_HEAD, [rdi + rcx]
 	ret
 
+# rbx: pre_cond
+routine branch_end
+	mov FLAGS, [rip + branch.og_flags]
+	xor eax, eax
+	mov [rip + branch.pre_cond], rax
+	mov [rip + branch.post_cond], rax
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, 2f
+	ASM_BEGIN rax
+	ASM_ret
+	ASM_END
+	jmp rbx
+2:	ret
+
 
 .macro dict_begin namespace:req
  .section .rodata.builtins_dict.\namespace
@@ -952,19 +971,42 @@ dict_begin _
 	enddef
 
 	defimm "if"
-		panic "TODO (if)"
+		asserteq (qword ptr [rip + branch.pre_cond]), 0, "(if) nested conditionals are forbidden"
+		ASM_BEGIN rax
+		mov [rip + branch.pre_cond], rax
+		mov [rip + branch.og_flags], FLAGS
+		or FLAGS, 1 << FLAG.COMPILE_MODE
 	enddef
 
 	defimm "then"
-		panic "TODO (then)"
+		assertne (qword ptr [rip + branch.pre_cond]), 0, "(then) not after if"
+		asserteq (qword ptr [rip + branch.post_cond]), 0, "(then) multiple thens"
+		ASM_BEGIN rax
+		ASM_num_pop_rax
+		ASM_ifeqz_rax_rel32_stub
+		ASM_END
+		mov [rip + branch.post_cond], rax
 	enddef
 
 	defimm "else"
-		panic "TODO (else)"
+		mov rcx, [rip + branch.post_cond]
+		assertnez rcx, "(then) not after then"
+		ASM_BEGIN rax
+		ASM_jmp_rel32_stub
+		ASM_END
+		mov [rip + branch.post_cond], rax
+		sub eax, ecx
+		mov [rcx - 4], eax
 	enddef
 
 	defimm "end"
-		panic "TODO (end)"
+		mov rbx, qword ptr [rip + branch.pre_cond]
+		mov rcx, qword ptr [rip + branch.post_cond]
+		assertnez rcx, "(end) not inside conditional"
+		ASM_BEGIN rax
+		sub eax, ecx
+		mov [rcx - 4], eax
+		call branch_end
 	enddef
 
 	defimm "repeat"
