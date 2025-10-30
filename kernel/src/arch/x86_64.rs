@@ -62,7 +62,7 @@ impl IrqHandlers {
     }
 
     fn wait(&mut self, irq: u8, cs: CriticalSection<'_>) {
-        let irq = usize::from(irq) - IRQ_NR;
+        let irq = usize::from(irq - IRQ_STUB_OFFSET);
         self.queues[irq].enqueue_last(thread::current());
         thread::park(cs);
     }
@@ -74,7 +74,7 @@ impl IrqHandlers {
             }
             let b = n.trailing_ones() as usize;
             *n |= 1 << b;
-            return Some((IRQ_NR + i * 32 + b) as u8)
+            return Some(IRQ_STUB_OFFSET + (i * 32 + b) as u8)
         }
         None
     }
