@@ -14,7 +14,7 @@ macro_rules! door {
             let table = const {
                 $crate::door::Table(core::ptr::NonNull::new(&T as *const T as *mut T).unwrap().cast())
             };
-            unsafe { $crate::door::register_internal(T::ID, $name, table) };
+            unsafe { $crate::door::register(T::ID, $name, table) };
         }
     };
 }
@@ -89,13 +89,6 @@ pub fn list(api: Option<ApiId>, cookie: Cookie) -> Option<(Cookie, Interface<'st
         }
     }
     None
-}
-
-/// # Safety
-///
-/// The implementation must conform to the API.
-pub unsafe fn register_internal(api: ApiId, name: &str, table: Table) {
-    unsafe { register(api, name, table) }
 }
 
 /// # Safety
