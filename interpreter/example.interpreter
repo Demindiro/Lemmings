@@ -9,13 +9,6 @@ end
 : interrupt->acquire 1 interrupt-door Sys Door call:0->1 ;
 : interrupt->release 2 interrupt-door Sys Door call:1->0 ;
 
-interrupt->acquire
-dup String natural Sys log
-
-interrupt->wait
-
-Sys halt
-
 : IO_DATA    0x60 ;
 : IO_STATUS  0x64 ;
 : IO_COMMAND 0x64 ;
@@ -52,19 +45,36 @@ Sys halt
 : ps2_get_config  0x20 ps2_command  ps2_read  ;
 : ps2_set_config  0x60 ps2_command  ps2_write ;
 
+: CTRL_CFG_PORT_1_INTERRUPT_ENABLED 1 0 #sl ;
+: CTRL_CFG_PORT_2_INTERRUPT_ENABLED 1 1 #sl ;
+: CTRL_CFG_PORT_1_TRANSLATION       1 6 #sl ;
+
+: ps2_init_config
+	ps2_get_config
+	CTRL_CFG_PORT_1_INTERRUPT_ENABLED #or
+	CTRL_CFG_PORT_2_INTERRUPT_ENABLED #or
+	CTRL_CFG_PORT_1_TRANSLATION #not #and
+	ps2_set_config ;
+
 : ps2_keyboard_init ;
 : ps2_mouse_init ;
 
 : ps2_init
 	ps2_disable_ports
-	ps2_keyboard_init
-	ps2_mouse_init
+	ps2_init_config
 	ps2_enable_ports
+	// ps2_keyboard_init
+	// ps2_mouse_init
 	;
 
-0xee ps2_write
-ps2_read
+// 0xee ps2_write
+// ps2_read
 
-Sys halt
+ps2_init
 
-exit
+interrupt->acquire
+dup String natural Sys log
+
+interrupt->wait
+
+Sys exit
