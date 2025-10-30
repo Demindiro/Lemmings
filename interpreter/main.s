@@ -1057,13 +1057,11 @@ dict_end _
 
 
 dict_begin Sys
-	def door
-		num_pop rdi # high
-		num_peek rsi # low
-		xor edx, edx
-		xor ecx, ecx
-		syscall_door_list
-		num_replace rax
+	defimm Door
+		lea rdi, [rip + builtins_dict.Sys.Door]
+		lea rdx, [rip + builtins.Sys.Door]
+		string rsi, ecx, "Sys Door"
+		call dict_parse
 	enddef
 
 	def exit
@@ -1087,6 +1085,18 @@ dict_begin Sys
 		syscall_panic
 	enddef
 dict_end Sys
+
+
+dict_begin Sys.Door
+	def find
+		num_pop rdi # high
+		num_peek rsi # low
+		xor edx, edx
+		xor ecx, ecx
+		syscall_door_list
+		num_replace rax
+	enddef
+dict_end Sys.Door
 
 
 dict_begin X86
