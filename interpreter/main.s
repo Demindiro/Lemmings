@@ -925,6 +925,13 @@ routine dict_parse
 
 
 dict_begin _
+	defimm String
+		lea rdi, [rip + builtins_dict.String]
+		lea rdx, [rip + builtins.String]
+		string rsi, ecx, "String"
+		call dict_parse
+	enddef
+
 	defimm Sys
 		lea rdi, [rip + builtins_dict.Sys]
 		lea rdx, [rip + builtins.Sys]
@@ -1083,6 +1090,41 @@ dict_begin X86
 		call dict_parse
 	enddef
 dict_end X86
+
+
+dict_begin String
+	def natural
+		num_pop rax
+		# write to stack first so we don't
+		# have to reverse the string later
+		mov rsi, rsp
+		# 64/4 = 16
+		sub rsp, 16
+		# this is actually (1 << 64) / 10,
+		# but written such that it is evaluated correctly
+		movabs rcx, ((1 << (64 - 1)) - 1) / 5
+	2:	# TODO surely there's a way to use the result in rax
+		# directly (modulus), but my brain no work
+		mov ebx, eax
+		mul rcx
+		mov eax, edx
+		shl eax, 1
+		lea eax, [eax + eax * 4]
+		sub ebx, eax
+		add ebx, '0'
+		dec rsi
+		mov [rsi], bl
+		mov rax, rdx
+		ifnez rax, 2b
+		mov ecx, esp
+		sub ecx, esi
+		add ecx, 16
+		call str_reserve
+		obj_push rdi
+		rep movsb
+		add rsp, 16
+	enddef
+dict_end String
 
 
 dict_begin X86.Io
