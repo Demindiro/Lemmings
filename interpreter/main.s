@@ -1044,8 +1044,8 @@ dict_end _
 
 dict_begin Sys
 	def door
-		num_pop rsi # high
-		num_peek rdi # low
+		num_pop rdi # high
+		num_peek rsi # low
 		xor edx, edx
 		xor ecx, ecx
 		syscall_door_list
