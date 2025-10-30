@@ -21,6 +21,10 @@ pub enum TriggerMode {
 }
 
 impl<'a> IoApicHelper<'a> {
+    pub fn new(apic: &'a IoApic) -> Self {
+        Self { apic }
+    }
+
     pub fn irq_offset(irq: u8) -> u32 {
         0x10 + u32::from(irq) * 2
     }
