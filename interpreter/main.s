@@ -373,6 +373,12 @@ _panic_start:
 .macro ASM_sub_r14_imm8_c x:req
 	ASM_PUSH32 0xee8349 | (\x << 24)
 .endm
+.macro ASM_add_r15_imm8_c x:req
+	ASM_PUSH32 0xc78349 | (\x << 24)
+.endm
+.macro ASM_add_r14_imm8_c x:req
+	ASM_PUSH32 0xc68349 | (\x << 24)
+.endm
 .macro ASM_store_r15_rax
 	ASM_PUSH24 0x078949
 .endm
@@ -383,6 +389,12 @@ _panic_start:
 	ASM_PUSH24 0x07c749
 	ASM_PUSH32 \x
 .endm
+.macro ASM_load_r15_rax
+	ASM_PUSH24 0x078b49
+.endm
+.macro ASM_load_r14_rax
+	ASM_PUSH24 0x068b49
+.endm
 .macro ASM_num_push_rax
 	ASM_sub_r15_imm8_c 8
 	ASM_store_r15_rax
@@ -391,9 +403,17 @@ _panic_start:
 	ASM_sub_r15_imm8_c 8
 	ASM_store_r15_imm32 \x
 .endm
+.macro ASM_num_pop_rax
+	ASM_load_r15_rax
+	ASM_add_r15_imm8_c 8
+.endm
 .macro ASM_obj_push_rax
 	ASM_sub_r14_imm8_c 8
 	ASM_store_r14_rax
+.endm
+.macro ASM_obj_pop_rax
+	ASM_load_r14_rax
+	ASM_add_r14_imm8_c 8
 .endm
 
 # rax: routine
