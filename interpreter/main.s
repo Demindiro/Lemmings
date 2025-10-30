@@ -979,6 +979,24 @@ dict_begin _
 	def drop
 		num_drop
 	enddef
+
+	def_as "=" int_eq
+		num_pop rdx
+		num_peek rcx
+		xor eax, eax
+		cmp rcx, rdx
+		sete al
+		num_replace rax
+	enddef
+
+	def_as "<>" int_ne
+		num_pop rdx
+		num_peek rcx
+		xor eax, eax
+		cmp rcx, rdx
+		setne al
+		num_replace rax
+	enddef
 dict_end _
 
 
