@@ -1,11 +1,20 @@
 "Hello interpreter!" Sys log
 
-: interrupt-door 0xa3691cc8b5ec1fad 0x9566d3fc16c2b763 Sys door ;
-
-interrupt-door
+0xa3691cc8b5ec1fad 0x9566d3fc16c2b763 Sys Door find
 if dup 0 = then
 	"Failed to find interrupt door" Sys panic
 end
+: interrupt-door ! const ;
+: interrupt->wait    0 interrupt-door Sys Door call:1->0 ;
+: interrupt->acquire 1 interrupt-door Sys Door call:0->1 ;
+: interrupt->release 2 interrupt-door Sys Door call:1->0 ;
+
+interrupt->acquire
+dup String natural Sys log
+
+interrupt->wait
+
+Sys halt
 
 : IO_DATA    0x60 ;
 : IO_STATUS  0x64 ;
