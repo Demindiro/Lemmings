@@ -1,7 +1,6 @@
-//! This kernel supports real-time scheduling with `O(log n)` worst-case runtime.
-//!
-//! If you absolutely need `O(1)` scheduling, avoid having any threads sleep.
-//! The sleep queue is a min-heap, which has `O(log n)` time complexity on all operations.
+#![allow(unused)]
+//! This kernel supports real-time scheduling with `O(1)` time complexity
+//! and no additional space overhead.
 
 use crate::{KernelEntryToken, page::{self, PAGE_SIZE, PageAttr}, sync::SpinLock, time::Monotonic};
 use core::{arch::asm, cell::Cell, fmt, mem, ptr::NonNull, ops};
@@ -33,11 +32,6 @@ pub struct ThreadHandle(ThreadRef);
 
 struct ThreadManager {
     pending: [RoundRobinQueue; PRIORITY_COUNT],
-    sleeping: TimeQueue,
-}
-
-struct TimeQueue {
-    head: Option<ThreadRef>,
 }
 
 struct ThreadControlBlock {
@@ -49,7 +43,6 @@ struct ThreadControlBlock {
     ///
     /// Ditto
     right: Cell<ThreadRef>,
-    sleep_until: Cell<Monotonic>,
     priority: Cell<Priority>,
     program_counter: Cell<*const u8>,
     stack_pointer: Cell<*const u8>,
@@ -70,11 +63,11 @@ impl ThreadManager {
     pub const fn new() -> Self {
         Self {
             pending: [const { RoundRobinQueue::new() }; PRIORITY_COUNT],
-            sleeping: TimeQueue::new(),
         }
     }
 
     /// Create a new thread and put it at the *end* of the queue.
+    #[allow(unused)]
     pub fn spawn(&mut self, priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
         let thread = self.create(priority, entry)?;
         self.pending[priority as usize].enqueue_last(ThreadHandle(thread));
@@ -103,13 +96,13 @@ impl ThreadManager {
             base.write(ThreadControlBlock {
                 left: Cell::new(thread),
                 right: Cell::new(thread),
-                sleep_until: Default::default(),
                 priority: Cell::new(priority),
                 program_counter: Cell::new(entry as *const u8),
                 stack_pointer: Cell::new(base.cast::<usize>().as_ptr().sub(1).cast()),
             });
             thread
         };
+        // FIXME alignment?
         thread.stack.last().expect("not empty").set(mem::MaybeUninit::new(Thread::exit as usize));
         Ok(thread)
     }
@@ -147,14 +140,6 @@ impl RoundRobinQueue {
             self.cur = Some(l);
         }
         Some(ThreadHandle(cur))
-    }
-}
-
-impl TimeQueue {
-    pub const fn new() -> Self {
-        Self {
-            head: None,
-        }
     }
 }
 

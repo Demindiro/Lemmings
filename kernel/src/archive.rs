@@ -1,7 +1,7 @@
 use crate::{KernelEntryToken, page};
 
 pub mod door {
-    use core::{num::NonZero, mem::MaybeUninit, ptr::NonNull};
+    use core::ptr::NonNull;
     use lemmings_idl_archive::*;
 
     door! {
@@ -89,7 +89,7 @@ pub mod door {
         unsafe {
             let n = usize::from(out.len).min(data.len());
             let src = NonNull::from(&data[..n]);
-            let p = out.base.0.copy_from_nonoverlapping(src.cast(), src.len());
+            out.base.0.copy_from_nonoverlapping(src.cast(), src.len());
         }
         ReadResult {
             bytes_to_end: FileLen::from(u64::try_from(data.len()).expect("u64 == usize")),
@@ -144,7 +144,7 @@ impl Dir {
         let (len_ty, strings) = strings.split_first().expect("truncated");
         let namelen = 1 + (len_ty & 0x7f);
         let is_dir = len_ty & 0x80 != 0;
-        let (name, strings) = strings.split_at(usize::from(namelen));
+        let name = &strings[..usize::from(namelen)];
         let name = core::str::from_utf8(name).expect("name is not UTF-8");
         let DirRef { offset, len } = self.refs()
             .skip(u32_to_usize(i))
@@ -206,13 +206,6 @@ impl core::ops::Deref for File {
 }
 
 impl Item {
-    pub fn as_dir(self) -> Option<Dir> {
-        match self {
-            Self::Dir(x) => Some(x),
-            _ => None,
-        }
-    }
-
     pub fn as_file(self) -> Option<File> {
         match self {
             Self::File(x) => Some(x),

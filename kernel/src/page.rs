@@ -1,3 +1,4 @@
+#![allow(unused)]
 pub use lemmings_x86_64::mmu::PageAttr;
 
 use crate::{KernelEntryToken, sync::SpinLock};
@@ -19,6 +20,7 @@ const HUGEPAGE_1G_MASK: usize = HUGEPAGE_1G_SIZE - 1;
 pub use lemmings_qemubios::Phys;
 pub type Virt = NonNull<u8>;
 
+#[derive(Debug)]
 pub struct OutOfMemory;
 pub struct OutOfVirtSpace;
 
@@ -84,6 +86,7 @@ impl VirtManager {
         let mut pa = mmu::Phys::<mmu::A12>::new(phys.0).unwrap();
         let va_end = mmu::Virt::<mmu::A12>::new(range.end.as_ptr() as u64).unwrap();
         let mut root = unsafe { mmu::current_root::<mmu::L4>() };
+        let va_start = va;
         while va != va_end {
             /*
             if va. & HUGEPAGE_1G_MASK == 0 {
@@ -94,7 +97,8 @@ impl VirtManager {
             }
             */
             unsafe {
-                root.set_4k(&IdentityMapper, &mut PageAllocator, va, pa, attr);
+                root.set_4k(&IdentityMapper, &mut PageAllocator, va, pa, attr)
+                    .inspect_err(|_| self.unmap_range(va_start..va, |_| ()))?;
             }
             va = va.step_next(1);
             pa = pa.step_next(1);
@@ -106,15 +110,25 @@ impl VirtManager {
         let mut va = mmu::Virt::<mmu::A12>::new(range.start.as_ptr() as u64).unwrap();
         let va_end = mmu::Virt::<mmu::A12>::new(range.end.as_ptr() as u64).unwrap();
         let mut root = unsafe { mmu::current_root::<mmu::L4>() };
+        let va_start = va;
         while va != va_end {
             // FIXME deadlock...
             let pa = mmu::Phys::<mmu::A12>::new(virt_to_phys(alloc_one()?).0).unwrap();
             unsafe {
-                root.set_4k(&IdentityMapper, &mut PageAllocator, va, pa, attr);
+                root.set_4k(&IdentityMapper, &mut PageAllocator, va, pa, attr)
+                    .inspect_err(|_| self.unmap_range(va_start..va, |_| ()))?;
             }
             va = va.step_next(1);
         }
         Ok(())
+    }
+
+    unsafe fn unmap_range<F>(&mut self, range: ops::Range<mmu::Virt<mmu::A12>>, mut f: F)
+    where
+        F: FnMut(Range<Phys>)
+    {
+        let _ = (range, f);
+        todo!();
     }
 }
 

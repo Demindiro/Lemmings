@@ -39,10 +39,6 @@ pub type ApiId = NonZero<u128>;
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Routine(pub NonNull<()>);
-
-#[derive(Clone, Copy)]
-#[repr(transparent)]
 pub struct Cookie(u64);
 
 #[derive(Clone, Copy)]
@@ -52,7 +48,6 @@ pub struct Table(pub NonNull<NonNull<()>>);
 #[derive(Clone, Copy)]
 struct Name(u32);
 
-unsafe impl Sync for Routine {}
 unsafe impl Sync for Table {}
 
 impl Name {

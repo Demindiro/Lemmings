@@ -1,6 +1,6 @@
 use {
     crate::{mmu::{self, Phys}, tss::Tss},
-    core::{arch::asm, marker::PhantomData, mem, pin::Pin},
+    core::{arch::asm, marker::PhantomData, mem},
 };
 
 // ~~stolen from~~ inspired by ToaruOS code
