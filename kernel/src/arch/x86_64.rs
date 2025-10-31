@@ -1,7 +1,7 @@
-use core::{mem::MaybeUninit, ptr::NonNull};
+use core::mem::MaybeUninit;
 use crate::{KernelEntryToken, page, sync::{SpinLock, SpinLockGuard}, thread::{self, RoundRobinQueue, ThreadHandle}};
 use critical_section::CriticalSection;
-use lemmings_x86_64::{apic::{self, local::LocalApicHelper, io::{IoApicHelper, TriggerMode}}, idt::{self, Idt, Ist, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
+use lemmings_x86_64::{apic::{self, local::LocalApicHelper, io::{IoApicHelper, TriggerMode}}, idt::{self, Idt, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
 
 static mut GDT: Gdt = Gdt::new();
 static mut TSS: Tss = Tss::new();
@@ -147,7 +147,7 @@ impl IrqHandlers {
 
     fn ioapic(&self) -> IoApicHelper<'_> {
         let io = apic::io::DEFAULT_ADDR;
-        let io = unsafe { page::phys_to_virt(page::Phys(io.into())) };
+        let io = page::phys_to_virt(page::Phys(io.into()));
         let io = unsafe { io.cast::<apic::io::IoApic>().as_ref() };
         let io = IoApicHelper::new(io);
         io
@@ -159,7 +159,7 @@ pub fn init(token: KernelEntryToken) -> KernelEntryToken {
     let root = unsafe { mmu::current_root::<mmu::L4>() };
     init_gdt(&root);
     init_idt(&root);
-    init_apic(&root);
+    init_apic();
     token
 }
 
@@ -194,9 +194,9 @@ fn init_idt(root: &mmu::Root<mmu::L4>) {
 }
 
 #[inline(always)]
-fn init_apic(root: &mmu::Root<mmu::L4>) {
+fn init_apic() {
     let apic = apic::local_address();
-    let apic = unsafe { page::phys_to_virt(page::Phys(apic.into())) };
+    let apic = page::phys_to_virt(page::Phys(apic.into()));
     let apic = unsafe { apic.cast::<apic::local::LocalApic>().as_ref() };
     let apic = LocalApicHelper::new(apic);
     let apic = unsafe { (&mut *(&raw mut LOCAL_APIC)).write(apic) };

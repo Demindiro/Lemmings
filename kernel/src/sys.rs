@@ -1,5 +1,5 @@
 use crate::{KernelEntryToken, door::{self, ApiId, Cookie, Table}, ffi::{Slice, Tuple2}};
-use core::{mem::{self, MaybeUninit}, ptr::NonNull, num::NonZero};
+use core::mem::MaybeUninit;
 
 macro_rules! systable {
     ($($id:literal $fn:ident)*) => {
@@ -18,6 +18,7 @@ systable! {
     3 door_register
 }
 
+#[allow(unused)]
 struct SysFn(*const ());
 
 #[repr(C)]
@@ -27,10 +28,6 @@ struct InterfaceInfo {
 }
 
 unsafe impl Sync for SysFn {}
-
-extern "sysv64" fn invalid(eax: u32) {
-    panic!("invalid system call! eax={eax}");
-}
 
 /// # Safety
 ///

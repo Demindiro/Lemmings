@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 #[derive(Default)]
 pub struct Monotonic(u64);
 

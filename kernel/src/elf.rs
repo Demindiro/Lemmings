@@ -1,5 +1,5 @@
 use crate::page;
-use core::{fmt, ptr::NonNull, ops::Range};
+use core::{fmt, ptr::NonNull};
 
 const ET_DYN: [u8; 2] = [3, 0];
 const ARCH: [u8; 2] = [0x3e, 0];
@@ -30,6 +30,7 @@ pub enum LoadError {
     OutOfVirtSpace,
 }
 
+#[allow(dead_code)]
 pub struct Entry(NonNull<u8>);
 
 struct ElfMapper<'a> {
@@ -96,6 +97,7 @@ pub fn load(file: &'static [u8]) -> Result<Entry, LoadError> {
         phys_base: page::virt_to_phys(NonNull::from(&file[0])),
         dyn_rela,
     };
+    mapper.check_segments(&program_headers)?;
     mapper.map_segments(&program_headers);
     mapper.patch_dynamic();
     // SAFETY:
@@ -152,6 +154,24 @@ fn parse_dynamic<'a>(file: &'a [u8], dynamic: &[[u8; 16]]) -> Result<&'a [[u8; 2
 }
 
 impl<'a> ElfMapper<'a> {
+    fn check_segments(&self, program_headers: &[[u8; PH_ENTSIZE]]) -> Result<(), LoadError> {
+        for ph in program_headers {
+            if u32(&ph[..4]) != self::PT_LOAD {
+                continue;
+            }
+            let offset = u64(&ph[8..16]);
+            let vaddr = u64(&ph[16..24]);
+            let align = u64(&ph[48..56]);
+            if align != 0x1000 {
+                return Err(LoadError::SegmentNotAligned);
+            }
+            if offset % align != vaddr % align {
+                return Err(LoadError::SegmentNotAligned);
+            }
+        }
+        Ok(())
+    }
+
     fn map_segments(&self, program_headers: &[[u8; PH_ENTSIZE]]) {
         // at this point, the ELF file should be fully validated.
         // if any unexpected conditions occur, just panic.
@@ -192,12 +212,13 @@ impl<'a> ElfMapper<'a> {
             _ => panic!("unsupported flags"),
         };
 
-        unsafe { page::map_region(va..va_mid, pa, attr) };
-        unsafe { page::map_region_zero(va_mid..va_end, attr) };
+        // TODO handle properly
+        unsafe { page::map_region(va..va_mid, pa, attr).unwrap() };
+        unsafe { page::map_region_zero(va_mid..va_end, attr).unwrap() };
     }
 
     fn patch_dynamic(&self) {
-        for e in self.dyn_rela {
+        for _e in self.dyn_rela {
             todo!("dynamic");
         }
     }

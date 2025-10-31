@@ -1,3 +1,4 @@
+#![allow(unused)]
 //! This kernel supports real-time scheduling with `O(1)` time complexity
 //! and no additional space overhead.
 
@@ -66,6 +67,7 @@ impl ThreadManager {
     }
 
     /// Create a new thread and put it at the *end* of the queue.
+    #[allow(unused)]
     pub fn spawn(&mut self, priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
         let thread = self.create(priority, entry)?;
         self.pending[priority as usize].enqueue_last(ThreadHandle(thread));
