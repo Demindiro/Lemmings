@@ -58,13 +58,13 @@ fn main_init() -> elf::Entry {
     init
 }
 
-fn main() {
+extern "sysv64" fn main() {
     let init = main_init();
     unsafe { core::mem::transmute::<_, extern "sysv64" fn()>(init)() }
 }
 
 #[inline]
-fn entry(entry: &lemmings_qemubios::Entry) -> ! {
+extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     unsafe {
         use lemmings_x86_64::{cr0, cr4};
         cr0::update(|x| x | cr0::WRITE_PROTECT);

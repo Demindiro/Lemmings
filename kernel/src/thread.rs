@@ -73,7 +73,7 @@ impl ThreadManager {
     }
 
     /// Create a new thread and put it at the *end* of the queue.
-    pub fn spawn(&mut self, priority: Priority, entry: fn()) -> Result<(), ThreadSpawnError> {
+    pub fn spawn(&mut self, priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
         let thread = self.create(priority, entry)?;
         self.pending[priority as usize].enqueue_last(ThreadHandle(thread));
         Ok(())
@@ -84,13 +84,13 @@ impl ThreadManager {
     /// # Warning
     ///
     /// Should only be called from [`_start`]!
-    pub fn enter(&mut self, priority: Priority, entry: fn(), token: KernelEntryToken) -> ! {
+    pub fn enter(&mut self, priority: Priority, entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
         self.create(priority, entry)
             .expect("failed to create initial thread")
             .enter(token);
     }
 
-    fn create(&mut self, priority: Priority, entry: fn()) -> Result<ThreadRef, ThreadSpawnError> {
+    fn create(&mut self, priority: Priority, entry: extern "sysv64" fn()) -> Result<ThreadRef, ThreadSpawnError> {
         let page = page::alloc_one_guarded(PageAttr::RW)?.cast::<Thread>();
         // SAFETY:
         // - the page we allocated is valid and writeable.
