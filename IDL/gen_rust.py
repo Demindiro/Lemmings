@@ -130,8 +130,6 @@ def emit(outf, idl, sysv):
     outf_depth = 0
     out = lambda s: outf('    ' * outf_depth + s) if s else outf('')
 
-    prev_fn = False
-
     class Scope:
         def __init__(self, s, *, suffix = ''):
             self.s = s
@@ -146,18 +144,12 @@ def emit(outf, idl, sysv):
             out(f'}}{self.suffix}')
     class Impl(Scope):
         def __init__(self, name):
-            nonlocal prev_fn
-            prev_fn = False
             super().__init__(f'impl {name}')
     class ImplFor(Impl):
         def __init__(self, trait, name):
             super().__init__(f'{trait} for {name}')
     class Fn(Scope):
         def __init__(self, name, args, ret, *, public = False, macro_public = False, dead_code = False):
-            nonlocal prev_fn
-            if prev_fn:
-                out('')
-            prev_fn = True
             ret = ret and f' -> {ret}'
             if macro_public:
                 public = True
