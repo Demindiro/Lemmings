@@ -29,7 +29,7 @@ pub mod door {
         map
     }
 
-    fn wait(x: IrqVector) -> Void {
+    fn wait(x: IrqVector) {
         let IrqVector { irq, vector } = x;
         let irq = u32::from(irq).try_into().expect("invalid IRQ");
         let vector = u32::from(vector).try_into().expect("invalid vector");
@@ -40,17 +40,15 @@ pub mod door {
             h.mask(irq);
             h.eoi();
         });
-        Void
     }
 
-    fn done(x: IrqVector) -> Void {
+    fn done(x: IrqVector) {
         let IrqVector { irq, .. } = x;
         let x = u32::from(irq).try_into().expect("invalid IRQ");
         critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).unmask(x));
-        Void
     }
 
-    fn reserve(_: Void) -> MaybeVector {
+    fn reserve() -> MaybeVector {
         critical_section::with(|cs| {
             super::IRQ_HANDLERS
                 .lock(cs)
@@ -63,13 +61,12 @@ pub mod door {
         )
     }
 
-    fn release(x: Vector) -> Void {
+    fn release(x: Vector) {
         let x = u32::from(x).try_into().expect("invalid vector");
         critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).release(x));
-        Void
     }
 
-    fn map(x: Map) -> Void {
+    fn map(x: Map) {
         let Map { irq, vector, mode } = x;
         let irq = u32::from(irq).try_into().expect("invalid IRQ");
         let vector = u32::from(vector).try_into().expect("invalid vector");
@@ -78,7 +75,6 @@ pub mod door {
             TriggerMode::Edge(_) => true,
         };
         critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).map(irq, vector, edge));
-        Void
     }
 }
 

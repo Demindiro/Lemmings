@@ -185,6 +185,11 @@ def emit(outf, idl, sysv):
             outputs = f'$crate::{outputs}'
         return outputs and f' -> {outputs}'
 
+    def is_void(name):
+        sysv_ty = sysv[name]
+        # be defensive about alignment, just in case
+        return name == 'Void' and sysv_ty.memory_size == 0 and sysv_ty.memory_alignment <= 1
+
     emit_documentation(idl)
     out(f'#[repr(C)]')
     with Scope(f'pub struct {idl.name.replace("_", "")}'):
@@ -265,6 +270,8 @@ def emit(outf, idl, sysv):
                 out('self.0.as_ptr() as usize')
 
     def emit_record(name, ty, sysv_ty):
+        if is_void(name):
+            return
         tr = lambda x: f'r#{x}' if x in RESERVED_KEYWORDS else x
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
@@ -377,7 +384,9 @@ def emit(outf, idl, sysv):
         out('')
         for name, routine in idl.routines.items():
             emit_documentation(routine)
-            with Fn(name, f'&self, x: {routine.input}', routine.output, public = True):
+            args = '' if is_void(routine.input) else f', x: {routine.input}'
+            ret = '' if is_void(routine.output) else routine.output
+            with Fn(name, f'&self{args}', ret, public = True):
                 n = sysv[routine.input].register_count
                 args = ", ".join(VARS[:n])
                 if n > 0:
@@ -388,7 +397,8 @@ def emit(outf, idl, sysv):
                     out(f'{routine.output}::from_ffi(x)')
                 else:
                     out(f'unsafe {{ (self.{name})({args}) }};')
-                    out(f'{routine.output}')
+                    if not is_void(routine.output):
+                        out(f'{routine.output}')
                 del n, args
         del name, routine
 
@@ -407,13 +417,21 @@ def emit(outf, idl, sysv):
                     args = regn_to_usizes_args(sysv_in)
                     ret = regn_to_usizes_ret(sysv_out, macro = True)
                     with Scope(f'{name}:', suffix = ','):
-                        with Scope(f'unsafe extern "sysv64" fn ffi({args}){ret}'):
-                            if sysv[routine.input].register_count > 0:
+                        fn = f'unsafe extern "sysv64" fn ffi({args})'
+                        if not is_void(routine.output):
+                            fn = f'{fn}{ret}'
+                        with Scope(fn):
+                            x = 'x'
+                            if is_void(routine.input):
+                                x = ''
+                            elif sysv[routine.input].register_count > 0:
                                 out(f'let x = {routine.input}::from_ffi({regn_to_usizes_vars(sysv_in)});')
                             else:
                                 out(f'let x = {routine.input};')
-                            if sysv[routine.output].register_count > 0:
-                                out(f'let x: {routine.output} = $impl_{name}(x);')
+                            if is_void(routine.output):
+                                out(f'$impl_{name}({x})')
+                            elif sysv[routine.output].register_count > 0:
+                                out(f'let x: {routine.output} = $impl_{name}({x});')
                                 out(f'x.to_ffi().into()')
                             else:
                                 out(f'let _: {routine.output} = $impl_{name}(x);')
