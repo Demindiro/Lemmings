@@ -384,7 +384,8 @@ def emit(outf, idl, sysv):
         out('')
         for name, routine in idl.routines.items():
             emit_documentation(routine)
-            args = '' if is_void(routine.input) else f', x: {routine.input}'
+            x = '_' if sysv[routine.input].register_count == 0 else 'x'
+            args = '' if is_void(routine.input) else f', {x}: {routine.input}'
             ret = '' if is_void(routine.output) else routine.output
             with Fn(name, f'&self{args}', ret, public = True):
                 n = sysv[routine.input].register_count
