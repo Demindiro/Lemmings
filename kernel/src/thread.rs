@@ -113,6 +113,10 @@ impl ThreadManager {
         thread.stack.last().expect("not empty").set(mem::MaybeUninit::new(Thread::exit as usize));
         Ok(thread)
     }
+
+    fn dequeue_next(&mut self) -> Option<ThreadHandle> {
+        self.pending.iter_mut().find_map(|x| x.dequeue_first())
+    }
 }
 
 impl RoundRobinQueue {
