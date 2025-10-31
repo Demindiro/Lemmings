@@ -74,6 +74,11 @@ impl IrqHandlers {
         thread::park(cs);
     }
 
+    fn dequeue(&mut self, irq: u8) -> Option<ThreadHandle> {
+        let irq = usize::from(irq - IRQ_STUB_OFFSET);
+        self.queues[irq].dequeue_first()
+    }
+
     fn reserve(&mut self) -> Option<u8> {
         for (i, n) in self.allocated.iter_mut().enumerate() {
             if *n == u32::MAX {
@@ -158,8 +163,12 @@ extern "sysv64" fn double_fault() {
     panic!("Double fault!");
 }
 
-extern "sysv64" fn irq_handler(id: u8) {
-    todo!("irq handler {id}");
+extern "sysv64" fn irq_handler<'a>(irq: u8) {
+    // SAFETY: interrupts are disabled right now
+    let cs = unsafe { CriticalSection::<'a>::new() };
+    let thread = IRQ_HANDLERS.lock(cs).dequeue(irq);
+    let thread = thread.unwrap_or_else(|| todo!("no waiting threads"));
+    thread.resume(cs);
 }
 
 extern "sysv64" fn timer_handler() {
