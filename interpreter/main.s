@@ -1042,6 +1042,11 @@ dict_begin _
 		num_push rax
 	enddef
 
+	def dup2
+		mov rax, [NUM_STACK_HEAD + 8*1]
+		num_push rax
+	enddef
+
 	def drop
 		num_drop
 	enddef
@@ -1145,6 +1150,23 @@ dict_begin Sys.Door
 	def_as "call:1->0" call_1_0
 		num_pop rbx
 		num_pop rax
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:2->0" call_2_0
+		num_pop rbx
+		num_pop rax
+		num_pop rsi
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:3->0" call_3_0
+		num_pop rbx
+		num_pop rax
+		num_pop rdx
+		num_pop rsi
 		num_pop rdi
 		call [rbx + rax * 8]
 	enddef

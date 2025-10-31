@@ -130,8 +130,6 @@ def emit(outf, idl, sysv):
     outf_depth = 0
     out = lambda s: outf('    ' * outf_depth + s) if s else outf('')
 
-    prev_fn = False
-
     class Scope:
         def __init__(self, s, *, suffix = ''):
             self.s = s
@@ -146,18 +144,12 @@ def emit(outf, idl, sysv):
             out(f'}}{self.suffix}')
     class Impl(Scope):
         def __init__(self, name):
-            nonlocal prev_fn
-            prev_fn = False
             super().__init__(f'impl {name}')
     class ImplFor(Impl):
         def __init__(self, trait, name):
             super().__init__(f'{trait} for {name}')
     class Fn(Scope):
         def __init__(self, name, args, ret, *, public = False, macro_public = False, dead_code = False):
-            nonlocal prev_fn
-            if prev_fn:
-                out('')
-            prev_fn = True
             ret = ret and f' -> {ret}'
             if macro_public:
                 public = True
@@ -166,6 +158,12 @@ def emit(outf, idl, sysv):
                 out('#[allow(dead_code)]')
             public = 'pub ' if public else ''
             super().__init__(f'{public}fn {name}({args}){ret}')
+
+    def documentation(ty):
+        return idl.documentation.get(ty, tuple())
+    def emit_documentation(ty):
+        for l in documentation(ty):
+            out(f'/// {l}')
 
     def regn_to_usizes(sysv_ty):
         n = sysv_ty.register_count
@@ -190,20 +188,22 @@ def emit(outf, idl, sysv):
             outputs = f'$crate::{outputs}'
         return outputs and f' -> {outputs}'
 
+    emit_documentation(idl)
     out(f'#[repr(C)]')
-    out(f'pub struct {idl.name.replace("_", "")} {{')
-    for name, routine in idl.routines.items():
-        args = regn_to_usizes_args(sysv.get(routine.input))
-        ret = regn_to_usizes_ret(sysv.get(routine.output))
-        out(f'\tpub {name}: unsafe extern "sysv64" fn({args}){ret},')
-        del name, routine, args, ret
-    out('}')
+    with Scope(f'pub struct {idl.name.replace("_", "")}'):
+        for name, routine in idl.routines.items():
+            args = regn_to_usizes_args(sysv.get(routine.input))
+            ret = regn_to_usizes_ret(sysv.get(routine.output))
+            emit_documentation(routine)
+            out(f'pub {name}: unsafe extern "sysv64" fn({args}){ret},')
+            del name, routine, args, ret
     out('')
 
     def emit_integer(signed, bits):
         x = f'{"ui"[signed]}{bits or "size"}'
         def f(name, ty, sysv):
-            out(f'#[derive(Clone)]')
+            emit_documentation(ty)
+            out(f'#[derive(Clone, Debug)]')
             out(f'pub struct {name}({x});')
             with Impl(name):
                 always_true = ty.start == 0 and ty.until in (gen.IntegerType.ADDRESS_MAX_EXCL, 1 << 64)
@@ -256,6 +256,8 @@ def emit(outf, idl, sysv):
         return f
 
     def emit_pointer(name, ty, sysv):
+        emit_documentation(ty)
+        out(f'#[derive(Clone, Debug)]')
         out(f'pub struct {name}(pub core::ptr::NonNull<{ty.deref_type}>);')
         with Impl(name):
             with Fn('is_valid', 'x: usize', 'bool', dead_code = True):
@@ -268,10 +270,13 @@ def emit(outf, idl, sysv):
     def emit_unit(name, ty, sysv):
         if name == 'None':
             return
+        emit_documentation(ty)
         out(f'pub struct {name};')
 
     def emit_record(name, ty, sysv_ty):
         tr = lambda x: f'r#{x}' if x in RESERVED_KEYWORDS else x
+        emit_documentation(ty)
+        out(f'#[derive(Clone, Debug)]')
         if sysv_ty.register_count == 0:
             out(f'pub struct {name};')
             return
@@ -314,6 +319,8 @@ def emit(outf, idl, sysv):
                 del i
 
     def emit_routine(name, ty, sysv_ty):
+        emit_documentation(ty)
+        out(f'#[derive(Clone, Debug)]')
         out(f'pub struct {name}(pub unsafe extern "sysv64" fn());')
         with Impl(name):
             with Fn('is_valid', 'x: usize', 'bool', dead_code = True):
@@ -325,6 +332,8 @@ def emit(outf, idl, sysv):
                 out('self.0 as _')
 
     def emit_sum(name, ty, sysv_ty):
+        emit_documentation(ty)
+        out(f'#[derive(Clone, Debug)]')
         if len(ty.variants) == 1:
             # FIXME no worky!
             out(f'pub type {name} = {ty.variants[0]}')
@@ -383,6 +392,7 @@ def emit(outf, idl, sysv):
         out(f'pub const ID: core::num::NonZero<u128> = core::num::NonZero::new({idl.api_id:#x}).unwrap();')
         out('')
         for name, routine in idl.routines.items():
+            emit_documentation(routine)
             with Fn(name, f'&self, x: {routine.input}', routine.output, public = True):
                 n = sysv[routine.input].register_count
                 args = ", ".join(VARS[:n])

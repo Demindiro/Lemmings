@@ -13,70 +13,98 @@ static IRQ_HANDLERS: SpinLock<IrqHandlers> = SpinLock::new(IrqHandlers::new());
 
 const IDT_NR: usize = 256;
 // 32 reserved + 1 for timer
-const IRQ_STUB_OFFSET: u8 = 33;
-const IRQ_TIMER: u8 = 32;
-const IRQ_NR: usize = IDT_NR - IRQ_STUB_OFFSET as usize;
+const VECTOR_STUB_OFFSET: u8 = 33;
+const VECTOR_TIMER: u8 = 32;
+const VECTOR_NR: usize = IDT_NR - VECTOR_STUB_OFFSET as usize;
 
 pub mod door {
-    use lemmings_idl_x86_64_interrupt::*;
+    use lemmings_idl_interrupt::*;
 
     door! {
-        [lemmings_idl_x86_64_interrupt Interrupt "x86-64 interrupt"]
+        [lemmings_idl_interrupt Interrupt "x86-64 interrupt"]
         wait
-        reserve_irq
-        release_irq
+        done
+        reserve
+        release
+        map
     }
 
-    fn wait(x: IrqN) -> Void {
+    fn wait(x: IrqVector) -> Void {
+        let IrqVector { irq, vector } = x;
+        let irq = u32::from(irq).try_into().expect("invalid IRQ");
+        let vector = u32::from(vector).try_into().expect("invalid vector");
         critical_section::with(|cs| {
             let h = super::IRQ_HANDLERS.lock(cs);
-            super::IrqHandlers::wait(h, x.into(), cs);
+            super::IrqHandlers::wait(h, vector, cs);
+            let mut h = super::IRQ_HANDLERS.lock(cs);
+            h.mask(irq);
+            h.eoi();
         });
         Void
     }
 
-    fn reserve_irq(_: Void) -> MaybeIrqN {
+    fn done(x: IrqVector) -> Void {
+        let IrqVector { irq, .. } = x;
+        let x = u32::from(irq).try_into().expect("invalid IRQ");
+        critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).unmask(x));
+        Void
+    }
+
+    fn reserve(_: Void) -> MaybeVector {
         critical_section::with(|cs| {
             super::IRQ_HANDLERS
                 .lock(cs)
                 .reserve()
-                .map_or(MaybeIrqN::None(None::default()), |x| MaybeIrqN::IrqN(IrqN::try_from(x).unwrap()))
         })
+        .map(u32::from)
+        .map_or_else(
+            || MaybeVector::NoVector(NoVector::default()),
+            |x| MaybeVector::Vector(Vector::try_from(u32::from(x)).unwrap()),
+        )
     }
 
-    fn release_irq(x: IrqN) -> Void {
-        critical_section::with(|cs| {
-            super::IRQ_HANDLERS
-                 .lock(cs)
-                 .release(x.into());
-            Void
-        })
+    fn release(x: Vector) -> Void {
+        let x = u32::from(x).try_into().expect("invalid vector");
+        critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).release(x));
+        Void
+    }
+
+    fn map(x: Map) -> Void {
+        let Map { irq, vector, mode } = x;
+        let irq = u32::from(irq).try_into().expect("invalid IRQ");
+        let vector = u32::from(vector).try_into().expect("invalid vector");
+        let edge = match mode {
+            TriggerMode::Level(_) => false,
+            TriggerMode::Edge(_) => true,
+        };
+        critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).map(irq, vector, edge));
+        Void
     }
 }
 
 struct IrqHandlers {
-    queues: [RoundRobinQueue; IRQ_NR],
-    allocated: [u32; (IRQ_NR + 32) / 32],
+    queues: [RoundRobinQueue; VECTOR_NR],
+    allocated: [u32; (VECTOR_NR + 32) / 32],
 }
 
 impl IrqHandlers {
     const fn new() -> Self {
         Self {
-            queues: [const { RoundRobinQueue::new() }; IRQ_NR],
-            allocated: [0; (IRQ_NR + 32) / 32],
+            queues: [const { RoundRobinQueue::new() }; VECTOR_NR],
+            allocated: [0; (VECTOR_NR + 32) / 32],
         }
     }
 
-    fn wait(mut slf: SpinLockGuard<Self>, irq: u8, cs: CriticalSection<'_>) {
-        let irq = usize::from(irq - IRQ_STUB_OFFSET);
-        slf.queues[irq].enqueue_last(thread::current());
+    fn wait(mut slf: SpinLockGuard<Self>, vector: u8, cs: CriticalSection<'_>) {
+        let vector = usize::from(vector - VECTOR_STUB_OFFSET);
+        slf.queues[vector].enqueue_last(thread::current());
         drop(slf);
         thread::park(cs);
     }
 
-    fn dequeue(&mut self, irq: u8) -> Option<ThreadHandle> {
-        let irq = usize::from(irq - IRQ_STUB_OFFSET);
-        self.queues[irq].dequeue_first()
+    fn dequeue(&mut self, vector: u8) -> Option<ThreadHandle> {
+        let vector = usize::from(vector - VECTOR_STUB_OFFSET);
+        self.queues[vector].dequeue_first()
     }
 
     fn reserve(&mut self) -> Option<u8> {
@@ -86,16 +114,43 @@ impl IrqHandlers {
             }
             let b = n.trailing_ones() as usize;
             *n |= 1 << b;
-            return Some(IRQ_STUB_OFFSET + (i * 32 + b) as u8)
+            return Some(VECTOR_STUB_OFFSET + (i * 32 + b) as u8)
         }
         None
     }
 
-    fn release(&mut self, irq: u8) {
-        let irq = usize::from(irq) - IRQ_NR;
-        let [i, b] = [irq / 32, irq % 32];
+    fn release(&mut self, vector: u8) {
+        let vector = usize::from(vector - VECTOR_STUB_OFFSET);
+        let [i, b] = [vector / 32, vector % 32];
         self.allocated[i] &= !(1 << b);
         todo!();
+    }
+
+    fn map(&mut self, irq: u8, vector: u8, edge: bool) {
+        // FIXME detect Local APIC ID
+        let mode = if edge { TriggerMode::Edge } else { TriggerMode::Level };
+        unsafe { self.ioapic().set_irq(irq, 0, vector, mode, false) }
+    }
+
+    fn mask(&mut self, irq: u8) {
+        unsafe { self.ioapic().mask_irq(irq, true) }
+    }
+
+    fn unmask(&mut self, irq: u8) {
+        unsafe { self.ioapic().mask_irq(irq, false) }
+    }
+
+    fn eoi(&mut self) {
+        let apic = unsafe { (&mut *(&raw mut LOCAL_APIC)).assume_init_ref() };
+        apic.set_eoi(0);
+    }
+
+    fn ioapic(&self) -> IoApicHelper<'_> {
+        let io = apic::io::DEFAULT_ADDR;
+        let io = unsafe { page::phys_to_virt(page::Phys(io.into())) };
+        let io = unsafe { io.cast::<apic::io::IoApic>().as_ref() };
+        let io = IoApicHelper::new(io);
+        io
     }
 }
 
@@ -123,11 +178,11 @@ fn init_idt(root: &mmu::Root<mmu::L4>) {
     let idt = unsafe { &mut *(&raw mut IDT) };
 
     idt.set_handler(idt::nr::DOUBLE_FAULT, double_fault as _);
-    idt.set_handler(IRQ_TIMER, timer_handler as _);
-    for i in IRQ_STUB_OFFSET..=u8::MAX {
+    idt.set_handler(VECTOR_TIMER, timer_handler as _);
+    for i in VECTOR_STUB_OFFSET..=u8::MAX {
         unsafe {
             let p = &irq_stub_table as *const [u8; 5];
-            let p = p.add(usize::from(i - IRQ_STUB_OFFSET));
+            let p = p.add(usize::from(i - VECTOR_STUB_OFFSET));
             idt.set_handler(i, p.cast());
         }
     }
@@ -146,17 +201,6 @@ fn init_apic(root: &mmu::Root<mmu::L4>) {
     let apic = LocalApicHelper::new(apic);
     let apic = unsafe { (&mut *(&raw mut LOCAL_APIC)).write(apic) };
     apic.enable();
-
-    let io = {
-        let io = apic::io::DEFAULT_ADDR;
-        let io = unsafe { page::phys_to_virt(page::Phys(io.into())) };
-        let io = unsafe { io.cast::<apic::io::IoApic>().as_ref() };
-        let io = IoApicHelper::new(io);
-        io
-    };
-
-    // FIXME no hardcoding!
-    unsafe { io.set_irq(1, 0, 33, TriggerMode::Level, false) }
 }
 
 extern "sysv64" fn double_fault() {
@@ -176,7 +220,7 @@ extern "sysv64" fn timer_handler() {
 }
 
 unsafe extern "sysv64" {
-    static irq_stub_table: [[u8; 5]; 256 - IRQ_STUB_OFFSET as usize];
+    static irq_stub_table: [[u8; 5]; 256 - VECTOR_STUB_OFFSET as usize];
 }
 
 // Generate 223 IRQ stubs which each push the IRQ number.
@@ -188,7 +232,7 @@ unsafe extern "sysv64" {
 // It's only the dynamically assigned interrupts that are muddy.
 core::arch::global_asm! {
     "irq_stub_table:",
-    ".rept 256 - {IRQ_STUB_OFFSET}",
+    ".rept 256 - {VECTOR_STUB_OFFSET}",
     "call irq_entry",
     ".endr",
     "irq_entry:",
@@ -209,8 +253,8 @@ core::arch::global_asm! {
 	"mov rdi, [rsp + 8 * 8]", // load caller *next* rip
 	"mov [rsp + 8 * 8], rax", // store rax
 	// offset in handler table is (rip - (irq_stub_table + 5)) / 5
-    // account for IRQ_STUB_OFFSET while at it
-	"lea rcx, [rip + irq_stub_table + 5 - ({IRQ_STUB_OFFSET} * 5)]",
+    // account for VECTOR_STUB_OFFSET while at it
+	"lea rcx, [rip + irq_stub_table + 5 - ({VECTOR_STUB_OFFSET} * 5)]",
 	"sub edi, ecx",
 	// The trick here is to find some large enough power-of-two divisor, then find the corresponding
 	// dividend to approach 1/5, i.e. divisor / 5 = dividend.
@@ -231,6 +275,6 @@ core::arch::global_asm! {
 	"pop rdi", // 1
 	"pop rax", // 0
 	"iretq",
-    IRQ_STUB_OFFSET = const IRQ_STUB_OFFSET,
+    VECTOR_STUB_OFFSET = const VECTOR_STUB_OFFSET,
     irq_handler = sym irq_handler,
 }
