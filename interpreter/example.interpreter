@@ -77,4 +77,6 @@ dup String natural Sys log
 
 interrupt->wait
 
+"Got an interrupt!!!" Sys log
+
 Sys exit
