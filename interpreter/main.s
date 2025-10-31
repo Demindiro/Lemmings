@@ -1210,6 +1210,7 @@ dict_begin X86.Io
 .macro f x:req a:req
 	def in\x
 		num_pop rdx
+		xor eax, eax
 		in \a, dx
 		num_push rax
 	enddef
