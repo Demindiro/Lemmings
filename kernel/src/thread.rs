@@ -170,11 +170,21 @@ impl ThreadRef {
     pub unsafe fn wrap(ptr: NonNull<Thread>) -> Self {
         unsafe { Self(ptr.byte_add(Self::OFFSET)) }
     }
+
+    /// # Safety
+    ///
+    /// - Must be a valid pointer.
+    /// - Must not be dereferenced before initialization.
+    /// - Must point to the TCB!
+    pub unsafe fn wrap_tcb(ptr: NonNull<ThreadControlBlock>) -> Self {
+        unsafe { Self(ptr.cast()) }
+    }
 }
 
 impl Thread {
     fn enter(&self, _token: KernelEntryToken) -> ! {
         unsafe {
+            set_current(self);
             asm! {
                 "mov rsp, {sp}",
                 "jmp {pc}",
@@ -234,8 +244,14 @@ impl fmt::Debug for ThreadSpawnError {
     }
 }
 
+unsafe fn set_current(thread: &Thread) {
+    unsafe { lemmings_x86_64::set_fs(&thread.tcb as *const _ as *mut u8) }
+}
+
 pub fn current() -> ThreadHandle {
-    todo!();
+    let tcb = lemmings_x86_64::fs().cast::<ThreadControlBlock>();
+    let tcb = NonNull::new(tcb).expect("fs register should not be null");
+    unsafe { ThreadHandle(ThreadRef::wrap_tcb(tcb)) }
 }
 
 pub fn park(cs: CriticalSection<'_>) {
