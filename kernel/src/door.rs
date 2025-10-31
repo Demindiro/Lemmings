@@ -2,23 +2,21 @@ use core::{num::NonZero, ptr::NonNull};
 
 #[macro_export]
 macro_rules! door {
-    ([$id:literal $name:literal] $($num:literal $fn:ident)*) => {
-        const API: $crate::door::ApiId = $crate::door::ApiId::new($id).expect("non-zero");
-        static TABLE: [$crate::door::Routine; 1 + door!(+ $($num)*)] = [
-            $({
-                // TODO verify sysv64 signature
-                let ptr = core::ptr::NonNull::new($fn as *mut ());
-                $crate::door::Routine(ptr.expect("function is non-null"))
-            },)*
-        ];
-        const _: () = assert!($name.len() >= 1);
-        const _: () = assert!($name.len() <= 64);
+    ([$idl:ident $table:ident $name:literal] $($fn:ident)*) => {
         pub fn register() {
-            unsafe { $crate::door::register_internal(API, $name, &TABLE) };
+            type T = $idl::$table;
+            static T: T = $idl::imp! {
+                [$table]
+                $($fn = $fn,)*
+            };
+            const _: () = assert!($name.len() >= 1);
+            const _: () = assert!($name.len() <= 64);
+            let table = const {
+                $crate::door::Table(core::ptr::NonNull::new(&T as *const T as *mut T).unwrap().cast())
+            };
+            unsafe { $crate::door::register(T::ID, $name, table) };
         }
     };
-    (+ $x:literal) => { $x };
-    (+ $x:literal $($xs:literal)*) => { door!(+ $($xs)*) };
 }
 
 const MAX_ENTRIES: usize = 64;
@@ -49,12 +47,13 @@ pub struct Cookie(u64);
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct Table(NonNull<NonNull<()>>);
+pub struct Table(pub NonNull<NonNull<()>>);
 
 #[derive(Clone, Copy)]
 struct Name(u32);
 
 unsafe impl Sync for Routine {}
+unsafe impl Sync for Table {}
 
 impl Name {
     fn as_str(&self) -> &str {
@@ -90,13 +89,6 @@ pub fn list(api: Option<ApiId>, cookie: Cookie) -> Option<(Cookie, Interface<'st
         }
     }
     None
-}
-
-/// # Safety
-///
-/// The implementation must conform to the API.
-pub unsafe fn register_internal(api: ApiId, name: &str, table: &'static [Routine]) {
-    register(api, name, Table(NonNull::from(table).cast()))
 }
 
 /// # Safety

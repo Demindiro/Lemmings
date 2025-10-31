@@ -63,7 +63,7 @@ unsafe extern "sysv64" fn door_list(api: Option<ApiId>, cookie: Cookie, info: Op
 #[allow(improper_ctypes_definitions)]
 unsafe extern "sysv64" fn door_register(api: ApiId, name: Slice<u8>, table: Table) {
     let name = unsafe { name.as_str() };
-    door::register(api, name, table);
+    unsafe { door::register(api, name, table) };
 }
 
 #[inline]

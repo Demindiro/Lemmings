@@ -30,6 +30,18 @@ mod x86 {
             }
         }
     }
+    pub unsafe fn rdmsr(msr: u32) -> u64 {
+        let hi @ lo: u32;
+        unsafe {
+            core::arch::asm! {
+                "rdmsr",
+                in("ecx") msr,
+                out("eax") lo,
+                out("edx") hi,
+            }
+        }
+        u64::from(hi) << 32 | u64::from(lo)
+    }
 }
 
 mod sys {
@@ -158,6 +170,20 @@ mod alloc {
         None
     }
 
+    pub unsafe fn free(base: NonNull<u8>, byte_count: usize) {
+        let base = base.as_ptr() as u64;
+        #[allow(static_mut_refs)]
+        for r in unsafe { &mut REGIONS } {
+            if r.start.0 == r.end.0 {
+                let mask = PAGE_SIZE - 1;
+                r.start = boot::Phys(base);
+                r.end = boot::Phys(base + ((byte_count + mask) & !mask) as u64);
+                return;
+            }
+        }
+        fail("alloc::free: can't free pages: no free memory regions");
+    }
+
     pub fn memory_map() -> boot::MemoryMap {
         let start = unsafe { &raw const REGIONS };
         let end = unsafe { start.add(1) };
@@ -223,13 +249,17 @@ mod page {
                 pub fn get_or_alloc_table(&mut self) -> Option<$table> {
                     self.get_table().or_else(|| (!self.is_present()).then(|| {
                         let Some(table) = $table::new() else { fail("out of memory") };
-                        self.0 = table.as_u64() | PRESENT;
+                        self.set_table_raw(table.as_u64());
                         table
                     }))
                 }
 
                 pub fn set_table(&mut self, table: $table) {
-                    self.0 = table.as_u64() | DIRTY | ACCESSED | READ_WRITE | PRESENT;
+                    self.set_table_raw(table.as_u64());
+                }
+
+                fn set_table_raw(&mut self, table: u64) {
+                    self.0 = table | DIRTY | ACCESSED | READ_WRITE | PRESENT;
                 }
 
                 fn is_table(&self) -> bool {
@@ -354,6 +384,30 @@ mod elf {
         ph_count: u16,
     }
 
+    struct ProgramHeader {
+        ty: u32,
+        flags: u32,
+        offset: u64,
+        vaddr: u64,
+        filesz: u64,
+        memsz: u64,
+        align: u64,
+    }
+
+    impl ProgramHeader {
+        fn from_bytes(bytes: &[u8; 56]) -> Self {
+            Self {
+                ty: bytes_to_u32le(&bytes[0..4]),
+                flags: bytes_to_u32le(&bytes[4..8]),
+                offset: bytes_to_u64le(&bytes[8..16]),
+                vaddr: bytes_to_u64le(&bytes[16..24]),
+                filesz: bytes_to_u64le(&bytes[32..40]),
+                memsz: bytes_to_u64le(&bytes[40..48]),
+                align: bytes_to_u64le(&bytes[48..56]),
+            }
+        }
+    }
+
     fn bytes_to_u64le(b: &[u8]) -> u64 {
         u64::from_le_bytes(b.try_into().expect("b.len() should be 8"))
     }
@@ -395,19 +449,25 @@ mod elf {
         slice(data, from, len).unwrap_or_else(|| fail(msg))
     }
 
-    fn parse_program_headers(file: &[u8], header: &Header) -> NonNull<u8> {
-        let virt_base = NonNull::new((usize::MAX << (9*4 + 12 - 1)) as *mut _).unwrap();
+    // New pages are allocated for the segments because the Rust linker doesn't play nice:
+    // - segments have non-zero bytes between filesz and memsz
+    // - we can't zero it out in-place, as it may contain other segments
+    // The easy fix is to just alloc fresh pages and copy over.
+
+    #[inline(always)]
+    fn alloc_segments<I>(file: &[u8], program_headers: I, virt_base: NonNull<u8>)
+    where
+        I: Iterator<Item = ProgramHeader>,
+    {
         let fail = |s| -> ! {
-            sys::print("parse_ph: ");
+            sys::print("alloc_segments: ");
             fail(s);
         };
         let assert = |c: bool, s| if !c { fail(s) };
-        assert(header.ph_size >= 56, "PH entry size smaller than expected");
+
         let Some(mut pt) = page::Pt::new() else {
             fail("out of memory");
         };
-        let ph = slice_fail(file, header.ph_offset, usize::from(header.ph_size) * usize::from(header.ph_count), "PH array truncated");
-
         let Some(mut pd) = page::Pd::new() else { fail("out of memory") };
         pd[0].set_table(unsafe { core::mem::transmute_copy(&pt) });
         let Some(mut pdp) = page::Pdp::new() else { fail("out of memory") };
@@ -415,100 +475,136 @@ mod elf {
         let mut pml4 = unsafe { sys::pml4() };
         pml4[256].set_table(pdp);
 
-        for e in ph.chunks_exact(header.ph_size.into()) {
-            let ty = bytes_to_u32le(&e[0..4]);
-            let flags = bytes_to_u32le(&e[4..8]);
-            let offset = bytes_to_u64le(&e[8..16]);
-            let vaddr = bytes_to_u64le(&e[16..24]);
-            let filesz = bytes_to_u64le(&e[32..40]);
-            let memsz = bytes_to_u64le(&e[40..48]);
-            let align = bytes_to_u64le(&e[48..56]);
-            match ty {
-                PH_TY_LOAD => {
-                    assert(align == alloc::PAGE_SIZE as u64, "unsupported alignment");
-                    assert(offset % align == vaddr % align, "segment misaligned");
-                    let mask = align - 1;
-                    let mut va = vaddr & !mask;
-                    let mut pa = file.as_ptr().addr() as u64 + (offset & !mask);
-                    let va_map_end = if filesz != 0 {
-                        (vaddr + filesz + mask) & !mask
-                    } else {
-                        va
-                    };
-                    let va_zero_end = (vaddr + memsz + mask) & !mask;
-                    let map_n = (va_map_end - va) / align;
-                    let zero_n = (va_zero_end - va) / align;
-                    for pi in 0..zero_n {
-                        let [_, i] = split_bits(va as usize, 12);
-                        let Some(pte) = pt.get_mut(i) else {
-                            fail("vaddr above 2MiB not supported");
-                        };
-                        let p = if pi < map_n {
-                            pa
-                        } else {
-                            alloc::alloc(alloc::PAGE_SIZE)
-                                .unwrap_or_else(|| fail("ELF: out of memory"))
-                                .addr()
-                                .get() as u64
-                        };
-                        match flags {
-                            0b100 => pte.set_r(p),
-                            0b101 => pte.set_rx(p),
-                            0b110 => pte.set_rw(p),
-                            0b111 => pte.set_rwx(p),
-                            _ => fail("unsupported flags"),
-                        }
-                        va += alloc::PAGE_SIZE as u64;
-                        pa += alloc::PAGE_SIZE as u64;
-                    }
-                    if flags & 0b010 != 0 {
-                        // ensure extra data is zeroed
-                        // TODO is it fine to zero in-place?
-                        // My interpretation of
-                        // https://refspecs.linuxfoundation.org/ELF/zSeries/lzsabi0_zSeries/c2083.html
-                        // says "yes" but I'm not sure...
-                        unsafe { virt_base.byte_add(vaddr as usize).byte_add(filesz as usize).write_bytes(0, (memsz - filesz) as usize) };
-                    }
+        //for ph in program_headers.filter(|ph| ph.ty == PH_TY_LOAD) {
+        for ph in program_headers {
+            if ph.ty != PH_TY_LOAD {
+                continue;
+            }
+            assert(ph.align == alloc::PAGE_SIZE as u64, "unsupported alignment");
+            assert(ph.offset % ph.align == ph.vaddr % ph.align, "segment misaligned");
+            let mask = ph.align - 1;
+            let mut va = ph.vaddr & !mask;
+            let va_end = (ph.vaddr + ph.memsz + mask) & !mask;
+            // we could allocate pages one by one,
+            // but allocating a contiguous physical range reduces
+            // the risk of breaking sloppily linked kernels (like mine)
+            let mut pa = alloc::alloc((va_end - va) as usize)
+                .unwrap_or_else(|| fail("out of memory"))
+                .addr()
+                .get() as u64;
+            while va < va_end {
+                let [_, i] = split_bits(va as usize, 12);
+                let Some(pte) = pt.get_mut(i) else {
+                    fail("vaddr above 2MiB not supported");
+                };
+                match ph.flags {
+                    0b100 => pte.set_r(pa),
+                    0b101 => pte.set_rx(pa),
+                    0b110 => pte.set_rw(pa),
+                    0b111 => pte.set_rwx(pa),
+                    _ => fail("unsupported flags"),
                 }
-                PH_TY_DYNAMIC => {
-                    let dynamic = slice_fail(file, offset as usize, filesz as usize, "dynamic segment truncated");
-                    let mut rela @ mut relasz @ mut relaent = 0;
-                    for e in dynamic.chunks_exact(8 * 2) {
-                        let ty = bytes_to_u64le(&e[0..8]);
-                        let val = bytes_to_u64le(&e[8..16]) as usize;
-                        const RELA: u64 = 7;
-                        const RELASZ: u64 = 8;
-                        const RELAENT: u64 = 9;
-                        match ty {
-                            RELA => rela = val,
-                            RELASZ => relasz = val,
-                            RELAENT => relaent = val,
-                            _ => {}
-                        }
-                    }
-                    assert(relaent == 24, "RELAENT size is not 24");
-                    let rela = slice_fail(file, rela, relasz, "RELA in dynamic segment truncated");
-                    for e in rela.chunks_exact(relaent) {
-                        let offset = bytes_to_u64le(&e[0..8]) as usize;
-                        let addend = bytes_to_u64le(&e[16..24]) as usize;
-                        unsafe {
-                            let p = virt_base.byte_add(offset).cast::<usize>();
-                            p.write_unaligned(virt_base.as_ptr() as usize + addend);
-                        }
-                    }
-                }
-                _ => {}
+                va += alloc::PAGE_SIZE as u64;
+                pa += alloc::PAGE_SIZE as u64;
             }
         }
+    }
+
+    #[inline(always)]
+    fn copy_segments<I>(file: &[u8], program_headers: I, virt_base: NonNull<u8>)
+    where
+        I: Iterator<Item = ProgramHeader>,
+    {
+        //for ph in program_headers.filter(|ph| ph.ty == PH_TY_LOAD) {
+        for ph in program_headers {
+            if ph.ty != PH_TY_LOAD {
+                continue;
+            }
+            let offset = ph.offset as usize;
+            let filesz = ph.filesz as usize;
+            let memsz = ph.memsz as usize;
+            unsafe {
+                let va = virt_base.byte_add(ph.vaddr as usize);
+                va.copy_from_nonoverlapping(NonNull::from(file).cast().byte_add(offset), filesz);
+                // not strictly necessary on initial boot in QEMU,
+                // but might be necessary after triple fault.
+                va.byte_add(filesz).write_bytes(0, memsz - filesz);
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn update_dynamic<I>(file: &[u8], mut program_headers: I, virt_base: NonNull<u8>)
+    where
+        I: Iterator<Item = ProgramHeader>,
+    {
+        let mut found_one = false;
+        //for ph in program_headers.find(|ph| ph.ty == PH_TY_DYNAMIC) {
+        for ph in program_headers {
+            if ph.ty != PH_TY_DYNAMIC {
+                continue;
+            }
+            if found_one {
+                fail("multiple DYNAMIC segments");
+            }
+            found_one = true;
+            let offset = ph.offset as usize;
+            let filesz = ph.filesz as usize;
+            let dynamic = slice_fail(file, offset, filesz, "dynamic segment truncated");
+            let mut rela @ mut relasz @ mut relaent = 0;
+            for e in dynamic.chunks_exact(8 * 2) {
+                let ty = bytes_to_u64le(&e[0..8]);
+                let val = bytes_to_u64le(&e[8..16]) as usize;
+                const RELA: u64 = 7;
+                const RELASZ: u64 = 8;
+                const RELAENT: u64 = 9;
+                match ty {
+                    RELA => rela = val,
+                    RELASZ => relasz = val,
+                    RELAENT => relaent = val,
+                    _ => {}
+                }
+            }
+            if relaent != 24 {
+                fail("RELAENT size is not 24 bytes");
+            }
+            let rela = slice_fail(file, rela, relasz, "RELA in dynamic segment truncated");
+            for e in rela.chunks_exact(relaent) {
+                let offset = bytes_to_u64le(&e[0..8]) as usize;
+                let addend = bytes_to_u64le(&e[16..24]) as usize;
+                unsafe {
+                    let p = virt_base.byte_add(offset).cast::<usize>();
+                    p.write_unaligned(virt_base.as_ptr() as usize + addend);
+                }
+            }
+        }
+    }
+
+    fn parse_program_headers(file: &[u8], header: &Header) -> NonNull<u8> {
+        if header.ph_size != 56 {
+            fail("PH entry size not 56 bytes");
+        }
+        let virt_base = NonNull::new((usize::MAX << (9*4 + 12 - 1)) as *mut _).unwrap();
+        let ph = slice_fail(file, header.ph_offset, usize::from(header.ph_size) * usize::from(header.ph_count), "PH array truncated");
+        let ph = || ph.chunks_exact(header.ph_size.into())
+            .map(|x| x.try_into().unwrap())
+            .map(ProgramHeader::from_bytes);
+        alloc_segments(file, ph(), virt_base);
+        copy_segments(file, ph(), virt_base);
+        update_dynamic(file, ph(), virt_base);
         virt_base
     }
 
     /// # Returns
     ///
     /// Entry point
-    pub fn load(file: &[u8]) -> (NonNull<u8>, boot::VirtRegion) {
+    pub fn load(file: sys::File) -> (NonNull<u8>, boot::VirtRegion) {
+        let file = load_file(file);
         let hdr = parse_header(file);
         let base = parse_program_headers(file, &hdr);
+        unsafe {
+            alloc::free(NonNull::from(file).cast(), file.len());
+        }
         let region = boot::VirtRegion {
             start: boot::Virt(NonNull::new(0xffff8000_00000000u64 as _).unwrap()),
             end: boot::Virt(NonNull::new((0xffff8000_00000000u64 + (1<<21)) as _).unwrap()),
@@ -885,6 +981,31 @@ mod pcie {
     }
 }
 
+mod apic {
+    use crate::*;
+
+    const MSR_APIC_BASE: u32 = 0x1b;
+
+    fn local_address() -> u64 {
+        unsafe { x86::rdmsr(MSR_APIC_BASE) & !0xfff }
+    }
+
+    fn io_address() -> u64 {
+        0xfec00000
+    }
+
+    fn map(addr: u64, err: &str) {
+        let x = NonNull::new(addr as _).unwrap_or_else(|| fail(err));
+        let r = unsafe { x..x.byte_add(4096) };
+        page::identity_map_rw(r);
+    }
+
+    pub fn init() {
+        map(local_address(), "no local APIC?");
+        map(io_address(), "no I/O APIC?");
+    }
+}
+
 mod boot {
     // Intentionally separated from the `lemmings-qemubios` crate because you
     // better have a damn good reason to touch this.
@@ -1005,12 +1126,25 @@ fn fail(reason: &str) -> ! {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn memset(mut dst: *mut u8, c: i32, n: usize) -> *mut u8 {
+unsafe extern "C" fn memset(dst: *mut u8, c: i32, n: usize) -> *mut u8 {
     unsafe {
         core::arch::asm! {
             "rep stosb",
             in("al") c as u8,
-            inout("rdi") dst => dst,
+            inout("rdi") dst => _,
+            inout("rcx") n => _,
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    unsafe {
+        core::arch::asm! {
+            "rep movsb",
+            inout("rdi") dst => _,
+            inout("rsi") src => _,
             inout("rcx") n => _,
         }
     }
@@ -1033,9 +1167,9 @@ fn load_file<'a>(file: sys::File) -> &'a [u8] {
 extern "sysv64" fn boot(kernel: sys::File, data: sys::File) -> NonNull<u8> {
     alloc::init();
     let pcie_base = pcie::configure();
-    let kernel = load_file(kernel);
-    let data = load_file(data);
     let (entry, kernel) = elf::load(kernel);
+    let data = load_file(data);
+    apic::init();
     boot::collect_info(kernel, data);
     entry
 }

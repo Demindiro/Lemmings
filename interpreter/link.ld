@@ -10,6 +10,7 @@ PHDRS {
 	num_stack PT_LOAD FLAGS(6);
 	obj_stack PT_LOAD FLAGS(6);
 	obj_heap PT_LOAD FLAGS(6);
+	code_heap PT_LOAD FLAGS(7);
 }
 
 SECTIONS {
@@ -30,4 +31,7 @@ SECTIONS {
 	. = ALIGN(0x1000);
 	. += 0x1000;
 	.obj_heap : { *(.obj_heap) } :obj_heap =0
+	. = ALIGN(0x1000);
+	. += 0x1000;
+	.code_heap : { *(.code_heap) } :code_heap =0
 }

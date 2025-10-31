@@ -1,3 +1,4 @@
+use crate::mmu::{A4, Phys};
 use core::{arch::asm, marker::PhantomData, mem};
 
 pub mod nr {
@@ -41,7 +42,7 @@ pub mod nr {
     }
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct IdtEntry {
     offset_low: u16,
     selector: u16,
@@ -76,7 +77,20 @@ impl IdtEntry {
     const ATTRIBUTE_PRESENT: u8 = 0x80;
     const ATTRIBUTE_DPL: u8 = 0x00;
 
-    pub const fn new(selector: u16, handler: u64, ist: Ist) -> Self {
+    pub const fn zero() -> Self {
+        Self {
+            offset_low: 0,
+            selector: 0,
+            ist: 0,
+            type_attributes: 0,
+            offset_high: 0,
+            offset_higher: 0,
+            _unused_1: 0,
+        }
+    }
+
+    pub fn new(selector: u16, handler: *const (), ist: Ist) -> Self {
+        let handler = handler.addr();
         Self {
             offset_low: (handler >> 0) as u16,
             selector,
@@ -89,57 +103,58 @@ impl IdtEntry {
             _unused_1: 0,
         }
     }
-
-    pub fn set_handler(&mut self, handler: *const ()) {
-        let handler = handler as u64;
-        self.offset_low = (handler >> 0) as u16;
-        self.offset_high = (handler >> 16) as u16;
-        self.offset_higher = (handler >> 32) as u32;
-    }
 }
 
 #[repr(transparent)]
-pub struct Idt<const MAX: usize = 256> {
+pub struct Idt<const MAX: usize> {
     descriptors: [IdtEntry; MAX],
 }
 
 impl<const MAX: usize> Idt<MAX> {
-    const _SANE_LIMIT: () = assert!(MAX < 256, "can't support more than 256 entries");
-
     pub const fn new() -> Self {
+        const {
+            assert!(MAX <= 256, "can't support more than 256 entries");
+        }
         Self {
-            descriptors: [const { IdtEntry::new(0, 0, Ist::N0) }; MAX],
+            descriptors: [const { IdtEntry::zero() }; MAX],
         }
     }
 
     pub const fn set(&mut self, index: u8, entry: IdtEntry) {
         self.descriptors[index as usize] = entry;
     }
+
+    /// Set a handler for a particular IRQ.
+    ///
+    /// This will always use the interrupt gatetype, which disables interrupts on entry.
+    ///
+    /// It uses [`Ist::N0`], i.e. no switching of the stack.
+    ///
+    /// It uses the standard GDT layout. See [`crate::gdt`] for more information.
+    pub fn set_handler(&mut self, index: u8, handler: *const ()) {
+        let entry = IdtEntry::new(crate::gdt::Gdt::KERNEL_CS, handler as _, Ist::N0);
+        self.set(index, entry);
+    }
 }
 
 #[repr(C)]
 #[repr(packed)]
-pub struct IdtPointer<'a, const MAX: usize> {
+pub struct IdtPointer {
     limit: u16,
     offset: u64,
-    _marker: PhantomData<&'a Idt<MAX>>,
 }
 
-impl<'a, const MAX: usize> IdtPointer<'a, MAX> {
-    pub const fn new() -> Self {
-        const {
-            let limit = mem::size_of::<Idt<MAX>>() - 1;
-            assert!(limit <= u16::MAX as usize);
-            Self {
-                limit: limit as u16,
-                offset: 0,
-                _marker: PhantomData,
-            }
+impl IdtPointer {
+    pub fn new<const MAX: usize>(phys: Phys<A4>) -> Self {
+        let limit = const {
+            let x = mem::size_of::<Idt<MAX>>() - 1;
+            assert!(x <= u16::MAX as usize);
+            x as u16
+        };
+        Self {
+            limit,
+            offset: phys.into(),
         }
-    }
-
-    pub fn set_idt(&mut self, idt: &'a Idt<MAX>) {
-        self.offset = idt as *const _ as u64;
     }
 
     pub unsafe fn activate(&self) {

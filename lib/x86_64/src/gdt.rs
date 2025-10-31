@@ -1,5 +1,5 @@
 use {
-    super::tss::Tss,
+    crate::{mmu::{self, Phys}, tss::Tss},
     core::{arch::asm, marker::PhantomData, mem, pin::Pin},
 };
 
@@ -53,7 +53,8 @@ pub struct GdtPointer {
     address: u64,
 }
 
-#[repr(C)]
+// align to ensure it is contained entirely within one page
+#[repr(C, align(64))]
 pub struct Gdt<'a> {
     null: GdtEntry,        // 0
     kernel_code: GdtEntry, // 1
@@ -71,6 +72,7 @@ impl<'a> Gdt<'a> {
     pub const USER_CS: u16 = 8 * 4 | 3;
     pub const USER_SS: u16 = 8 * 3 | 3;
     pub const TSS: u16 = 5 * 8 | 3;
+    pub const SIZE: u16 = (6 + 1) * 8;
 
     /// # Note
     ///
@@ -160,17 +162,11 @@ impl<'a> Gdt<'a> {
 }
 
 impl GdtPointer {
-    pub fn new(gdt: Pin<&Gdt>) -> Self {
-        const {
-            assert!(
-                mem::size_of::<Gdt>() - 1 <= u16::MAX as usize,
-                "GDT too large"
-            )
-        };
+    pub fn new(gdt: Phys<mmu::A6>) -> Self {
         Self {
             _padding: [0; 3],
-            limit: (mem::size_of::<Gdt>() - 1) as u16,
-            address: gdt.get_ref() as *const _ as u64,
+            limit: Gdt::SIZE - 1,
+            address: gdt.into(),
         }
     }
 
@@ -178,13 +174,13 @@ impl GdtPointer {
         unsafe {
             asm! {
                 "lgdt [{ptr}]",
-                "mov ax, {kernel_ss}",
-                "mov ds, ax",
-                "mov es, ax",
-                "mov ss, ax",
+                "mov {scratch:x}, {kernel_ss}",
+                "mov ds, {scratch:x}",
+                "mov es, {scratch:x}",
+                "mov ss, {scratch:x}",
                 // Set TSS
-                "mov ax, {tss}",
-                "ltr ax",
+                "mov {scratch:x}, {tss}",
+                "ltr {scratch:x}",
                 // Do far return
                 "push {kernel_cs}",
                 "lea {scratch}, [rip + 2f]",

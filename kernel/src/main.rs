@@ -9,11 +9,12 @@ extern crate lemmings_qemubios;
 #[macro_use]
 mod door;
 
+mod arch;
 mod archive;
 mod critical_section;
 mod elf;
 mod ffi;
-mod framebuffer;
+//mod framebuffer;
 mod page;
 mod thread;
 mod time;
@@ -48,21 +49,22 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 // do not inline so the stupid compiler frees up stack space before entering init.
 #[inline(never)]
 fn main_init() -> elf::Entry {
+    arch::door::register();
     archive::door::register();
-    framebuffer::door::register();
+    //framebuffer::door::register();
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
     let init = elf::load(init.data()).expect("failed to parse init");
     init
 }
 
-fn main() {
+extern "sysv64" fn main() {
     let init = main_init();
     unsafe { core::mem::transmute::<_, extern "sysv64" fn()>(init)() }
 }
 
 #[inline]
-fn entry(entry: &lemmings_qemubios::Entry) -> ! {
+extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     unsafe {
         use lemmings_x86_64::{cr0, cr4};
         cr0::update(|x| x | cr0::WRITE_PROTECT);
@@ -70,11 +72,11 @@ fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     }
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
+    let token = arch::init(entry, token);
     let token = page::init(entry, token);
     let token = archive::init(entry, token);
     let token = sys::init(entry, token);
-    let mut threads = thread::ThreadManager::new();
-    threads.enter(thread::Priority::Regular, main, token);
+    thread::init(main, token)
 }
 
 lemmings_qemubios::entry!(entry);

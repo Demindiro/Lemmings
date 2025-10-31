@@ -50,20 +50,33 @@
 .set NUM_STACK_HEAD, r15
 .set OBJ_STACK_HEAD, r14
 .set OBJ_HEAP_HEAD,  r13
+.set FLAGS,          r12
+
+.equ FLAG.COMPILE_MODE, 0
 
 .section .bss
 rsp_start: .quad 0
 obj_heap_base: .quad 0
 dict_base: .quad 0
 dict_head: .quad 0
+code_head: .quad 0
+define_cur_routine: .quad 0
+define_cur_name: .quad 0
 
 .section .bss.read
 fn_read_word: .quad 0
+fn_read_byte: .quad 0
 
 .section .bss.read_archive
 read_archive.door: .quad 0
 read_archive.file: .quad 0
 read_archive.offset: .quad 0
+
+.section .bss.branch
+branch.pre_cond: .quad 0
+branch.post_cond: .quad 0
+# we need to save/restore flags as conditionals may occur inside definitions
+branch.og_flags: .quad 0
 
 .macro defpanic label:req, reason:req
  .pushsection .rodata.panic
@@ -125,17 +138,32 @@ read_archive.offset: .quad 0
 	defpanic .L\@, "\reason"
 	\ifccz \x, .L\@
  .endm
- .macro assertge x:req, y:req, reason:req
-	_assertcc iflt, \x, \y, "\reason"
- .endm
  .macro assertne x:req, y:req, reason:req
 	_assertcc ifeq, \x, \y, "\reason"
  .endm
  .macro asserteq x:req, y:req, reason:req
 	_assertcc ifne, \x, \y, "\reason"
  .endm
+ .macro assertgt x:req, y:req, reason:req
+	_assertcc ifle, \x, \y, "\reason"
+ .endm
+ .macro assertlt x:req, y:req, reason:req
+	_assertcc ifge, \x, \y, "\reason"
+ .endm
+ .macro assertge x:req, y:req, reason:req
+	_assertcc iflt, \x, \y, "\reason"
+ .endm
+ .macro assertle x:req, y:req, reason:req
+	_assertcc ifgt, \x, \y, "\reason"
+ .endm
+ .macro assertltu x:req, y:req, reason:req
+	_assertcc ifgeu, \x, \y, "\reason"
+ .endm
  .macro assertgez x:req, reason:req
 	_assertccz ifltz, \x, "\reason"
+ .endm
+ .macro assertlez x:req, reason:req
+	_assertccz ifgtz, \x, "\reason"
  .endm
  .macro assertnez x:req, reason:req
 	_assertccz ifeqz, \x, "\reason"
@@ -194,7 +222,8 @@ f 3 door_register
 	syscall_door_list
  .endm
 .endm
-find_door archive    , 0x5238e0fc4d60503d, 0x7b357037d5319ae5
+find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
+
 
 .equ door.archive.root, 8 * 0
 .equ door.archive.dir_iter, 8 * 1
@@ -210,9 +239,43 @@ find_door archive    , 0x5238e0fc4d60503d, 0x7b357037d5319ae5
 	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
 	add \PREFIX\()_STACK_HEAD, 8
  .endm
+ .macro \prefix\()_peek x:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
+ .endm
+ .macro \prefix\()_replace x:req
+	mov qword ptr [\PREFIX\()_STACK_HEAD], \x
+ .endm
+ .macro \prefix\()_drop
+	add \PREFIX\()_STACK_HEAD, 8
+ .endm
 .endm
 	f num NUM
 	f obj OBJ
+.purgem f
+
+
+.macro set_bit reg:req, x:req
+ .if \x < 8
+	or \reg, 1 << (\x)
+ .else
+	bts \reg, \x
+ .endif
+.endm
+.macro reset_bit reg:req, x:req
+ .if \x < 8
+	and \reg, ~(1 << (\x))
+ .else
+	btr \reg, \x
+ .endif
+.endm
+.macro f name:req cc_bt:req
+ .macro if_bit_\name reg:req, x:req, label:req
+	bt \reg, \x
+	j\cc_bt \label
+ .endm
+.endm
+	f set   c
+	f reset nc
 .purgem f
 
 
@@ -257,6 +320,149 @@ _panic_start:
 
 
 .section .text
+
+.macro ASM_BEGIN ptr:req
+ .set .LASM_PTR, \ptr
+	mov .LASM_PTR, qword ptr [rip + code_head]
+.endm
+.macro ASM_END
+	mov qword ptr [rip + code_head], .LASM_PTR
+.endm
+
+.macro ASM_ADVANCE32
+	add .LASM_PTR, 4
+.endm
+
+.macro ASM_PUSH8 x:req
+	mov byte ptr [.LASM_PTR], \x
+	inc .LASM_PTR
+.endm
+.macro ASM_PUSH16 x:req
+	mov word ptr [.LASM_PTR], \x
+	add .LASM_PTR, 2
+.endm
+.macro ASM_PUSH24 x:req
+	mov dword ptr [.LASM_PTR], \x
+	add .LASM_PTR, 3
+.endm
+.macro ASM_PUSH32 x:req
+	mov dword ptr [.LASM_PTR], \x
+	add .LASM_PTR, 4
+.endm
+.macro ASM_PUSH64 x:req
+	mov qword ptr [.LASM_PTR], \x
+	add .LASM_PTR, 8
+.endm
+
+.macro ASM_ret
+	ASM_PUSH8 0xc3
+.endm
+.macro ASM_call_rel32 rel:req
+	ASM_PUSH8 0xe8
+	ASM_PUSH32 \rel
+.endm
+.macro ASM_jmp_rel32 rel:req
+	ASM_PUSH8 0xe9
+	ASM_PUSH32 \rel
+.endm
+.macro ASM_jmp_rel32_stub
+	ASM_PUSH8 0xe9
+	ASM_ADVANCE32
+.endm
+.macro ASM_jz_rel32_stub
+	ASM_PUSH16 0x840f
+	ASM_ADVANCE32
+.endm
+.macro ASM_mov_rax_imm64 x:req
+	ASM_PUSH16 0xb848
+	ASM_PUSH64 \x
+.endm
+.macro ASM_test_rax_rax
+	ASM_PUSH24 0xc08548
+.endm
+.macro ASM_sub_r15_imm8_c x:req
+	ASM_PUSH32 0xef8349 | (\x << 24)
+.endm
+.macro ASM_sub_r14_imm8_c x:req
+	ASM_PUSH32 0xee8349 | (\x << 24)
+.endm
+.macro ASM_add_r15_imm8_c x:req
+	ASM_PUSH32 0xc78349 | (\x << 24)
+.endm
+.macro ASM_add_r14_imm8_c x:req
+	ASM_PUSH32 0xc68349 | (\x << 24)
+.endm
+.macro ASM_store_r15_rax
+	ASM_PUSH24 0x078949
+.endm
+.macro ASM_store_r14_rax
+	ASM_PUSH24 0x068949
+.endm
+.macro ASM_store_r15_imm32 x:req
+	ASM_PUSH24 0x07c749
+	ASM_PUSH32 \x
+.endm
+.macro ASM_load_r15_rax
+	ASM_PUSH24 0x078b49
+.endm
+.macro ASM_load_r14_rax
+	ASM_PUSH24 0x068b49
+.endm
+.macro ASM_num_push_rax
+	ASM_sub_r15_imm8_c 8
+	ASM_store_r15_rax
+.endm
+.macro ASM_num_push_imm32 x:req
+	ASM_sub_r15_imm8_c 8
+	ASM_store_r15_imm32 \x
+.endm
+.macro ASM_num_pop_rax
+	ASM_load_r15_rax
+	ASM_add_r15_imm8_c 8
+.endm
+.macro ASM_obj_push_rax
+	ASM_sub_r14_imm8_c 8
+	ASM_store_r14_rax
+.endm
+.macro ASM_obj_pop_rax
+	ASM_load_r14_rax
+	ASM_add_r14_imm8_c 8
+.endm
+.macro ASM_ifeqz_rax_rel32_stub
+	ASM_test_rax_rax
+	ASM_jz_rel32_stub
+.endm
+
+# rax: routine
+routine asm_call_rel32
+	ASM_BEGIN rdx
+	sub eax, 5
+	sub eax, edx
+	ASM_call_rel32 eax
+	ASM_END
+	ret
+
+# rax: number
+routine asm_num_push
+	ASM_BEGIN rdx
+	ifgtu rax, ((1 << 31) - 1), 2f
+	ASM_num_push_imm32 eax
+	ASM_END
+	ret
+2:	ASM_mov_rax_imm64 rax
+	ASM_num_push_rax
+	ASM_END
+	ret
+
+# rax: pointer
+routine asm_obj_push
+	ASM_BEGIN rdx
+	ASM_mov_rax_imm64 rax
+	ASM_obj_push_rax
+	ASM_END
+	ret
+
+
 # rdi: pointer to syscall routine
 routine _start
 	_start_enter
@@ -264,6 +470,8 @@ routine _start
 	lea NUM_STACK_HEAD, [rip + num_stack.end]
 	lea OBJ_STACK_HEAD, [rip + obj_stack.end]
 	lea OBJ_HEAP_HEAD, [rip + obj_heap]
+	lea rax, [rip + code_heap]
+	mov [rip + code_head], rax
 
 	find_door_archive
 	assertnez rax, "Failed to find door archive"
@@ -277,11 +485,13 @@ routine _start
 	mov [rip + read_archive.file], rdx
 	lea rax, [rip + read_archive.read_word]
 	mov [rip + fn_read_word], rax
+	lea rax, [rip + read_archive.read_byte]
+	mov [rip + fn_read_byte], rax
 
 .L_start.init_dict:
-	lea rsi, [rip + builtins_dict]
+	lea rsi, [rip + builtins_dict._]
 	lea rdi, [rip + word_dict]
-	lea rbx, [rip + _builtins]
+	lea rbx, [rip + builtins._]
 2:	movzx edx, word ptr [rsi]
 	ifeq dx, -1, parse_input
 	add rsi, 2
@@ -289,6 +499,7 @@ routine _start
 	mov [rdi], rax
 	add rdi, 8
 	movzx ecx, byte ptr [rsi]
+	and ecx, 0x7f
 	inc ecx
 	rep movsb
 	jmp 2b
@@ -296,30 +507,147 @@ routine _start
 
 routine parse_input
 .Lparse_input.loop:
-	call [rip + fn_read_word]
+	call read_word
 	ifeqz ecx, .Lparse_input.end
 	movzx eax, byte ptr [rsi]
 	ifeq al, '"', .Lparse_input.string
-	movzx eax, byte ptr [rsi]
 	ifeq al, '\'', .Lparse_input.char
+	sub eax, '0'
+	ifltu al, 10, .Lparse_input.number
+.Lparse_input.word:
+	push rsi
 	call find_word
-	assertnez rax, "Word not found :("
-	call rax
+	pop rsi
+	ifeqz rax, .Lparse_input.word_not_found
+	ifnez edx, 2f
+	if_bit_reset FLAGS, FLAG.COMPILE_MODE, 2f
+	call asm_call_rel32
+	jmp .Lparse_input.loop
+2:	call rax
 	jmp .Lparse_input.loop
 .Lparse_input.end:
+	defpanic .Lparse_input.inside_definition, "unterminated definition"
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, .Lparse_input.inside_definition
 	ret
 .Lparse_input.string:
 	sub ecx, 2
 	inc rsi
 	call str_reserve
-	obj_push rdi
+	mov rax, rdi
 	rep movsb
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, 2f
+	obj_push rax
+	jmp .Lparse_input.loop
+2:	call asm_obj_push
 	jmp .Lparse_input.loop
 .Lparse_input.char:
-	panic "TODO char"
+	call parse_char
+	jmp .Lparse_input.num_push
+.Lparse_input.number:
+	call parse_number
+.Lparse_input.num_push:
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, 2f
+	num_push rax
+	jmp .Lparse_input.loop
+2:	call asm_num_push
+	jmp .Lparse_input.loop
+.Lparse_input.word_not_found:
+	string rdi, edx, "undefined word: "
 
+
+# rdi: prefix ptr
+# edx: prefix len
+# rsi: postfix ptr
+# ecx: postfix len
+routine panic_prefix
+	sub rsp, 256
+	push rsi
+	push rcx
+	mov rsi, rdi
+	mov ecx, edx
+	lea rdi, [rsp + 16]
+	rep movsb
+	pop rcx
+	pop rsi
+	rep movsb
+	mov rsi, rdi
+	mov rdi, rsp
+	sub esi, edi
+	syscall_panic
+
+
+# rsi: string (must start with a "'" !)
+# ecx: len
+#
+# rax: char
+routine parse_char
+	asserteq (byte ptr [rsi + rcx - 1]), '\'', "char doesn't end with a '"
+	asserteq cl, 3, "TODO: non-ascii characters"
+	movzx eax, byte ptr [rsi + 1]
+	assertle al, 127, "Invalid UTF-8"
+	ret
+
+# rsi: string
+# ecx: len
+#
+# rax: number
+routine parse_number
+	mov rdi, rsi
+	add rsi, rcx
+	movzx eax, byte ptr [rdi]
+	inc rdi
+	ifeq rdi, rsi, .Lparse_number.singledigit
+	mov edx, eax
+	xor eax, eax
+	mov ecx, 10
+	ifne dl, '0', .Lparse_number.loop
+	movzx edx, byte ptr [rdi]
+	mov ecx, 16
+	ifeq dl, 'x', .Lparse_number.skipprefix
+	mov ecx, 2
+	ifeq dl, 'b', .Lparse_number.skipprefix
+	mov ecx, 8
+	ifeq dl, 'o', .Lparse_number.skipprefix
+	jmp .Lparse_number.loop
+.Lparse_number.singledigit:
+	sub eax, '0'
+	assertltu al, 10, "decimal out of range"
+	ret
+.Lparse_number.skipprefix:
+	inc rdi
+	assertne rdi, rsi, "expected digits after prefix"
+.Lparse_number.loop:
+	movzx edx, byte ptr [rdi]
+	lea ebx, [edx - '0']
+	ifltu bl, 10, 2f
+	or edx, 040
+	lea ebx, [edx - 'a' + 10]
+2:	assertlt bl, dl, "digit out of range for base"
+	mul rcx
+	add rax, rbx
+	inc rdi
+	ifne rdi, rsi .Lparse_number.loop
+.Lparse_number.end:
+	ret
 
 # Allocates on the string heap
+#
+# Never returns an empty string.
+#
+# rsi: word string (0 if EOF)
+# ecx: word length
+routine read_word
+3:	call [rip + fn_read_word]
+	ifeqz rsi, 2f
+	ifeqz ecx, 3b
+2:	ret
+
+routine read_byte
+	jmp [rip + fn_read_byte]
+
+# Allocates on the string heap
+#
+# May return empty strings.
 #
 # rsi: word string
 # ecx: word length
@@ -332,10 +660,10 @@ routine read_archive.read_word
 	mov rsi, [rip + read_archive.offset]
 	mov ecx, MAX_WORD_LEN + 1
 	call [rax + door.archive.file_read]
+	ifeqz rax, .Lread_archive.eof
 	mov rdi, rdx
 	mov rsi, rdx
 	lea rbp, [rdx + rax]
-	ifeq rdi, rbp, .Lread_archive.read_word.eof
 .Lread_archive.read_word.loop:
 2:	movzx eax, byte ptr [rdi]
 	ifeq al, ' ', .Lread_archive.read_word.end
@@ -362,19 +690,64 @@ routine read_archive.read_word
 	ifne al, dl, 2b
 	ifeq rdi, rbp, .Lread_archive.read_word.end
 	jmp .Lread_archive.read_word.loop
-.Lread_archive.read_word.eof:
-	panic "TODO read word eof"
+.Lread_archive.eof:
+	xor esi, esi
+	ret
+
+# eax: character (-1 if EOF)
+routine read_archive.read_byte
+	push -1
+	mov rax, [rip + read_archive.door]
+	mov rdi, [rip + read_archive.file]
+	mov rsi, [rip + read_archive.offset]
+	mov ecx, 1
+	mov rdx, rsp
+	call [rax + door.archive.file_read]
+	pop rax
+	ifeqz rdx, 2f
+	inc qword ptr [rip + read_archive.offset]
+	movzx eax, al
+2:	ret
 
 # rsi: string
 # ecx: string length
 #
-# rax: routine
+# rax: routine (0 if not found)
+# edx: 1<<7 if immediate, 0 if not
 routine find_word
 	lea rdi, [rip + word_dict]
 2:	mov rax, [rdi]
 	add rdi, 8
-	ifeqz rax, .Lfind_word.found
+	ifeqz rax, .Lfind_word.found # ... or not
 	movzx edx, byte ptr [rdi]
+	mov ebx, edx
+	and ebx, 0x7f
+	inc rdi
+	ifne ecx, ebx, 3f
+	push rdi
+	push rsi
+	rep cmpsb
+	pop rsi
+	pop rdi
+	mov ecx, ebx
+	je .Lfind_word.found
+3:	add rdi, rbx
+	jmp 2b
+.Lfind_word.found:
+	and edx, 1<<7
+	ret
+
+# rax: routine
+# rsi: name
+# ecx: name len (< 127!!)
+# edx: 1<<7 if immediate, 0 if not
+routine set_word
+	push rdx
+	lea rdi, [rip + word_dict]
+	ifeq (qword ptr [rdi]), 0, .Lset_word.new # technically not possible, but be defensive
+2:	add rdi, 8
+	movzx edx, byte ptr [rdi]
+	and edx, 0x7f
 	inc rdi
 	ifne ecx, edx, 3f
 	push rdi
@@ -382,10 +755,22 @@ routine find_word
 	rep cmpsb
 	pop rsi
 	pop rdi
-	je .Lfind_word.found
+	mov ecx, edx
+	je .Lset_word.update
 3:	add rdi, rdx
-	jmp 2b
-.Lfind_word.found:
+	ifne (qword ptr [rdi]), 0, 2b
+.Lset_word.new:
+	pop rdx
+	mov [rdi], rax
+	add rdi, 8
+	or edx, ecx
+	mov [rdi], dl
+	inc rdi
+	rep movsb
+	ret
+.Lset_word.update:
+	pop rdx
+	mov [rdi - 8 - 1], rax
 	ret
 
 # ecx: byte count
@@ -398,44 +783,470 @@ routine str_reserve
 	lea OBJ_HEAP_HEAD, [rdi + rcx]
 	ret
 
-
-.section .rodata.builtins_dict
-builtins_dict:
-
-.macro def name:req
- .pushsection .rodata.builtins_dict
-	.word \name - _builtins
-	.byte .L\@.end - .L\@
-	.L\@: .ascii "\name"
-	.L\@.end:
- .popsection
-	routine \name
-.endm
-.macro enddef
-	ret
-.endm
-
-.section .text.builtins
-
-_builtins:
-
-def exit
-	_start_exit
+# rbx: pre_cond
+routine branch_end
+	mov FLAGS, [rip + branch.og_flags]
 	xor eax, eax
-enddef
+	mov [rip + branch.pre_cond], rax
+	mov [rip + branch.post_cond], rax
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, 2f
+	ASM_BEGIN rax
+	ASM_ret
+	ASM_END
+	jmp rbx
+2:	ret
 
-def syslog
-	obj_pop rdi
-	mov esi, [rdi - 8]
-	syscall_log
-enddef
 
-.purgem def
-.purgem enddef
+.macro dict_begin namespace:req
+ .section .rodata.builtins_dict.\namespace
+builtins_dict.\namespace:
 
-.section .rodata.builtins_dict
+ .macro _def_as name:req, label:req, imm:req
+  .pushsection .rodata.builtins_dict.\namespace
+	.word \label - builtins.\namespace
+	.byte (1001f - 1000f) | (\imm << 7)
+	1000: .ascii "\name"
+	1001:
+  .popsection
+	routine \label
+ .endm
+ .macro def_as name:req, label:req
+	_def_as "\name", \label, 0
+ .endm
+ .macro defimm_as name:req, label:req
+	_def_as "\name", \label, 1
+ .endm
+ .macro def name:req
+	def_as \name \name
+ .endm
+ .macro defimm name:req
+	defimm_as \name \name
+ .endm
+ .macro enddef
+	ret
+ .endm
+
+ .section .text.builtins.\namespace
+builtins.\namespace:
+.endm
+
+.macro dict_end namespace:req
+ .purgem def
+ .purgem defimm
+ .purgem def_as
+ .purgem defimm_as
+ .purgem _def_as
+ .purgem enddef
+
+ .section .rodata.builtins_dict.\namespace
 	.word -1
-builtins_dict.end:
+builtins_dict.\namespace\().end:
+.endm
+
+
+# rdi: dict base
+# rsi: name
+# ecx: namelen
+#
+# eax: offset to routine (or -1)
+# edx: 1 if immediate, 0 if not
+routine dict_find
+	xor ebx, ebx
+.Ldict_find.loop:
+	add rdi, rbx
+	movzx eax, word ptr [rdi]
+	ifeq ax, -1, .Ldict_find.notfound
+	movzx edx, byte ptr [rdi + 2]
+	mov ebx, edx
+	and ebx, 0x7f
+	add rdi, 2 + 1
+	ifne bl, cl .Ldict_find.loop
+	push rdi
+	push rsi
+	rep cmpsb
+	pop rsi
+	pop rdi
+	mov ecx, ebx
+	jne .Ldict_find.loop
+.Ldict_find.found:
+	and edx, 1<<7
+	ret
+.Ldict_find.notfound:
+	push -1
+	pop rax
+	ret
+
+# rdi: dict base
+# rdx: code base
+# rsi: prefix ptr
+# ecx: prefix len
+routine dict_parse
+	push rdx
+	push rsi
+	push rcx
+	push rdi
+	call read_word
+	pop rdi
+	push rsi
+	push rcx
+	call dict_find
+	ifeq eax, -1, .Ldict_parse.not_found
+.Ldict_parse.found:
+	add rsp, 8 * 4
+	pop rbx
+	add rax, rbx
+	test FLAGS, 1 << FLAG.COMPILE_MODE
+	jz .Ldict_parse.interpret_mode
+	test edx, edx
+	jz asm_call_rel32
+.Ldict_parse.interpret_mode:
+	jmp rax
+.Ldict_parse.not_found:
+	pop rdx
+	pop rdi
+	pop rcx
+	pop rsi
+	pop rbx
+	sub rsp, 256 - 8
+	push '('
+	push rdi
+	push rdx
+	lea rdi, [rsp + 16 + 1]
+	rep movsb
+	string rsi, ecx, ") word not found: "
+	rep movsb
+	pop rcx
+	pop rsi
+	rep movsb
+	mov rsi, rdi
+	mov rdi, rsp
+	sub esi, edi
+	syscall_panic
+
+
+dict_begin _
+	defimm String
+		lea rdi, [rip + builtins_dict.String]
+		lea rdx, [rip + builtins.String]
+		string rsi, ecx, "String"
+		call dict_parse
+	enddef
+
+	defimm Sys
+		lea rdi, [rip + builtins_dict.Sys]
+		lea rdx, [rip + builtins.Sys]
+		string rsi, ecx, "Sys"
+		call dict_parse
+	enddef
+
+	defimm X86
+		lea rdi, [rip + builtins_dict.X86]
+		lea rdx, [rip + builtins.X86]
+		string rsi, ecx, "X86"
+		call dict_parse
+	enddef
+
+	defimm_as "!" Immediate
+		lea rdi, [rip + builtins_dict.Immediate]
+		lea rdx, [rip + builtins.Immediate]
+		string rsi, ecx, "!"
+		call dict_parse
+	enddef
+
+	defimm_as "//" comment
+	2:	call read_byte
+		ifltz eax, 3f
+		ifne al, '\n', 2b
+	3:
+	enddef
+
+	defimm_as ":" define
+		bts FLAGS, FLAG.COMPILE_MODE
+		defpanic .Ldefine.nested_define, "(:) nested defines are forbidden"
+		jc .Ldefine.nested_define
+		mov rax, [rip + code_head]
+		mov [rip + define_cur_routine], rax
+		call read_word
+		mov [rip + define_cur_name], rsi
+	enddef
+
+	defimm_as ";" end_define
+		btr FLAGS, FLAG.COMPILE_MODE
+		defpanic .Lend_define.nodefine, "(;) not inside definition"
+		jnc .Lend_define.nodefine
+		ASM_BEGIN rdx
+		ASM_ret
+		ASM_END
+		mov rsi, [rip + define_cur_name]
+		mov rax, [rip + define_cur_routine]
+		mov ecx, [rsi - 8]
+		xor edx, edx
+		call set_word
+	enddef
+
+	defimm "if"
+		asserteq (qword ptr [rip + branch.pre_cond]), 0, "(if) nested conditionals are forbidden"
+		ASM_BEGIN rax
+		mov [rip + branch.pre_cond], rax
+		mov [rip + branch.og_flags], FLAGS
+		or FLAGS, 1 << FLAG.COMPILE_MODE
+	enddef
+
+	defimm "then"
+		assertne (qword ptr [rip + branch.pre_cond]), 0, "(then) not after if"
+		asserteq (qword ptr [rip + branch.post_cond]), 0, "(then) multiple thens"
+		ASM_BEGIN rax
+		ASM_num_pop_rax
+		ASM_ifeqz_rax_rel32_stub
+		ASM_END
+		mov [rip + branch.post_cond], rax
+	enddef
+
+	defimm "else"
+		mov rcx, [rip + branch.post_cond]
+		assertnez rcx, "(then) not after then"
+		ASM_BEGIN rax
+		ASM_jmp_rel32_stub
+		ASM_END
+		mov [rip + branch.post_cond], rax
+		sub eax, ecx
+		mov [rcx - 4], eax
+	enddef
+
+	defimm "end"
+		mov rbx, qword ptr [rip + branch.pre_cond]
+		mov rcx, qword ptr [rip + branch.post_cond]
+		assertnez rcx, "(end) not inside conditional"
+		ASM_BEGIN rax
+		sub eax, ecx
+		mov [rcx - 4], eax
+		call branch_end
+	enddef
+
+	defimm "repeat"
+		mov rbx, qword ptr [rip + branch.pre_cond]
+		mov rcx, qword ptr [rip + branch.post_cond]
+		assertnez rcx, "(repeat) not inside conditional"
+		ASM_BEGIN rax
+		lea edx, [ebx - 5]
+		sub edx, eax
+		ASM_jmp_rel32 edx
+		ASM_END
+		sub eax, ecx
+		mov [rcx - 4], eax
+		call branch_end
+	enddef
+
+	def dup
+		num_peek rax
+		num_push rax
+	enddef
+
+	def dup2
+		mov rax, [NUM_STACK_HEAD + 8*1]
+		num_push rax
+	enddef
+
+	def drop
+		num_drop
+	enddef
+
+	def_as "=" int_eq
+		num_pop rdx
+		num_peek rcx
+		xor eax, eax
+		cmp rcx, rdx
+		sete al
+		num_replace rax
+	enddef
+
+	def_as "<>" int_ne
+		num_pop rdx
+		num_peek rcx
+		xor eax, eax
+		cmp rcx, rdx
+		setne al
+		num_replace rax
+	enddef
+
+	def_as "#sl" int_sl
+		num_pop rcx
+		shl qword ptr [NUM_STACK_HEAD], cl
+	enddef
+
+	def_as "#or" int_or
+		num_pop rax
+		or qword ptr [NUM_STACK_HEAD], rax
+	enddef
+
+	def_as "#and" int_and
+		num_pop rax
+		and qword ptr [NUM_STACK_HEAD], rax
+	enddef
+
+	def_as "#not" int_not
+		not qword ptr [NUM_STACK_HEAD]
+	enddef
+dict_end _
+
+
+dict_begin Sys
+	defimm Door
+		lea rdi, [rip + builtins_dict.Sys.Door]
+		lea rdx, [rip + builtins.Sys.Door]
+		string rsi, ecx, "Sys Door"
+		call dict_parse
+	enddef
+
+	def exit
+		_start_exit
+		xor eax, eax
+	enddef
+
+	def log
+		obj_pop rdi
+		mov esi, [rdi - 8]
+		syscall_log
+	enddef
+
+	def halt
+		hlt
+	enddef
+
+	def panic
+		obj_pop rdi
+		mov esi, [rdi - 8]
+		syscall_panic
+	enddef
+dict_end Sys
+
+
+dict_begin Sys.Door
+	def find
+		num_pop rdi # high
+		num_peek rsi # low
+		xor edx, edx
+		xor ecx, ecx
+		syscall_door_list
+		num_replace rax
+	enddef
+
+	def_as "call:0->0" call_0_0
+		num_pop rbx
+		num_pop rax
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:0->1" call_0_1
+		call call_0_0
+		num_push rax
+	enddef
+
+	def_as "call:0->2" call_0_2
+		call call_0_1
+		num_push rdx
+	enddef
+
+	def_as "call:1->0" call_1_0
+		num_pop rbx
+		num_pop rax
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:2->0" call_2_0
+		num_pop rbx
+		num_pop rax
+		num_pop rsi
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:3->0" call_3_0
+		num_pop rbx
+		num_pop rax
+		num_pop rdx
+		num_pop rsi
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
+dict_end Sys.Door
+
+
+dict_begin X86
+	defimm Io
+		lea rdi, [rip + builtins_dict.X86.Io]
+		lea rdx, [rip + builtins.X86.Io]
+		string rsi, ecx, "X86 Io"
+		call dict_parse
+	enddef
+dict_end X86
+
+
+dict_begin Immediate
+	defimm const
+		defpanic .LImmediate.const.assertfail, "(! const) only works in compile mode"
+		if_bit_reset FLAGS, FLAG.COMPILE_MODE, .LImmediate.const.assertfail
+		num_pop rax
+		call asm_num_push
+	enddef
+dict_end Immediate
+
+
+dict_begin String
+	def natural
+		num_pop rax
+		# write to stack first so we don't
+		# have to reverse the string later
+		mov rsi, rsp
+		# 64/4 = 16
+		sub rsp, 16
+		# this is actually (1 << 64) / 10,
+		# but written such that it is evaluated correctly
+		movabs rcx, ((1 << (64 - 1)) - 1) / 5
+	2:	# TODO surely there's a way to use the result in rax
+		# directly (modulus), but my brain no work
+		mov ebx, eax
+		mul rcx
+		mov eax, edx
+		shl eax, 1
+		lea eax, [eax + eax * 4]
+		sub ebx, eax
+		add ebx, '0'
+		dec rsi
+		mov [rsi], bl
+		mov rax, rdx
+		ifnez rax, 2b
+		mov ecx, esp
+		sub ecx, esi
+		add ecx, 16
+		call str_reserve
+		obj_push rdi
+		rep movsb
+		add rsp, 16
+	enddef
+dict_end String
+
+
+dict_begin X86.Io
+.macro f x:req a:req
+	def in\x
+		num_pop rdx
+		xor eax, eax
+		in \a, dx
+		num_push rax
+	enddef
+	def out\x
+		num_pop rdx
+		num_pop rax
+		out dx, \a
+	enddef
+.endm
+	f  8  al
+	f 16  ax
+	f 32 eax
+.purgem f
+dict_end X86.Io
 
 
 .macro f name:req size:req
@@ -447,4 +1258,5 @@ builtins_dict.end:
 	f obj_stack (1 << 12)
 	f obj_heap  (1 << 16)
 	f word_dict (1 << 12)
+	f code_heap (1 << 16)
 .purgem f

@@ -1,0 +1,91 @@
+"Hello interpreter!" Sys log
+
+0xff2ad0f92941f6c6 0x02e8903cae084b61 Sys Door find
+if dup 0 = then
+	"Failed to find interrupt door" Sys panic
+end
+: interrupt-door ! const ;
+: interrupt->wait    0 interrupt-door Sys Door call:2->0 ;
+: interrupt->done    1 interrupt-door Sys Door call:2->0 ;
+: interrupt->acquire 2 interrupt-door Sys Door call:0->1 ;
+: interrupt->release 3 interrupt-door Sys Door call:1->0 ;
+: interrupt->map     4 interrupt-door Sys Door call:3->0 ;
+: interrupt->LEVEL 0 ;
+: interrupt->EDGE  1 ;
+
+: IO_DATA    0x60 ;
+: IO_STATUS  0x64 ;
+: IO_COMMAND 0x64 ;
+
+: STATUS_OUTPUT_FULL 0 ;
+: STATUS_INPUT_FULL  1 ;
+
+: TIMEOUT_MS 100 ;
+
+: ps2_read    IO_DATA    X86 Io in8  ;
+: ps2_write   IO_DATA    X86 Io out8 ;
+: ps2_status  IO_STATUS  X86 Io in8  ;
+: ps2_command IO_COMMAND X86 Io out8 ;
+
+// : ps2_status_testbit ps2_status #testbit ;
+// : ps2_input_full   STATUS_INPUT_FULL ps2_status_testbit ;
+// : ps2_output_full STATUS_OUTPUT_FULL ps2_status_testbit ;
+// : ps2_output_empty ps2_output_full #not ;
+
+: ps2_read_nowait ps2_read ;
+// : ps2_write IF ps2_input_full   THEN REPEAT ps2_write ;
+// : ps2_read  IF ps2_output_empty THEN REPEAT ps2_read ;
+
+: ps2_disable_port1 0xad ps2_command ;
+: ps2_disable_port2 0xa7 ps2_command ;
+: ps2_enable_port1  0xae ps2_command ;
+: ps2_enable_port2  0xa8 ps2_command ;
+: ps2_disable_ports ps2_disable_port1 ps2_disable_port2 ;
+: ps2_enable_ports  ps2_enable_port1  ps2_enable_port2  ;
+
+: ps2_write_keyboard ps2_write ;
+: ps2_write_mouse 0xd4 ps2_command ps2_write ;
+
+: ps2_get_config  0x20 ps2_command  ps2_read  ;
+: ps2_set_config  0x60 ps2_command  ps2_write ;
+
+: CTRL_CFG_PORT_1_INTERRUPT_ENABLED 1 0 #sl ;
+: CTRL_CFG_PORT_2_INTERRUPT_ENABLED 1 1 #sl ;
+: CTRL_CFG_PORT_1_TRANSLATION       1 6 #sl ;
+
+: ps2_init_config
+	ps2_get_config
+	CTRL_CFG_PORT_1_INTERRUPT_ENABLED #or
+	CTRL_CFG_PORT_2_INTERRUPT_ENABLED #or
+	CTRL_CFG_PORT_1_TRANSLATION #not #and
+	ps2_set_config ;
+
+: ps2_keyboard_init ;
+: ps2_mouse_init ;
+
+: ps2_init
+	ps2_disable_ports
+	ps2_init_config
+	ps2_enable_ports
+	// ps2_keyboard_init
+	// ps2_mouse_init
+	;
+
+// 0xee ps2_write
+// ps2_read
+
+ps2_init
+
+0x01 interrupt->acquire
+0x01 dup2 interrupt->LEVEL interrupt->map
+dup : ps2_wait 0x01 ! const interrupt->wait ;
+    : ps2_done 0x01 ! const interrupt->done ;
+
+if 1 then
+	ps2_wait
+	"Got an interrupt!!!" Sys log
+	ps2_read  String natural  Sys log
+	ps2_done
+repeat
+
+Sys exit

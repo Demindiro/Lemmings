@@ -71,12 +71,6 @@ pub struct L3;
 pub struct L4;
 pub struct L5;
 
-pub struct A0;
-pub struct A12;
-pub struct A14;
-pub struct A21;
-pub struct A30;
-
 pub struct PhysSpace;
 pub struct VirtSpace;
 
@@ -184,6 +178,12 @@ impl<AA, AB, S> PartialEq<Addr<AA, S>> for Addr<AB, S> {
 
 impl<A, S> Eq for Addr<A, S> {}
 
+impl<A, S> From<Addr<A, S>> for u64 {
+    fn from(addr: Addr<A, S>) -> u64 {
+        addr.0
+    }
+}
+
 impl sealed::Level for L0 {
     fn is_page(_: &Entry<L0>) -> bool {
         true
@@ -250,26 +250,32 @@ impl sealed::Page for L2 {
 impl sealed::Root for L4 {}
 impl sealed::Root for L5 {}
 
-impl sealed::Align for A0 {
-    const BITS: u8 = 0;
+macro_rules! align {
+    ($n:literal $a:ident, $($ns:literal $as:ident,)*) => {
+        pub struct $a;
+        impl sealed::Align for $a {
+            const BITS: u8 = $n;
+        }
+        impl sealed::AlignedTo<$a> for $a {}
+        $(impl sealed::AlignedTo<$a> for $as {})*
+        $(const _: () = { use sealed::Align; assert!((<$a>::BITS) < (<$as>::BITS)) };)*
+        align!($($ns $as,)*);
+    };
+    () => {};
 }
-impl sealed::Align for A12 {
-    const BITS: u8 = 12;
+align! {
+    0 A0,
+    1 A1,
+    2 A2,
+    3 A3,
+    4 A4,
+    5 A5,
+    6 A6,
+    12 A12,
+    14 A14,
+    21 A21,
+    30 A30,
 }
-impl sealed::Align for A14 {
-    const BITS: u8 = 14;
-}
-impl sealed::Align for A21 {
-    const BITS: u8 = 21;
-}
-impl sealed::Align for A30 {
-    const BITS: u8 = 30;
-}
-
-impl sealed::AlignedTo<A12> for A12 {}
-impl sealed::AlignedTo<A12> for A14 {}
-impl sealed::AlignedTo<A12> for A21 {}
-impl sealed::AlignedTo<A12> for A30 {}
 
 impl<Level> Entry<Level>
 where
@@ -488,6 +494,35 @@ impl Root<L4> {
                 .copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
         }
         Ok(())
+    }
+
+    /// Translate a single virtual address to a physical address.
+    pub fn translate<M, A>(&self, mapper: &M, addr: Virt<A>) -> Option<Phys<A>>
+    where
+        A12: sealed::AlignedTo<A>,
+        M: PhysToPtr,
+    {
+        let ([l0, l1, l2, l3], _) = Self::indices(addr);
+        let f = (|| unsafe {
+            let entry = &self.table(mapper)[l3];
+            assert!(!entry.is_page());
+            let entry = &entry.table(mapper)?[l2];
+            if entry.is_page() {
+                return Some((entry.phys(), 30));
+            }
+            let entry = &entry.table(mapper)?[l1];
+            if entry.is_page() {
+                return Some((entry.phys(), 21));
+            }
+            let entry = &entry.table(mapper)?[l0];
+            if entry.is_page() {
+                return Some((entry.phys(), 12));
+            }
+            None
+        });
+        let (base, maskbits) = f()?;
+        let mask = (1 << maskbits) - 1;
+        Some(Addr((base.0 & !mask) | (addr.0 & mask), PhantomData))
     }
 
     fn indices<A>(virt: Virt<A>) -> ([usize; 4], usize) {

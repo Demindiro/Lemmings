@@ -10,10 +10,12 @@ rm -rf "$databin"
 mkdir -p "$databin"
 mkdir -p "$tmp"
 
+make -C IDL
+
 (cd qemubios && ./build.sh)
 (cd kernel && ./build.sh)
 (cd interpreter && ./build.sh)
 
-echo '"Hello interpreter!" syslog exit' >> "$databin/interpreter.init"
+cp interpreter/example.interpreter "$databin/interpreter.init"
 
 ./create_archive.py "$out/data.bin" "$databin"
