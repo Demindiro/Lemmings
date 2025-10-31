@@ -32,7 +32,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "lemmings-idl-archive",
- "lemmings-idl-x86-64-interrupt",
+ "lemmings-idl-interrupt",
  "lemmings-qemubios",
  "lemmings-x86_64",
 ]
@@ -49,7 +49,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lemmings-idl-x86-64-interrupt"
+name = "lemmings-idl-interrupt"
 version = "0.1.0"
 dependencies = [
  "lemmings-idl",
