@@ -68,6 +68,10 @@ impl<T> SpinLock<T> {
         unsafe { *self.value.get() = value }
         token
     }
+
+    pub unsafe fn get_mut_unchecked(&self) -> &mut T {
+        unsafe { &mut *self.value.get() }
+    }
 }
 
 impl<T> Drop for SpinLockGuard<'_, '_, T> {

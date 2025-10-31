@@ -3,11 +3,13 @@
 //! If you absolutely need `O(1)` scheduling, avoid having any threads sleep.
 //! The sleep queue is a min-heap, which has `O(log n)` time complexity on all operations.
 
-use crate::{KernelEntryToken, page::{self, PAGE_SIZE, PageAttr}, time::Monotonic};
+use crate::{KernelEntryToken, page::{self, PAGE_SIZE, PageAttr}, sync::SpinLock, time::Monotonic};
 use core::{arch::asm, cell::Cell, fmt, mem, ptr::NonNull, ops};
 use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
+
+static MANAGER: SpinLock<ThreadManager> = SpinLock::new(ThreadManager::new());
 
 pub struct ThreadManager {
     pending: [RoundRobinQueue; PRIORITY_COUNT],   
@@ -234,4 +236,9 @@ pub fn current() -> ThreadHandle {
 
 pub fn park(cs: CriticalSection<'_>) {
     todo!();
+}
+
+pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
+    let threads = unsafe { MANAGER.get_mut_unchecked() };
+    threads.enter(Priority::Regular, entry, token)
 }

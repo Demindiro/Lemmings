@@ -76,8 +76,7 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     let token = page::init(entry, token);
     let token = archive::init(entry, token);
     let token = sys::init(entry, token);
-    let mut threads = thread::ThreadManager::new();
-    threads.enter(thread::Priority::Regular, main, token);
+    thread::init(main, token)
 }
 
 lemmings_qemubios::entry!(entry);
