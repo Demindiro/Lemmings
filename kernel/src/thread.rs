@@ -195,6 +195,48 @@ impl Thread {
         }
     }
 
+    /// Enter this thread, saving the state of the current thread before entering.
+    fn resume(&self, cs: CriticalSection<'_>) {
+        let current = current();
+        unsafe {
+            set_current(self);
+            asm! {
+                "push rbx",
+                "push rbp",
+                "lea {scratch}, [rip + 2f]",
+                "mov [{cur} + {TCB_SP}], rsp",
+                "mov [{cur} + {TCB_PC}], {scratch}",
+                "mov rsp, {sp}",
+                "jmp {pc}",
+                "2:",
+                "pop rbp",
+                "pop rbx",
+                scratch = out(reg) _,
+                cur = in(reg) &current.0.tcb,
+                sp = in(reg) self.stack_pointer.get(),
+                pc = in(reg) self.program_counter.get(),
+                TCB_SP = const mem::offset_of!(ThreadControlBlock, stack_pointer),
+                TCB_PC = const mem::offset_of!(ThreadControlBlock, program_counter),
+                lateout("rax") _,
+                lateout("rcx") _,
+                lateout("rdx") _,
+                //lateout("rbx") _, // "cannot be used for inline asm"
+                //lateout("rsp") _,
+                //lateout("rbp") _, // "cannot be used for inline asm"
+                lateout("rsi") _,
+                lateout("rdi") _,
+                lateout("r8") _,
+                lateout("r9") _,
+                lateout("r10") _,
+                lateout("r11") _,
+                lateout("r12") _,
+                lateout("r13") _,
+                lateout("r14") _,
+                lateout("r15") _,
+            }
+        }
+    }
+
     fn exit() -> ! {
         todo!("exit thread");
     }
@@ -244,6 +286,12 @@ impl fmt::Debug for ThreadSpawnError {
     }
 }
 
+impl ThreadHandle {
+    pub fn resume(&self, cs: CriticalSection<'_>) {
+        self.0.resume(cs)
+    }
+}
+
 unsafe fn set_current(thread: &Thread) {
     unsafe { lemmings_x86_64::set_fs(&thread.tcb as *const _ as *mut u8) }
 }
@@ -261,4 +309,48 @@ pub fn park(cs: CriticalSection<'_>) {
 pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
     let threads = unsafe { MANAGER.get_mut_unchecked() };
     threads.enter(Priority::Regular, entry, token)
+}
+
+/// Save thread state, enable interrupts and halt until the thread is resumed.
+fn wait(cs: CriticalSection<'_>) {
+    let current = current();
+    unsafe {
+        asm! {
+            // TODO should we switch to a new stack/"sleep thread"?
+            // This works, but it is kinda weird that we are using the stack
+            // of a parked thread...
+            "push rbx",
+            "push rbp",
+            "lea {scratch}, [rip + 2f]",
+            "mov [{cur} + {TCB_SP}], rsp",
+            "mov [{cur} + {TCB_PC}], {scratch}",
+            "3: sti",
+            "hlt",
+            "jmp 3b",
+            "2:",
+            "pop rbp",
+            "pop rbx",
+            scratch = out(reg) _,
+            cur = in(reg) &current.0.tcb,
+            TCB_SP = const mem::offset_of!(ThreadControlBlock, stack_pointer),
+            TCB_PC = const mem::offset_of!(ThreadControlBlock, program_counter),
+            lateout("rax") _,
+            lateout("rcx") _,
+            lateout("rdx") _,
+            //lateout("rbx") _, // "cannot be used for inline asm"
+            //lateout("rsp") _,
+            //lateout("rbp") _, // "cannot be used for inline asm"
+            lateout("rsi") _,
+            lateout("rdi") _,
+            lateout("r8") _,
+            lateout("r9") _,
+            lateout("r10") _,
+            lateout("r11") _,
+            lateout("r12") _,
+            lateout("r13") _,
+            lateout("r14") _,
+            lateout("r15") _,
+            options(nomem, nostack),
+        }
+    }
 }
