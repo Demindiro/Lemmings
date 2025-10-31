@@ -237,6 +237,12 @@ def emit(outf, idl, sysv):
                 with ImplFor(f'From<{x}>', name):
                     with Fn('from', f'x: {x}', 'Self'):
                         out('Self(x)')
+            else:
+                with ImplFor(f'TryFrom<{x}>', name):
+                    out('type Error = ();')
+                    with Fn('try_from', f'x: {x}', 'Result<Self, Self::Error>'):
+                        # FIXME this usize nonsense is making things way too hard
+                        out('Self::is_valid(x as _).then_some(Self(x)).ok_or(())')
             if type(ty.until) is int and ty.start == ty.until - 1:
                 with ImplFor('Default', name):
                     with Fn('default', '', 'Self'):
@@ -266,12 +272,13 @@ def emit(outf, idl, sysv):
 
     def emit_record(name, ty, sysv_ty):
         tr = lambda x: f'r#{x}' if x in RESERVED_KEYWORDS else x
+        if sysv_ty.register_count == 0:
+            out(f'pub struct {name};')
+            return
         with Scope(f'pub struct {name}'):
             for m_name, m_ty in ty.members.items():
                 out(f'pub {tr(m_name)}: {m_ty},')
         out('')
-        if sysv_ty.register_count == 0:
-            return
         vals = regn_to_usizes(sysv_ty)
         args = vals and f'x: {vals}'
         with Impl(name):
@@ -387,7 +394,7 @@ def emit(outf, idl, sysv):
                     out(f'{routine.output}::from_ffi(x)')
                 else:
                     out(f'unsafe {{ (self.{name})({args}) }};')
-                    out(f'{routine.output} {{}}')
+                    out(f'{routine.output}')
                 del n, args
         del name, routine
 
@@ -410,12 +417,12 @@ def emit(outf, idl, sysv):
                             if sysv[routine.input].register_count > 0:
                                 out(f'let x = {routine.input}::from_ffi({regn_to_usizes_vars(sysv_in)});')
                             else:
-                                out(f'let x = {routine.input} {{}};')
+                                out(f'let x = {routine.input};')
                             if sysv[routine.output].register_count > 0:
-                                out(f'$impl_{name}(x).to_ffi().into()')
+                                out(f'let x: {routine.output} = $impl_{name}(x);')
+                                out(f'x.to_ffi().into()')
                             else:
-                                out(f'$impl_{name}(x);')
-                                out(f'{routine.output}')
+                                out(f'let _: {routine.output} = $impl_{name}(x);')
                         out(f'ffi')
         del name, routine
 

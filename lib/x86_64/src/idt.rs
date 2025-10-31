@@ -77,7 +77,20 @@ impl IdtEntry {
     const ATTRIBUTE_PRESENT: u8 = 0x80;
     const ATTRIBUTE_DPL: u8 = 0x00;
 
-    pub const fn new(selector: u16, handler: u64, ist: Ist) -> Self {
+    pub const fn zero() -> Self {
+        Self {
+            offset_low: 0,
+            selector: 0,
+            ist: 0,
+            type_attributes: 0,
+            offset_high: 0,
+            offset_higher: 0,
+            _unused_1: 0,
+        }
+    }
+
+    pub fn new(selector: u16, handler: *const (), ist: Ist) -> Self {
+        let handler = handler.addr();
         Self {
             offset_low: (handler >> 0) as u16,
             selector,
@@ -89,13 +102,6 @@ impl IdtEntry {
             offset_higher: (handler >> 32) as u32,
             _unused_1: 0,
         }
-    }
-
-    pub fn set_handler(&mut self, handler: *const ()) {
-        let handler = handler as u64;
-        self.offset_low = (handler >> 0) as u16;
-        self.offset_high = (handler >> 16) as u16;
-        self.offset_higher = (handler >> 32) as u32;
     }
 }
 
@@ -110,12 +116,24 @@ impl<const MAX: usize> Idt<MAX> {
             assert!(MAX <= 256, "can't support more than 256 entries");
         }
         Self {
-            descriptors: [const { IdtEntry::new(0, 0, Ist::N0) }; MAX],
+            descriptors: [const { IdtEntry::zero() }; MAX],
         }
     }
 
     pub const fn set(&mut self, index: u8, entry: IdtEntry) {
         self.descriptors[index as usize] = entry;
+    }
+
+    /// Set a handler for a particular IRQ.
+    ///
+    /// This will always use the interrupt gatetype, which disables interrupts on entry.
+    ///
+    /// It uses [`Ist::N0`], i.e. no switching of the stack.
+    ///
+    /// It uses the standard GDT layout. See [`crate::gdt`] for more information.
+    pub fn set_handler(&mut self, index: u8, handler: *const ()) {
+        let entry = IdtEntry::new(crate::gdt::Gdt::KERNEL_CS, handler as _, Ist::N0);
+        self.set(index, entry);
     }
 }
 

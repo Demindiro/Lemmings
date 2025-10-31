@@ -58,6 +58,7 @@ impl<'a> LocalApicHelper<'a> {
             .unwrap_or(u32::MAX)
     }
 
+    /// Set IRQ for timer.
     pub fn set_lvt(&self, irq: u8) {
         let t = self.apic.lvt_timer.get();
         self.apic

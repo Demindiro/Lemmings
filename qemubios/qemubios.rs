@@ -30,6 +30,18 @@ mod x86 {
             }
         }
     }
+    pub unsafe fn rdmsr(msr: u32) -> u64 {
+        let hi @ lo: u32;
+        unsafe {
+            core::arch::asm! {
+                "rdmsr",
+                in("ecx") msr,
+                out("eax") lo,
+                out("edx") hi,
+            }
+        }
+        u64::from(hi) << 32 | u64::from(lo)
+    }
 }
 
 mod sys {
@@ -237,13 +249,17 @@ mod page {
                 pub fn get_or_alloc_table(&mut self) -> Option<$table> {
                     self.get_table().or_else(|| (!self.is_present()).then(|| {
                         let Some(table) = $table::new() else { fail("out of memory") };
-                        self.0 = table.as_u64() | PRESENT;
+                        self.set_table_raw(table.as_u64());
                         table
                     }))
                 }
 
                 pub fn set_table(&mut self, table: $table) {
-                    self.0 = table.as_u64() | DIRTY | ACCESSED | READ_WRITE | PRESENT;
+                    self.set_table_raw(table.as_u64());
+                }
+
+                fn set_table_raw(&mut self, table: u64) {
+                    self.0 = table | DIRTY | ACCESSED | READ_WRITE | PRESENT;
                 }
 
                 fn is_table(&self) -> bool {
@@ -965,6 +981,31 @@ mod pcie {
     }
 }
 
+mod apic {
+    use crate::*;
+
+    const MSR_APIC_BASE: u32 = 0x1b;
+
+    fn local_address() -> u64 {
+        unsafe { x86::rdmsr(MSR_APIC_BASE) & !0xfff }
+    }
+
+    fn io_address() -> u64 {
+        0xfec00000
+    }
+
+    fn map(addr: u64, err: &str) {
+        let x = NonNull::new(addr as _).unwrap_or_else(|| fail(err));
+        let r = unsafe { x..x.byte_add(4096) };
+        page::identity_map_rw(r);
+    }
+
+    pub fn init() {
+        map(local_address(), "no local APIC?");
+        map(io_address(), "no I/O APIC?");
+    }
+}
+
 mod boot {
     // Intentionally separated from the `lemmings-qemubios` crate because you
     // better have a damn good reason to touch this.
@@ -1128,6 +1169,7 @@ extern "sysv64" fn boot(kernel: sys::File, data: sys::File) -> NonNull<u8> {
     let pcie_base = pcie::configure();
     let (entry, kernel) = elf::load(kernel);
     let data = load_file(data);
+    apic::init();
     boot::collect_info(kernel, data);
     entry
 }

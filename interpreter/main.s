@@ -72,6 +72,12 @@ read_archive.door: .quad 0
 read_archive.file: .quad 0
 read_archive.offset: .quad 0
 
+.section .bss.branch
+branch.pre_cond: .quad 0
+branch.post_cond: .quad 0
+# we need to save/restore flags as conditionals may occur inside definitions
+branch.og_flags: .quad 0
+
 .macro defpanic label:req, reason:req
  .pushsection .rodata.panic
 	.byte .L\@.end - .L\@
@@ -233,6 +239,15 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
 	add \PREFIX\()_STACK_HEAD, 8
  .endm
+ .macro \prefix\()_peek x:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
+ .endm
+ .macro \prefix\()_replace x:req
+	mov qword ptr [\PREFIX\()_STACK_HEAD], \x
+ .endm
+ .macro \prefix\()_drop
+	add \PREFIX\()_STACK_HEAD, 8
+ .endm
 .endm
 	f num NUM
 	f obj OBJ
@@ -246,11 +261,11 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 	bts \reg, \x
  .endif
 .endm
-.macro clear_bit reg:req, x:req
+.macro reset_bit reg:req, x:req
  .if \x < 8
 	and \reg, ~(1 << (\x))
  .else
-	btc \reg, \x
+	btr \reg, \x
  .endif
 .endm
 .macro f name:req cc_bt:req
@@ -260,7 +275,7 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
  .endm
 .endm
 	f set   c
-	f clear nc
+	f reset nc
 .purgem f
 
 
@@ -314,6 +329,10 @@ _panic_start:
 	mov qword ptr [rip + code_head], .LASM_PTR
 .endm
 
+.macro ASM_ADVANCE32
+	add .LASM_PTR, 4
+.endm
+
 .macro ASM_PUSH8 x:req
 	mov byte ptr [.LASM_PTR], \x
 	inc .LASM_PTR
@@ -342,15 +361,36 @@ _panic_start:
 	ASM_PUSH8 0xe8
 	ASM_PUSH32 \rel
 .endm
+.macro ASM_jmp_rel32 rel:req
+	ASM_PUSH8 0xe9
+	ASM_PUSH32 \rel
+.endm
+.macro ASM_jmp_rel32_stub
+	ASM_PUSH8 0xe9
+	ASM_ADVANCE32
+.endm
+.macro ASM_jz_rel32_stub
+	ASM_PUSH16 0x840f
+	ASM_ADVANCE32
+.endm
 .macro ASM_mov_rax_imm64 x:req
 	ASM_PUSH16 0xb848
 	ASM_PUSH64 \x
+.endm
+.macro ASM_test_rax_rax
+	ASM_PUSH24 0xc08548
 .endm
 .macro ASM_sub_r15_imm8_c x:req
 	ASM_PUSH32 0xef8349 | (\x << 24)
 .endm
 .macro ASM_sub_r14_imm8_c x:req
 	ASM_PUSH32 0xee8349 | (\x << 24)
+.endm
+.macro ASM_add_r15_imm8_c x:req
+	ASM_PUSH32 0xc78349 | (\x << 24)
+.endm
+.macro ASM_add_r14_imm8_c x:req
+	ASM_PUSH32 0xc68349 | (\x << 24)
 .endm
 .macro ASM_store_r15_rax
 	ASM_PUSH24 0x078949
@@ -362,6 +402,12 @@ _panic_start:
 	ASM_PUSH24 0x07c749
 	ASM_PUSH32 \x
 .endm
+.macro ASM_load_r15_rax
+	ASM_PUSH24 0x078b49
+.endm
+.macro ASM_load_r14_rax
+	ASM_PUSH24 0x068b49
+.endm
 .macro ASM_num_push_rax
 	ASM_sub_r15_imm8_c 8
 	ASM_store_r15_rax
@@ -370,9 +416,21 @@ _panic_start:
 	ASM_sub_r15_imm8_c 8
 	ASM_store_r15_imm32 \x
 .endm
+.macro ASM_num_pop_rax
+	ASM_load_r15_rax
+	ASM_add_r15_imm8_c 8
+.endm
 .macro ASM_obj_push_rax
 	ASM_sub_r14_imm8_c 8
 	ASM_store_r14_rax
+.endm
+.macro ASM_obj_pop_rax
+	ASM_load_r14_rax
+	ASM_add_r14_imm8_c 8
+.endm
+.macro ASM_ifeqz_rax_rel32_stub
+	ASM_test_rax_rax
+	ASM_jz_rel32_stub
 .endm
 
 # rax: routine
@@ -462,7 +520,7 @@ routine parse_input
 	pop rsi
 	ifeqz rax, .Lparse_input.word_not_found
 	ifnez edx, 2f
-	if_bit_clear FLAGS, FLAG.COMPILE_MODE, 2f
+	if_bit_reset FLAGS, FLAG.COMPILE_MODE, 2f
 	call asm_call_rel32
 	jmp .Lparse_input.loop
 2:	call rax
@@ -565,7 +623,7 @@ routine parse_number
 	or edx, 040
 	lea ebx, [edx - 'a' + 10]
 2:	assertlt bl, dl, "digit out of range for base"
-	mul ecx
+	mul rcx
 	add rax, rbx
 	inc rdi
 	ifne rdi, rsi .Lparse_number.loop
@@ -712,7 +770,7 @@ routine set_word
 	ret
 .Lset_word.update:
 	pop rdx
-	mov [rdi - 8], rax
+	mov [rdi - 8 - 1], rax
 	ret
 
 # ecx: byte count
@@ -724,6 +782,19 @@ routine str_reserve
 	add rdi, 8
 	lea OBJ_HEAP_HEAD, [rdi + rcx]
 	ret
+
+# rbx: pre_cond
+routine branch_end
+	mov FLAGS, [rip + branch.og_flags]
+	xor eax, eax
+	mov [rip + branch.pre_cond], rax
+	mov [rip + branch.post_cond], rax
+	if_bit_set FLAGS, FLAG.COMPILE_MODE, 2f
+	ASM_BEGIN rax
+	ASM_ret
+	ASM_END
+	jmp rbx
+2:	ret
 
 
 .macro dict_begin namespace:req
@@ -854,6 +925,13 @@ routine dict_parse
 
 
 dict_begin _
+	defimm String
+		lea rdi, [rip + builtins_dict.String]
+		lea rdx, [rip + builtins.String]
+		string rsi, ecx, "String"
+		call dict_parse
+	enddef
+
 	defimm Sys
 		lea rdi, [rip + builtins_dict.Sys]
 		lea rdx, [rip + builtins.Sys]
@@ -865,6 +943,13 @@ dict_begin _
 		lea rdi, [rip + builtins_dict.X86]
 		lea rdx, [rip + builtins.X86]
 		string rsi, ecx, "X86"
+		call dict_parse
+	enddef
+
+	defimm_as "!" Immediate
+		lea rdi, [rip + builtins_dict.Immediate]
+		lea rdx, [rip + builtins.Immediate]
+		string rsi, ecx, "!"
 		call dict_parse
 	enddef
 
@@ -886,7 +971,7 @@ dict_begin _
 	enddef
 
 	defimm_as ";" end_define
-		btc FLAGS, FLAG.COMPILE_MODE
+		btr FLAGS, FLAG.COMPILE_MODE
 		defpanic .Lend_define.nodefine, "(;) not inside definition"
 		jnc .Lend_define.nodefine
 		ASM_BEGIN rdx
@@ -898,10 +983,106 @@ dict_begin _
 		xor edx, edx
 		call set_word
 	enddef
+
+	defimm "if"
+		asserteq (qword ptr [rip + branch.pre_cond]), 0, "(if) nested conditionals are forbidden"
+		ASM_BEGIN rax
+		mov [rip + branch.pre_cond], rax
+		mov [rip + branch.og_flags], FLAGS
+		or FLAGS, 1 << FLAG.COMPILE_MODE
+	enddef
+
+	defimm "then"
+		assertne (qword ptr [rip + branch.pre_cond]), 0, "(then) not after if"
+		asserteq (qword ptr [rip + branch.post_cond]), 0, "(then) multiple thens"
+		ASM_BEGIN rax
+		ASM_num_pop_rax
+		ASM_ifeqz_rax_rel32_stub
+		ASM_END
+		mov [rip + branch.post_cond], rax
+	enddef
+
+	defimm "else"
+		mov rcx, [rip + branch.post_cond]
+		assertnez rcx, "(then) not after then"
+		ASM_BEGIN rax
+		ASM_jmp_rel32_stub
+		ASM_END
+		mov [rip + branch.post_cond], rax
+		sub eax, ecx
+		mov [rcx - 4], eax
+	enddef
+
+	defimm "end"
+		mov rbx, qword ptr [rip + branch.pre_cond]
+		mov rcx, qword ptr [rip + branch.post_cond]
+		assertnez rcx, "(end) not inside conditional"
+		ASM_BEGIN rax
+		sub eax, ecx
+		mov [rcx - 4], eax
+		call branch_end
+	enddef
+
+	defimm "repeat"
+		panic "TODO (repeat)"
+	enddef
+
+	def dup
+		num_peek rax
+		num_push rax
+	enddef
+
+	def drop
+		num_drop
+	enddef
+
+	def_as "=" int_eq
+		num_pop rdx
+		num_peek rcx
+		xor eax, eax
+		cmp rcx, rdx
+		sete al
+		num_replace rax
+	enddef
+
+	def_as "<>" int_ne
+		num_pop rdx
+		num_peek rcx
+		xor eax, eax
+		cmp rcx, rdx
+		setne al
+		num_replace rax
+	enddef
+
+	def_as "#sl" int_sl
+		num_pop rcx
+		shl qword ptr [NUM_STACK_HEAD], cl
+	enddef
+
+	def_as "#or" int_or
+		num_pop rax
+		or qword ptr [NUM_STACK_HEAD], rax
+	enddef
+
+	def_as "#and" int_and
+		num_pop rax
+		and qword ptr [NUM_STACK_HEAD], rax
+	enddef
+
+	def_as "#not" int_not
+		not qword ptr [NUM_STACK_HEAD]
+	enddef
 dict_end _
 
 
 dict_begin Sys
+	defimm Door
+		lea rdi, [rip + builtins_dict.Sys.Door]
+		lea rdx, [rip + builtins.Sys.Door]
+		string rsi, ecx, "Sys Door"
+		call dict_parse
+	enddef
+
 	def exit
 		_start_exit
 		xor eax, eax
@@ -916,7 +1097,48 @@ dict_begin Sys
 	def halt
 		hlt
 	enddef
+
+	def panic
+		obj_pop rdi
+		mov esi, [rdi - 8]
+		syscall_panic
+	enddef
 dict_end Sys
+
+
+dict_begin Sys.Door
+	def find
+		num_pop rdi # high
+		num_peek rsi # low
+		xor edx, edx
+		xor ecx, ecx
+		syscall_door_list
+		num_replace rax
+	enddef
+
+	def_as "call:0->0" call_0_0
+		num_pop rbx
+		num_pop rax
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:0->1" call_0_1
+		call call_0_0
+		num_push rax
+	enddef
+
+	def_as "call:0->2" call_0_2
+		call call_0_1
+		num_push rdx
+	enddef
+
+	def_as "call:1->0" call_1_0
+		num_pop rbx
+		num_pop rax
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
+dict_end Sys.Door
 
 
 dict_begin X86
@@ -927,6 +1149,51 @@ dict_begin X86
 		call dict_parse
 	enddef
 dict_end X86
+
+
+dict_begin Immediate
+	defimm const
+		defpanic .LImmediate.const.assertfail, "(! const) only works in compile mode"
+		if_bit_reset FLAGS, FLAG.COMPILE_MODE, .LImmediate.const.assertfail
+		num_pop rax
+		call asm_num_push
+	enddef
+dict_end Immediate
+
+
+dict_begin String
+	def natural
+		num_pop rax
+		# write to stack first so we don't
+		# have to reverse the string later
+		mov rsi, rsp
+		# 64/4 = 16
+		sub rsp, 16
+		# this is actually (1 << 64) / 10,
+		# but written such that it is evaluated correctly
+		movabs rcx, ((1 << (64 - 1)) - 1) / 5
+	2:	# TODO surely there's a way to use the result in rax
+		# directly (modulus), but my brain no work
+		mov ebx, eax
+		mul rcx
+		mov eax, edx
+		shl eax, 1
+		lea eax, [eax + eax * 4]
+		sub ebx, eax
+		add ebx, '0'
+		dec rsi
+		mov [rsi], bl
+		mov rax, rdx
+		ifnez rax, 2b
+		mov ecx, esp
+		sub ecx, esi
+		add ecx, 16
+		call str_reserve
+		obj_push rdi
+		rep movsb
+		add rsp, 16
+	enddef
+dict_end String
 
 
 dict_begin X86.Io

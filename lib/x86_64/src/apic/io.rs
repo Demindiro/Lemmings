@@ -21,10 +21,17 @@ pub enum TriggerMode {
 }
 
 impl<'a> IoApicHelper<'a> {
+    pub fn new(apic: &'a IoApic) -> Self {
+        Self { apic }
+    }
+
     pub fn irq_offset(irq: u8) -> u32 {
         0x10 + u32::from(irq) * 2
     }
 
+    /// - `irq`: the IRQ of the *device*
+    /// - `apic_id`: the Local APIC to send the IRQ to.
+    /// - `vector`: the IRQ of the *Local APIC*
     pub unsafe fn set_irq(
         &self,
         irq: u8,

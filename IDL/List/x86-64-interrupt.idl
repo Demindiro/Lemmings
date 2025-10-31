@@ -1,0 +1,12 @@
+door Interrupt {
+	wait = IrqN -> Void
+	reserve_irq = Void -> MaybeIrqN
+	release_irq = IrqN -> Void
+}
+
+record Void {
+}
+
+u8 IrqN = 32 to 255
+u8 None = 0
+sum MaybeIrqN = None | IrqN
