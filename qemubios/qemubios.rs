@@ -3,24 +3,6 @@
 use core::{cell::UnsafeCell, ptr::NonNull};
 
 mod x86 {
-    pub unsafe fn out8(port: u16, value: u8) {
-        unsafe {
-            core::arch::asm! {
-                "out dx, eax",
-                in("dx") port,
-                in("al") value,
-            }
-        }
-    }
-    pub unsafe fn out16(port: u16, value: u16) {
-        unsafe {
-            core::arch::asm! {
-                "out dx, eax",
-                in("dx") port,
-                in("ax") value,
-            }
-        }
-    }
     pub unsafe fn out32(port: u16, value: u32) {
         unsafe {
             core::arch::asm! {
@@ -47,8 +29,6 @@ mod x86 {
 mod sys {
     use crate::*;
     use core::{arch::asm, ptr::{self, NonNull}};
-
-    const FW_CFG_IOBASE: u16 = 0x510;
 
     #[repr(C)]
     pub struct File {
@@ -117,25 +97,10 @@ mod sys {
             page::Pml4::from_ptr(addr)
         }
     }
-
-    /// # Safety
-    ///
-    /// The page mappings must be valid.
-    ///
-    /// In particular: the page with the current IP must be properly mapped.
-    pub unsafe fn set_pml4(pml4: page::Pml4) {
-        unsafe {
-            asm! {
-                "mov cr3, rax",
-                in("rax") pml4.as_u64(),
-            }
-        }
-    }
 }
 
 mod alloc {
     use crate::*;
-    use core::ops::Range;
 
     static mut REGIONS: [boot::MemoryRegion; MAX_REGIONS] = [boot::MemoryRegion::EMPTY; MAX_REGIONS];
 
@@ -185,7 +150,7 @@ mod alloc {
     }
 
     pub fn memory_map() -> boot::MemoryMap {
-        let start = unsafe { &raw const REGIONS };
+        let start = &raw const REGIONS;
         let end = unsafe { start.add(1) };
         boot::MemoryMap {
             list: boot::MemoryRegion {
@@ -322,6 +287,7 @@ mod page {
         }
     }
 
+    #[allow(dead_code)]
     impl PdEntry {
         fn set(&mut self, addr: u64, flags: u64) {
             self.0 = addr | DIRTY | ACCESSED | PAGE_SIZE | flags;
@@ -361,7 +327,6 @@ mod page {
             let mut pml4 = unsafe { sys::pml4() };
             let Some(mut pdp) = pml4[pml4_i].get_or_alloc_table() else { fail("identity map PDP conflict") };
             let Some(mut pd) = pdp[pdp_i].get_or_alloc_table() else { fail("identity map PD conflict") };
-            let mut pd: Pd = pd;
             if start & MASK_2M == 0 && end - start > MASK_2M {
                 pd[pd_i].set_rw(start);
                 start += MASK_2M + 1;
@@ -455,10 +420,11 @@ mod elf {
     // The easy fix is to just alloc fresh pages and copy over.
 
     #[inline(always)]
-    fn alloc_segments<I>(file: &[u8], program_headers: I, virt_base: NonNull<u8>)
+    fn alloc_segments<I>(program_headers: I, virt_base: NonNull<u8>)
     where
         I: Iterator<Item = ProgramHeader>,
     {
+        assert_eq!(virt_base.addr().get(), 0xffff_8000_0000_0000, "todo: variable virt_base");
         let fail = |s| -> ! {
             sys::print("alloc_segments: ");
             fail(s);
@@ -534,7 +500,7 @@ mod elf {
     }
 
     #[inline(always)]
-    fn update_dynamic<I>(file: &[u8], mut program_headers: I, virt_base: NonNull<u8>)
+    fn update_dynamic<I>(file: &[u8], program_headers: I, virt_base: NonNull<u8>)
     where
         I: Iterator<Item = ProgramHeader>,
     {
@@ -589,7 +555,7 @@ mod elf {
         let ph = || ph.chunks_exact(header.ph_size.into())
             .map(|x| x.try_into().unwrap())
             .map(ProgramHeader::from_bytes);
-        alloc_segments(file, ph(), virt_base);
+        alloc_segments(ph(), virt_base);
         copy_segments(file, ph(), virt_base);
         update_dynamic(file, ph(), virt_base);
         virt_base
@@ -619,6 +585,7 @@ mod pci {
     #[derive(Clone, Copy)]
     pub struct BDF(u16);
 
+    #[allow(dead_code)]
     impl BDF {
         pub const fn new(bus: u8, dev: u8, func: u8) -> Self {
             assert!(func < 8);
@@ -813,11 +780,13 @@ mod pcie {
             unsafe {
                 let base = Self::BASE.addr().get() as u64;
                 unsafe fn f<const O: u8>(x: u32) {
-                    // no const generics? :(((
-                    match O {
-                        0 => pci::write32::<{ Q35::CFG_PCIE_BASE + 0 }>(Q35::BDF, x),
-                        4 => pci::write32::<{ Q35::CFG_PCIE_BASE + 4 }>(Q35::BDF, x),
-                        _ => panic!("no const generics! :((((((("),
+                    unsafe {
+                        // no const generics? :(((
+                        match O {
+                            0 => pci::write32::<{ Q35::CFG_PCIE_BASE + 0 }>(Q35::BDF, x),
+                            4 => pci::write32::<{ Q35::CFG_PCIE_BASE + 4 }>(Q35::BDF, x),
+                            _ => panic!("no const generics! :((((((("),
+                        }
                     }
                 }
                 f::<4>((base >> 32) as u32);
@@ -837,8 +806,8 @@ mod pcie {
             }
             hdr.configure(self);
             match id {
-                QemuVga::ID => QemuVga::configure(self, &hdr),
-                Ich9Lpc::ID => Ich9Lpc::configure(self, &hdr),
+                QemuVga::ID => QemuVga::configure(&hdr),
+                Ich9Lpc::ID => Ich9Lpc::configure(&hdr),
                 _ => {}
             }
         }
@@ -933,7 +902,7 @@ mod pcie {
     impl QemuVga {
         const ID: [u16; 2] = [0x1234, 0x1111];
 
-        fn configure(parent: &mut Q35, header: &Header0) {
+        fn configure(header: &Header0) {
             log("Found QEMU VGA");
             header.command(COMMAND_MMIO | COMMAND_BUS);
             let mmio = header.bar[2].get();
@@ -947,6 +916,7 @@ mod pcie {
         }
     }
 
+    #[allow(dead_code)]
     impl Ich9Lpc {
         const ID: [u16; 2] = [0x8086, 0x2918];
 
@@ -965,8 +935,10 @@ mod pcie {
         const PORTIO_PM1_TMR: u16 = 0x08;
 
         const ACPI_EN: u8 = 1 << 7;
+    }
 
-        fn configure(parent: &mut Q35, header: &Header0) {
+    impl Ich9Lpc {
+        fn configure(header: &Header0) {
             log("Found ICH9 LPC");
             header.command(COMMAND_PORTIO);
             unsafe { header.write32::<{ Self::PMBASE }>(0x600) };
@@ -1018,10 +990,6 @@ mod boot {
     #[used]
     #[unsafe(export_name = "boot_entry_info")]
     pub static mut ENTRY: MaybeUninit<Entry> = MaybeUninit::uninit();
-
-    pub const MAGIC: u64 = u64::from_le_bytes(*b"Lemmings");
-
-    pub struct Sys;
 
     #[repr(C)]
     pub struct Entry {
@@ -1167,6 +1135,7 @@ fn load_file<'a>(file: sys::File) -> &'a [u8] {
 extern "sysv64" fn boot(kernel: sys::File, data: sys::File) -> NonNull<u8> {
     alloc::init();
     let pcie_base = pcie::configure();
+    let _ = pcie_base;
     let (entry, kernel) = elf::load(kernel);
     let data = load_file(data);
     apic::init();
