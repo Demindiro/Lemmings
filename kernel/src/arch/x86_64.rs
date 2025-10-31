@@ -1,5 +1,5 @@
 use core::{mem::MaybeUninit, ptr::NonNull};
-use crate::{KernelEntryToken, page, sync::SpinLock, thread::{self, RoundRobinQueue}};
+use crate::{KernelEntryToken, page, sync::{SpinLock, SpinLockGuard}, thread::{self, RoundRobinQueue, ThreadHandle}};
 use critical_section::CriticalSection;
 use lemmings_x86_64::{apic::{self, local::LocalApicHelper, io::{IoApicHelper, TriggerMode}}, idt::{self, Idt, Ist, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
 
@@ -28,15 +28,11 @@ pub mod door {
     }
 
     fn wait(x: IrqN) -> Void {
-        unsafe {
-            core::arch::asm! {
-                "pushf",
-                "sti",
-                "hlt",
-                "popf",
-            }
-        }
-        todo!();
+        critical_section::with(|cs| {
+            let h = super::IRQ_HANDLERS.lock(cs);
+            super::IrqHandlers::wait(h, x.into(), cs);
+        });
+        Void
     }
 
     fn reserve_irq(_: Void) -> MaybeIrqN {
@@ -71,9 +67,10 @@ impl IrqHandlers {
         }
     }
 
-    fn wait(&mut self, irq: u8, cs: CriticalSection<'_>) {
+    fn wait(mut slf: SpinLockGuard<Self>, irq: u8, cs: CriticalSection<'_>) {
         let irq = usize::from(irq - IRQ_STUB_OFFSET);
-        self.queues[irq].enqueue_last(thread::current());
+        slf.queues[irq].enqueue_last(thread::current());
+        drop(slf);
         thread::park(cs);
     }
 
