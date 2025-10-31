@@ -13,11 +13,11 @@ static MANAGER: SpinLock<ThreadManager> = SpinLock::new(ThreadManager::new());
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
+    Critical = 0,
+    Realtime = 1,
+    User = 2,
     #[default]
-    Regular = 0,
-    User = 1,
-    Realtime = 2,
-    Critical = 3,
+    Regular = 3,
 }
 
 pub enum ThreadSpawnError {
