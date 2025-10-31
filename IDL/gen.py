@@ -125,7 +125,7 @@ class SumType(Type):
 
 
 class Door:
-    __slots__ = 'api_id', 'name', 'routines', 'types'
+    __slots__ = 'api_id', 'name', 'routines', 'types', 'documentation'
 
     def __repr__(self):
         return repr({
@@ -137,12 +137,13 @@ class Door:
 
 
 class DoorBuilder:
-    __slots__ = 'name', 'routines', 'types'
+    __slots__ = 'name', 'routines', 'types', 'documentation'
 
     def __init__(self):
         self.types = {}
         # NOTE: we rely on insertion order (only guaranteed in Python 3.7+)
         self.routines = {}
+        self.documentation = {}
 
     def set_name(self, name: str):
         try:
@@ -175,6 +176,9 @@ class DoorBuilder:
         door.name = self.name
         door.routines = self.routines
         door.types = self.types
+        door.documentation = self.documentation
+        door.documentation[door] = door.documentation[None]
+        del door.documentation[None]
 
         ser = Serializer()
 
@@ -291,11 +295,17 @@ def parse_idl(text) -> Door:
         door.set_name(name)
         assert scope == '{'
         del name, scope
+        doc = []
         for l in lines:
+            if l.startswith('--'):
+                doc.append(l[2:].strip())
+                continue
             if l == '}':
                 break
             name, r = parse_routine(l)
             door.add_routine(name, r)
+            door.documentation[r] = tuple(doc)
+            doc.clear()
 
     def parse_integer(Ty):
         def f(line):
@@ -369,13 +379,21 @@ def parse_idl(text) -> Door:
             vtbl[f'{s}{1 << x}'] = parse_integer(globals()[f'{s.upper()}{1 << x}Type'])
         del s, x
 
+    comment_buffer = []
     for l in lines:
+        if l.startswith('--'):
+            comment_buffer.append(l[2:].strip())
+            continue
         keyword, l = l.split(' ', 1)
         if keyword == 'door':
             parse_door(l)
+            doc_ty = None
         else:
             name, ty = vtbl[keyword](l)
             door.add_type(name, ty)
+            doc_ty = ty
+        door.documentation[doc_ty] = tuple(comment_buffer)
+        comment_buffer.clear()
 
     return door.finish()
 
