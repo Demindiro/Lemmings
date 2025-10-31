@@ -11,11 +11,6 @@ const PRIORITY_COUNT: usize = 4;
 
 static MANAGER: SpinLock<ThreadManager> = SpinLock::new(ThreadManager::new());
 
-pub struct ThreadManager {
-    pending: [RoundRobinQueue; PRIORITY_COUNT],   
-    sleeping: TimeQueue,
-}
-
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     #[default]
@@ -35,6 +30,11 @@ pub struct RoundRobinQueue {
 }
 
 pub struct ThreadHandle(ThreadRef);
+
+struct ThreadManager {
+    pending: [RoundRobinQueue; PRIORITY_COUNT],
+    sleeping: TimeQueue,
+}
 
 struct TimeQueue {
     head: Option<ThreadRef>,
