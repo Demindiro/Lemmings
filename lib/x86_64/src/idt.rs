@@ -1,5 +1,5 @@
 use crate::mmu::{A4, Phys};
-use core::{arch::asm, marker::PhantomData, mem};
+use core::{arch::asm, mem};
 
 pub mod nr {
     macro_rules! def {

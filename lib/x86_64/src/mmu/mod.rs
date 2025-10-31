@@ -503,7 +503,7 @@ impl Root<L4> {
         M: PhysToPtr,
     {
         let ([l0, l1, l2, l3], _) = Self::indices(addr);
-        let f = (|| unsafe {
+        let f = || unsafe {
             let entry = &self.table(mapper)[l3];
             assert!(!entry.is_page());
             let entry = &entry.table(mapper)?[l2];
@@ -519,7 +519,7 @@ impl Root<L4> {
                 return Some((entry.phys(), 12));
             }
             None
-        });
+        };
         let (base, maskbits) = f()?;
         let mask = (1 << maskbits) - 1;
         Some(Addr((base.0 & !mask) | (addr.0 & mask), PhantomData))
