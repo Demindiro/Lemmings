@@ -302,8 +302,18 @@ pub fn current() -> ThreadHandle {
     unsafe { ThreadHandle(ThreadRef::wrap_tcb(tcb)) }
 }
 
+/// Park the current thread.
+///
+/// This removes it from the main scheduler's queues.
+/// If the thread isn't referenced anywhere else, it will be lost!
+///
+/// If the thread is re-entered execution will resume from this function.
 pub fn park(cs: CriticalSection<'_>) {
-    todo!();
+    let next = MANAGER.lock(cs).dequeue_next();
+    match next {
+        Some(next) => next.0.resume(cs),
+        None => wait(cs),
+    }
 }
 
 pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
