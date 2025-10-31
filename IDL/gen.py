@@ -13,20 +13,6 @@ del _ensure_minversion
 class Type:
     __slots__ = ()
 
-class UnitType(Type):
-    __slots__ = 'name',
-
-    def __init__(self, name: str):
-        assert type(name) is str
-        super().__init__()
-        self.name = name
-
-    def resolve_types(self, resolve):
-        pass
-
-    def __repr__(self):
-        return self.name
-
 class IntegerType(Type):
     __slots__ = 'start', 'until'
 
@@ -359,18 +345,12 @@ def parse_idl(text) -> Door:
             ty.add_variant(variant)
         return name, ty
 
-    def parse_unit(line):
-        name = line.strip()
-        ty = UnitType(name)
-        return name, ty
-
     vtbl = {
         'door': parse_door,
         'pointer': parse_pointer,
         'record': parse_record,
         'routine': parse_routine,
         'sum': parse_sum,
-        'unit': parse_unit,
         'uptr': parse_integer(UPtrType),
         'iptr': parse_integer(SPtrType),
     }

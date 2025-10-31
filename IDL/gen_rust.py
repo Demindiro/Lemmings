@@ -87,9 +87,6 @@ def types_to_sysv64(idl):
             sysv.memory_alignment = max(sysv.memory_alignment, v_sysv.memory_alignment)
         return sysv
 
-    def from_unit(ty):
-        return Sysv64Type(0, 0, 0)
-
     vtbl = {
         gen.IntegerType: from_integer,
         gen.RecordType: from_record,
@@ -267,12 +264,6 @@ def emit(outf, idl, sysv):
             with Fn('to_ffi', 'self', 'usize', macro_public = True):
                 out('self.0.as_ptr() as usize')
 
-    def emit_unit(name, ty, sysv):
-        if name == 'None':
-            return
-        emit_documentation(ty)
-        out(f'pub struct {name};')
-
     def emit_record(name, ty, sysv_ty):
         tr = lambda x: f'r#{x}' if x in RESERVED_KEYWORDS else x
         emit_documentation(ty)
@@ -340,10 +331,7 @@ def emit(outf, idl, sysv):
             return
         with Scope(f'pub enum {name}'):
             for v in ty.variants:
-                if type(idl.types[v]) is gen.UnitType:
-                    out(f'{v},')
-                else:
-                    out(f'{v}({v}),')
+                out(f'{v}({v}),')
         if sysv_ty.register_count == 0:
             return
         with Impl(name):
@@ -364,16 +352,12 @@ def emit(outf, idl, sysv):
                 with Scope('match self'):
                     # FIXME proper ID assignment!
                     for i, v in enumerate(ty.variants):
-                        if type(idl.types[v]) is gen.UnitType:
-                            out(f'Self::{v} => {i},')
-                        else:
-                            out(f'Self::{v}(x) => x.to_ffi(),')
+                        out(f'Self::{v}(x) => x.to_ffi(),')
 
     vtbl = {
         gen.IntegerType: emit_integer,
         gen.RecordType: emit_record,
         gen.SumType: emit_sum,
-        gen.UnitType: emit_unit,
         gen.UPtrType: emit_integer(False, None),
         gen.SPtrType: emit_integer(True, None),
         gen.RoutineType: emit_routine,
