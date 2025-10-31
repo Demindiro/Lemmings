@@ -1024,7 +1024,17 @@ dict_begin _
 	enddef
 
 	defimm "repeat"
-		panic "TODO (repeat)"
+		mov rbx, qword ptr [rip + branch.pre_cond]
+		mov rcx, qword ptr [rip + branch.post_cond]
+		assertnez rcx, "(repeat) not inside conditional"
+		ASM_BEGIN rax
+		lea edx, [ebx - 5]
+		sub edx, eax
+		ASM_jmp_rel32 edx
+		ASM_END
+		sub eax, ecx
+		mov [rcx - 4], eax
+		call branch_end
 	enddef
 
 	def dup
