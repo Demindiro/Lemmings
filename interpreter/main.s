@@ -1198,31 +1198,30 @@ dict_begin String
 		# write to stack first so we don't
 		# have to reverse the string later
 		mov rsi, rsp
-		# 64/4 = 16
-		sub rsp, 16
-		# this is actually (1 << 64) / 10,
-		# but written such that it is evaluated correctly
-		movabs rcx, ((1 << (64 - 1)) - 1) / 5
-	2:	# TODO surely there's a way to use the result in rax
-		# directly (modulus), but my brain no work
-		mov ebx, eax
+		# log10(2**64) = log10(2) * 64 = 19.266
+		# round to 32 for convenience
+		sub rsp, 32
+		# I messed up the rounding, so just copy what GCC does
+		# I should study bit tricks some more...
+		movabs rcx, 0xcccccccccccccccd
+	2:	mov ebx, eax
 		mul rcx
-		mov eax, edx
-		shl eax, 1
-		lea eax, [eax + eax * 4]
-		sub ebx, eax
+		mov rax, rdx
+		shr rax, 3
+		lea edx, [eax + eax * 4]
+		shl edx, 1
+		sub ebx, edx
 		add ebx, '0'
 		dec rsi
 		mov [rsi], bl
-		mov rax, rdx
 		ifnez rax, 2b
 		mov ecx, esp
 		sub ecx, esi
-		add ecx, 16
+		add ecx, 32
 		call str_reserve
 		obj_push rdi
 		rep movsb
-		add rsp, 16
+		add rsp, 32
 	enddef
 dict_end String
 
