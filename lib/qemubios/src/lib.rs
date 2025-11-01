@@ -1,4 +1,5 @@
 #![no_std]
+#![deny(improper_ctypes_definitions)]
 
 #[macro_use]
 pub mod sys;
@@ -33,6 +34,7 @@ pub struct Entry {
     pub paging: Paging,
     pub pcie: Pcie,
     pub data: MemoryRegion,
+    pub framebuffer: FrameBuffer,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -79,6 +81,24 @@ pub struct Paging {
 #[repr(C)]
 pub struct Pcie {
     pub base: Phys,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct FrameBuffer {
+    pub base: Phys,
+    pub width: u16,
+    pub height: u16,
+    pub stride: u16,
+    pub format: ColorFormat,
+}
+
+#[derive(Debug)]
+#[repr(u16)]
+pub enum ColorFormat {
+    None = 0,
+    Rgbx8888 = 1,
+    Bgrx8888 = 2,
 }
 
 impl fmt::Debug for Phys {

@@ -798,7 +798,7 @@ mod pcie {
             unsafe { Self::BASE.byte_add(4096 * usize::from(bdf.index())).cast::<Header0>().as_ref() }
         }
 
-        fn configure_device(&mut self, bdf: pci::BDF) {
+        fn configure_device(&mut self, bdf: pci::BDF, framebuffer: &mut boot::FrameBuffer) {
             let hdr = Self::get_header(bdf);
             let id = hdr.vendor_device_id();
             if id == [0xffff; 2] {
@@ -806,21 +806,21 @@ mod pcie {
             }
             hdr.configure(self);
             match id {
-                QemuVga::ID => QemuVga::configure(&hdr),
+                QemuVga::ID => QemuVga::configure(&hdr, framebuffer),
                 Ich9Lpc::ID => Ich9Lpc::configure(&hdr),
                 _ => {}
             }
         }
 
-        fn configure_bus(&mut self, bus: u8) {
+        fn configure_bus(&mut self, bus: u8, framebuffer: &mut boot::FrameBuffer) {
             for dev in 0..32 {
-                self.configure_device(pci::BDF::new(bus, dev, 0));
+                self.configure_device(pci::BDF::new(bus, dev, 0), framebuffer);
             }
         }
 
-        fn configure(&mut self) {
+        fn configure(&mut self, framebuffer: &mut boot::FrameBuffer) {
             self.enable();
-            self.configure_bus(0);
+            self.configure_bus(0, framebuffer);
         }
     }
 
@@ -902,15 +902,24 @@ mod pcie {
     impl QemuVga {
         const ID: [u16; 2] = [0x1234, 0x1111];
 
-        fn configure(header: &Header0) {
+        fn configure(header: &Header0, fb: &mut boot::FrameBuffer) {
             log("Found QEMU VGA");
+            let bar = |i: usize| u64::from(header.bar[i].get());
+            let base = (bar(1) << 32 | bar(0)) & !0xf;
+            *fb = boot::FrameBuffer {
+                base: boot::Phys(base),
+                height: 768,
+                width: 1024,
+                stride: 1024 * 4,
+                format: boot::ColorFormat::Bgrx8888,
+            };
             header.command(COMMAND_MMIO | COMMAND_BUS);
-            let mmio = header.bar[2].get();
+            let mmio = bar(2) & !0xf;
             let vga = unsafe { &*((mmio + 0x400) as *const Vga) };
             let vbe = unsafe { &*((mmio + 0x500) as *const BochsVbe) };
             vga.att_w.set(0x20); // magic incantation stolen from EDK2
-            vbe.xres.set(1024);
-            vbe.yres.set(768);
+            vbe.xres.set(fb.width);
+            vbe.yres.set(fb.height);
             vbe.bpp.set(32);
             vbe.enable.set(0x41);
         }
@@ -946,10 +955,10 @@ mod pcie {
         }
     }
 
-    pub fn configure() {
+    pub fn configure(framebuffer: &mut boot::FrameBuffer) {
         let mut host = Q35::new();
         page::identity_map_rw(host.range());
-        host.configure();
+        host.configure(framebuffer);
     }
 }
 
@@ -997,9 +1006,10 @@ mod boot {
         paging: Paging,
         pcie: Pcie,
         data: MemoryRegion,
+        framebuffer: FrameBuffer,
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Default)]
     #[repr(transparent)]
     pub struct Phys(pub u64);
 
@@ -1040,11 +1050,31 @@ mod boot {
         pub base: Phys,
     }
 
+    #[derive(Default)]
+    #[repr(C)]
+    pub struct FrameBuffer {
+        pub base: Phys,
+        pub width: u16,
+        pub height: u16,
+        pub stride: u16,
+        pub format: ColorFormat,
+    }
+
+    #[derive(Default)]
+    #[repr(u16)]
+    pub enum ColorFormat {
+        #[default]
+        None = 0,
+        Rgbx8888 = 1,
+        Bgrx8888 = 2,
+    }
+
     impl MemoryRegion {
         pub const EMPTY: Self = Self { start: Phys(0), end: Phys(0) };
     }
 
-    pub fn collect_info(kernel: VirtRegion, data: &'static [u8]) {
+    #[inline(always)]
+    pub fn collect_info(kernel: VirtRegion, data: &'static [u8], framebuffer: FrameBuffer) {
         #[allow(static_mut_refs)]
         unsafe {
             ENTRY.write(Entry {
@@ -1058,7 +1088,8 @@ mod boot {
                 data: MemoryRegion {
                     start: Phys(data.as_ptr() as _),
                     end: Phys(data.as_ptr().byte_add(data.len()) as _),
-                }
+                },
+                framebuffer,
             });
         }
     }
@@ -1134,11 +1165,12 @@ fn load_file<'a>(file: sys::File) -> &'a [u8] {
 #[unsafe(no_mangle)]
 extern "sysv64" fn boot(kernel: sys::File, data: sys::File) -> NonNull<u8> {
     alloc::init();
-    let pcie_base = pcie::configure();
+    let mut fb = boot::FrameBuffer::default();
+    let pcie_base = pcie::configure(&mut fb);
     let _ = pcie_base;
     let (entry, kernel) = elf::load(kernel);
     let data = load_file(data);
     apic::init();
-    boot::collect_info(kernel, data);
+    boot::collect_info(kernel, data, fb);
     entry
 }
