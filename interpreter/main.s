@@ -594,13 +594,12 @@ routine parse_char
 routine parse_number
 	mov rdi, rsi
 	add rsi, rcx
-	movzx eax, byte ptr [rdi]
-	inc rdi
-	ifeq rdi, rsi, .Lparse_number.singledigit
-	mov edx, eax
+	movzx edx, byte ptr [rdi]
 	xor eax, eax
 	mov ecx, 10
 	ifne dl, '0', .Lparse_number.loop
+	inc rdi
+	ifeq rdi, rsi, .Lparse_number.singledigit
 	movzx edx, byte ptr [rdi]
 	mov ecx, 16
 	ifeq dl, 'x', .Lparse_number.skipprefix
@@ -610,7 +609,7 @@ routine parse_number
 	ifeq dl, 'o', .Lparse_number.skipprefix
 	jmp .Lparse_number.loop
 .Lparse_number.singledigit:
-	sub eax, '0'
+	lea eax, [edx - '0']
 	assertltu al, 10, "decimal out of range"
 	ret
 .Lparse_number.skipprefix:
