@@ -4,8 +4,7 @@
 #![feature(slice_as_chunks)] // stabilized in 1.88, but Guix is on 1.85 as of writing
 
 #[macro_use]
-extern crate lemmings_qemubios;
-
+mod sys;
 #[macro_use]
 mod door;
 
@@ -14,12 +13,11 @@ mod archive;
 mod critical_section;
 mod elf;
 mod ffi;
-//mod framebuffer;
+mod framebuffer;
 mod page;
 mod thread;
 mod time;
 mod sync;
-mod sys;
 
 mod private {
     /// This token MUST ONLY be constructed in [`_start`]!
@@ -72,6 +70,7 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     }
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
+    let token = framebuffer::init(entry, token);
     let token = arch::init(entry, token);
     let token = page::init(entry, token);
     let token = archive::init(entry, token);

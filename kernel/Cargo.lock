@@ -34,6 +34,7 @@ dependencies = [
  "lemmings-idl-archive",
  "lemmings-idl-interrupt",
  "lemmings-qemubios",
+ "lemmings-tty",
  "lemmings-x86_64",
 ]
 
@@ -58,6 +59,13 @@ dependencies = [
 [[package]]
 name = "lemmings-qemubios"
 version = "0.1.0"
+
+[[package]]
+name = "lemmings-tty"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+]
 
 [[package]]
 name = "lemmings-x86_64"
