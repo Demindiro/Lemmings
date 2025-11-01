@@ -1,5 +1,8 @@
 use {
-    crate::{mmu::{self, Phys}, tss::Tss},
+    crate::{
+        mmu::{self, Phys},
+        tss::Tss,
+    },
     core::{arch::asm, marker::PhantomData, mem},
 };
 

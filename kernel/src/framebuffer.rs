@@ -1,4 +1,7 @@
-use crate::{KernelEntryToken, sync::{SpinLock, SpinLockGuard}};
+use crate::{
+    KernelEntryToken,
+    sync::{SpinLock, SpinLockGuard},
+};
 use core::{fmt, mem::MaybeUninit, ptr::NonNull};
 use critical_section::CriticalSection;
 use lemmings_tty::Tty;
@@ -40,8 +43,7 @@ pub mod door {
         }
     }
 
-    unsafe extern "sysv64" fn release() {
-    }
+    unsafe extern "sysv64" fn release() {}
 
     unsafe extern "sysv64" fn inuse() -> bool {
         todo!()
@@ -105,5 +107,11 @@ fn init_tty(fb: &lemmings_qemubios::FrameBuffer) {
     let base = NonNull::new(fb.base.0 as *mut u32).unwrap();
     let tty = unsafe { &mut *(&raw mut TTY) };
     let chars = unsafe { &mut *(&raw mut CHARS) };
-    tty.write(SpinLock::new(Tty::new(base.cast(), fb.width.min(MAX_WIDTH), fb.height.min(MAX_HEIGHT), fb.stride, chars)));
+    tty.write(SpinLock::new(Tty::new(
+        base.cast(),
+        fb.width.min(MAX_WIDTH),
+        fb.height.min(MAX_HEIGHT),
+        fb.stride,
+        chars,
+    )));
 }

@@ -1,7 +1,21 @@
+use crate::{
+    KernelEntryToken, page,
+    sync::{SpinLock, SpinLockGuard},
+    thread::{self, RoundRobinQueue, ThreadHandle},
+};
 use core::mem::MaybeUninit;
-use crate::{KernelEntryToken, page, sync::{SpinLock, SpinLockGuard}, thread::{self, RoundRobinQueue, ThreadHandle}};
 use critical_section::CriticalSection;
-use lemmings_x86_64::{apic::{self, local::LocalApicHelper, io::{IoApicHelper, TriggerMode}}, idt::{self, Idt, IdtPointer}, gdt::{Gdt, GdtPointer}, tss::Tss, mmu, pic};
+use lemmings_x86_64::{
+    apic::{
+        self,
+        io::{IoApicHelper, TriggerMode},
+        local::LocalApicHelper,
+    },
+    gdt::{Gdt, GdtPointer},
+    idt::{self, Idt, IdtPointer},
+    mmu, pic,
+    tss::Tss,
+};
 
 static mut GDT: Gdt = Gdt::new();
 static mut TSS: Tss = Tss::new();
@@ -49,16 +63,12 @@ pub mod door {
     }
 
     fn reserve() -> MaybeVector {
-        critical_section::with(|cs| {
-            super::IRQ_HANDLERS
-                .lock(cs)
-                .reserve()
-        })
-        .map(u32::from)
-        .map_or_else(
-            || MaybeVector::NoVector(NoVector::default()),
-            |x| MaybeVector::Vector(Vector::try_from(u32::from(x)).unwrap()),
-        )
+        critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).reserve())
+            .map(u32::from)
+            .map_or_else(
+                || MaybeVector::NoVector(NoVector::default()),
+                |x| MaybeVector::Vector(Vector::try_from(u32::from(x)).unwrap()),
+            )
     }
 
     fn release(x: Vector) {
@@ -110,7 +120,7 @@ impl IrqHandlers {
             }
             let b = n.trailing_ones() as usize;
             *n |= 1 << b;
-            return Some(VECTOR_STUB_OFFSET + (i * 32 + b) as u8)
+            return Some(VECTOR_STUB_OFFSET + (i * 32 + b) as u8);
         }
         None
     }
@@ -124,7 +134,11 @@ impl IrqHandlers {
 
     fn map(&mut self, irq: u8, vector: u8, edge: bool) {
         // FIXME detect Local APIC ID
-        let mode = if edge { TriggerMode::Edge } else { TriggerMode::Level };
+        let mode = if edge {
+            TriggerMode::Edge
+        } else {
+            TriggerMode::Level
+        };
         unsafe { self.ioapic().set_irq(irq, 0, vector, mode, false) }
     }
 
@@ -162,10 +176,14 @@ pub fn init(token: KernelEntryToken) -> KernelEntryToken {
 #[inline(always)]
 fn init_gdt(root: &mmu::Root<mmu::L4>) {
     #[allow(static_mut_refs)]
-    unsafe { GDT.set_tss(&TSS) };
+    unsafe {
+        GDT.set_tss(&TSS)
+    };
     let gdtp = (&raw const GDT).addr() as u64;
     let gdtp = mmu::Virt::new(gdtp).expect("GDT should be in valid virtual space");
-    let gdtp = root.translate(&page::IdentityMapper, gdtp).expect("GDT should be mapped");
+    let gdtp = root
+        .translate(&page::IdentityMapper, gdtp)
+        .expect("GDT should be mapped");
     unsafe { GdtPointer::new(gdtp).activate() };
 }
 
@@ -185,7 +203,9 @@ fn init_idt(root: &mmu::Root<mmu::L4>) {
 
     let idtp = (&raw const IDT).addr() as u64;
     let idtp = mmu::Virt::new(idtp).expect("IDT should be in valid virtual space");
-    let idtp = root.translate(&page::IdentityMapper, idtp).expect("IDT should be mapped");
+    let idtp = root
+        .translate(&page::IdentityMapper, idtp)
+        .expect("IDT should be mapped");
     unsafe { IdtPointer::new::<IDT_NR>(idtp).activate() };
 }
 
@@ -232,45 +252,45 @@ core::arch::global_asm! {
     "call irq_entry",
     ".endr",
     "irq_entry:",
-	// Save scratch registers
-	// except rax, see below
+    // Save scratch registers
+    // except rax, see below
     /* rip from irq_stub_table, will become rax */ // 0
-	"push rdi", // 1
-	"push rsi", // 2
-	"push rdx", // 3
-	"push rcx", // 4
-	"push r8",  // 5
-	"push r9",  // 6
-	"push r10", // 7
-	"push r11", // 8
-	// xchg has an implicit lock, so it's horrendously slow.
-	// Still, we can emulate it efficiently with a scratch register, which we'll need as
-	// argument register anyways :)
-	"mov rdi, [rsp + 8 * 8]", // load caller *next* rip
-	"mov [rsp + 8 * 8], rax", // store rax
-	// offset in handler table is (rip - (irq_stub_table + 5)) / 5
+    "push rdi", // 1
+    "push rsi", // 2
+    "push rdx", // 3
+    "push rcx", // 4
+    "push r8",  // 5
+    "push r9",  // 6
+    "push r10", // 7
+    "push r11", // 8
+    // xchg has an implicit lock, so it's horrendously slow.
+    // Still, we can emulate it efficiently with a scratch register, which we'll need as
+    // argument register anyways :)
+    "mov rdi, [rsp + 8 * 8]", // load caller *next* rip
+    "mov [rsp + 8 * 8], rax", // store rax
+    // offset in handler table is (rip - (irq_stub_table + 5)) / 5
     // account for VECTOR_STUB_OFFSET while at it
-	"lea rcx, [rip + irq_stub_table + 5 - ({VECTOR_STUB_OFFSET} * 5)]",
-	"sub edi, ecx",
-	// The trick here is to find some large enough power-of-two divisor, then find the corresponding
-	// dividend to approach 1/5, i.e. divisor / 5 = dividend.
+    "lea rcx, [rip + irq_stub_table + 5 - ({VECTOR_STUB_OFFSET} * 5)]",
+    "sub edi, ecx",
+    // The trick here is to find some large enough power-of-two divisor, then find the corresponding
+    // dividend to approach 1/5, i.e. divisor / 5 = dividend.
     // In this case: 1/5 * 1024 = 204.8
-	"imul edi, edi, 205",
-	"shr edi, 10",
-	// Call handler
-	"cld",
-	"call {irq_handler}",
-	// Restore thread state
-	"pop r11", // 8
-	"pop r10", // 7
-	"pop r9",  // 6
-	"pop r8",  // 5
-	"pop rcx", // 4
-	"pop rdx", // 3
-	"pop rsi", // 2
-	"pop rdi", // 1
-	"pop rax", // 0
-	"iretq",
+    "imul edi, edi, 205",
+    "shr edi, 10",
+    // Call handler
+    "cld",
+    "call {irq_handler}",
+    // Restore thread state
+    "pop r11", // 8
+    "pop r10", // 7
+    "pop r9",  // 6
+    "pop r8",  // 5
+    "pop rcx", // 4
+    "pop rdx", // 3
+    "pop rsi", // 2
+    "pop rdi", // 1
+    "pop rax", // 0
+    "iretq",
     VECTOR_STUB_OFFSET = const VECTOR_STUB_OFFSET,
     irq_handler = sym irq_handler,
 }

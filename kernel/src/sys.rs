@@ -1,5 +1,13 @@
-use crate::{KernelEntryToken, door::{self, ApiId, Cookie, Table}, ffi::{Slice, Tuple2}, framebuffer};
-use core::{fmt::{self, Write}, mem::MaybeUninit};
+use crate::{
+    KernelEntryToken,
+    door::{self, ApiId, Cookie, Table},
+    ffi::{Slice, Tuple2},
+    framebuffer,
+};
+use core::{
+    fmt::{self, Write},
+    mem::MaybeUninit,
+};
 use critical_section::CriticalSection;
 
 #[macro_export]
@@ -101,15 +109,20 @@ unsafe extern "sysv64" fn panic(msg: Slice<u8>) -> ! {
 
 // XXX: u128 ought to be FFI-safe
 #[allow(improper_ctypes_definitions)]
-unsafe extern "sysv64" fn door_list(api: Option<ApiId>, cookie: Cookie, info: Option<&mut MaybeUninit<InterfaceInfo>>) -> Tuple2<Option<Table>, Cookie> {
-    door::list(api, cookie)
-        .map_or(Tuple2(None, cookie), |(cookie, x)| {
-            info.map(|w| w.write(InterfaceInfo {
+unsafe extern "sysv64" fn door_list(
+    api: Option<ApiId>,
+    cookie: Cookie,
+    info: Option<&mut MaybeUninit<InterfaceInfo>>,
+) -> Tuple2<Option<Table>, Cookie> {
+    door::list(api, cookie).map_or(Tuple2(None, cookie), |(cookie, x)| {
+        info.map(|w| {
+            w.write(InterfaceInfo {
                 api: x.api,
                 name: Slice::from(x.name),
-            }));
-            Tuple2(Some(x.table), cookie)
-        })
+            })
+        });
+        Tuple2(Some(x.table), cookie)
+    })
 }
 
 // XXX: u128 ought to be FFI-safe
@@ -121,9 +134,13 @@ unsafe extern "sysv64" fn door_register(api: ApiId, name: Slice<u8>, table: Tabl
 
 pub fn with_log<F>(f: F)
 where
-    F: FnOnce(Log<'_>)
+    F: FnOnce(Log<'_>),
 {
-    critical_section::with(|cs| f(Log { fb: framebuffer::log(cs) }))
+    critical_section::with(|cs| {
+        f(Log {
+            fb: framebuffer::log(cs),
+        })
+    })
 }
 
 #[inline]

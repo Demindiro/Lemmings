@@ -2,8 +2,13 @@
 //! This kernel supports real-time scheduling with `O(1)` time complexity
 //! and no additional space overhead.
 
-use crate::{KernelEntryToken, page::{self, PAGE_SIZE, PageAttr}, sync::SpinLock, time::Monotonic};
-use core::{arch::asm, cell::Cell, fmt, mem, ptr::NonNull, ops};
+use crate::{
+    KernelEntryToken,
+    page::{self, PAGE_SIZE, PageAttr},
+    sync::SpinLock,
+    time::Monotonic,
+};
+use core::{arch::asm, cell::Cell, fmt, mem, ops, ptr::NonNull};
 use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
@@ -50,7 +55,8 @@ struct ThreadControlBlock {
 
 #[repr(C, align(4096))]
 struct Thread {
-    stack: [Cell<mem::MaybeUninit<usize>>; (4096 - mem::size_of::<ThreadControlBlock>()) / mem::size_of::<usize>()],
+    stack: [Cell<mem::MaybeUninit<usize>>;
+        (4096 - mem::size_of::<ThreadControlBlock>()) / mem::size_of::<usize>()],
     tcb: ThreadControlBlock,
 }
 
@@ -68,7 +74,11 @@ impl ThreadManager {
 
     /// Create a new thread and put it at the *end* of the queue.
     #[allow(unused)]
-    pub fn spawn(&mut self, priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
+    pub fn spawn(
+        &mut self,
+        priority: Priority,
+        entry: extern "sysv64" fn(),
+    ) -> Result<(), ThreadSpawnError> {
         let thread = self.create(priority, entry)?;
         self.pending[priority as usize].enqueue_last(ThreadHandle(thread));
         Ok(())
@@ -79,13 +89,22 @@ impl ThreadManager {
     /// # Warning
     ///
     /// Should only be called from [`_start`]!
-    pub fn enter(&mut self, priority: Priority, entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
+    pub fn enter(
+        &mut self,
+        priority: Priority,
+        entry: extern "sysv64" fn(),
+        token: KernelEntryToken,
+    ) -> ! {
         self.create(priority, entry)
             .expect("failed to create initial thread")
             .enter(token);
     }
 
-    fn create(&mut self, priority: Priority, entry: extern "sysv64" fn()) -> Result<ThreadRef, ThreadSpawnError> {
+    fn create(
+        &mut self,
+        priority: Priority,
+        entry: extern "sysv64" fn(),
+    ) -> Result<ThreadRef, ThreadSpawnError> {
         let page = page::alloc_one_guarded(PageAttr::RW)?.cast::<Thread>();
         // SAFETY:
         // - the page we allocated is valid and writeable.
@@ -103,7 +122,11 @@ impl ThreadManager {
             thread
         };
         // FIXME alignment?
-        thread.stack.last().expect("not empty").set(mem::MaybeUninit::new(Thread::exit as usize));
+        thread
+            .stack
+            .last()
+            .expect("not empty")
+            .set(mem::MaybeUninit::new(Thread::exit as usize));
         Ok(thread)
     }
 
@@ -114,9 +137,7 @@ impl ThreadManager {
 
 impl RoundRobinQueue {
     pub const fn new() -> Self {
-        Self {
-            cur: None,
-        }
+        Self { cur: None }
     }
 
     pub fn enqueue_last(&mut self, ThreadHandle(thread): ThreadHandle) {

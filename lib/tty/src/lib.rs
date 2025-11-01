@@ -140,8 +140,17 @@ struct Vec2<T> {
 }
 
 impl<'a, const BBP: usize> Tty<'a, BBP> {
-    pub fn new(base: NonNull<u8>, width: u16, height: u16, stride: u16, chars: &'a mut [char]) -> Self {
-        let dim = Vec2 { x: width, y: height };
+    pub fn new(
+        base: NonNull<u8>,
+        width: u16,
+        height: u16,
+        stride: u16,
+        chars: &'a mut [char],
+    ) -> Self {
+        let dim = Vec2 {
+            x: width,
+            y: height,
+        };
         let n = (dim / CHAR_DIM).map(usize::from).area();
         assert!(chars.len() >= n, "{} ? {}", chars.len(), n);
         chars.fill(' ');
@@ -227,7 +236,11 @@ impl<'a, const BBP: usize> Tty<'a, BBP> {
         let p = if on { u32::MAX } else { 0 };
         let Vec2 { x, y } = pos.map(usize::from);
         unsafe {
-            self.base.cast::<u32>().byte_add(y * usize::from(self.stride)).add(x).write(p);
+            self.base
+                .cast::<u32>()
+                .byte_add(y * usize::from(self.stride))
+                .add(x)
+                .write(p);
         }
     }
 }

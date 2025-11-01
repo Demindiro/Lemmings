@@ -15,9 +15,9 @@ mod elf;
 mod ffi;
 mod framebuffer;
 mod page;
+mod sync;
 mod thread;
 mod time;
-mod sync;
 
 mod private {
     /// This token MUST ONLY be constructed in [`_start`]!
@@ -113,7 +113,7 @@ unsafe extern "C" fn memcmp(mut x: *const u8, mut y: *const u8, n: usize) -> i32
     unsafe {
         for _ in 0..n {
             if x.read() != y.read() {
-                return i32::from(x.read()) - i32::from(y.read())
+                return i32::from(x.read()) - i32::from(y.read());
             }
             x = x.byte_add(1);
             y = y.byte_add(1);
