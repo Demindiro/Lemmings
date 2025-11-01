@@ -73,7 +73,11 @@ impl fmt::Debug for LoadError {
 
 pub fn load(file: &'static [u8]) -> Result<Entry, LoadError> {
     use LoadError::*;
-    let header: &[u8; 64] = file.get(..64).ok_or(TruncatedHeader)?.try_into().expect("64 bytes");
+    let header: &[u8; 64] = file
+        .get(..64)
+        .ok_or(TruncatedHeader)?
+        .try_into()
+        .expect("64 bytes");
     assert(header[..4] == *b"\x7fELF", BadMagic)?;
     assert(header[4] == 2, Not64Bit)?;
     assert(header[5] == 1, NotLittleEndian)?;
@@ -107,10 +111,16 @@ pub fn load(file: &'static [u8]) -> Result<Entry, LoadError> {
     Ok(Entry(entry))
 }
 
-fn program_headers<'a>(file: &'a [u8], header: &'a [u8; 64]) -> Result<&'a [[u8; PH_ENTSIZE]], LoadError> {
+fn program_headers<'a>(
+    file: &'a [u8],
+    header: &'a [u8; 64],
+) -> Result<&'a [[u8; PH_ENTSIZE]], LoadError> {
     let offt = usize::try_from(u64(&header[32..40])).expect("usize == u64");
     let entsize = usize::from(u16(&header[54..56]));
-    assert(entsize == PH_ENTSIZE, LoadError::UnexpectedProgramHeaderSize)?;
+    assert(
+        entsize == PH_ENTSIZE,
+        LoadError::UnexpectedProgramHeaderSize,
+    )?;
     let num = usize::from(u16(&header[56..58]));
     offt.checked_add(usize::from(entsize) * usize::from(num))
         .and_then(|end| file.get(offt..end))
@@ -118,7 +128,10 @@ fn program_headers<'a>(file: &'a [u8], header: &'a [u8; 64]) -> Result<&'a [[u8;
         .ok_or(LoadError::ProgramHeadersTruncated)
 }
 
-fn parse_program_headers<'a>(file: &'a [u8], program_headers: &[[u8; PH_ENTSIZE]]) -> Result<(usize, &'a [[u8; 24]]), LoadError> {
+fn parse_program_headers<'a>(
+    file: &'a [u8],
+    program_headers: &[[u8; PH_ENTSIZE]],
+) -> Result<(usize, &'a [[u8; 24]]), LoadError> {
     let mut virt_size = 0;
     let mut dynamic = &[][..];
     for ph in program_headers {
@@ -127,7 +140,8 @@ fn parse_program_headers<'a>(file: &'a [u8], program_headers: &[[u8; PH_ENTSIZE]
                 virt_size = virt_size.max(u64(&ph[16..24]) + u64(&ph[40..48]));
             }
             self::PT_DYNAMIC => {
-                let [offt, len] = [&ph[8..16], &ph[32..40]].map(|x| usize::try_from(u64(x)).expect("u64 == usize"));
+                let [offt, len] = [&ph[8..16], &ph[32..40]]
+                    .map(|x| usize::try_from(u64(x)).expect("u64 == usize"));
                 let end = offt + len;
                 dynamic = file[offt..end].as_chunks().0;
             }
@@ -191,7 +205,7 @@ impl<'a> ElfMapper<'a> {
         let vaddr = u64(&ph[16..24]);
         let filesz = u64(&ph[32..40]);
         let memsz = u64(&ph[40..48]);
-        
+
         let floor = |x: u64| floor_p2(x.try_into().expect("u64 == usize"), page::PAGE_SIZE);
         let ceil = |x: u64| ceil_p2(x.try_into().expect("u64 == usize"), page::PAGE_SIZE);
         let pa = floor(offset);
@@ -200,8 +214,8 @@ impl<'a> ElfMapper<'a> {
         let va_end = ceil(vaddr + memsz);
         let va_mid = va + (pa_end - pa);
 
-        let [va, va_mid, va_end] = [va, va_mid, va_end]
-            .map(|x| unsafe { self.virt_base.byte_add(x) });
+        let [va, va_mid, va_end] =
+            [va, va_mid, va_end].map(|x| unsafe { self.virt_base.byte_add(x) });
         let pa = page::Phys(self.phys_base.0 + u64::try_from(pa).expect("u64 == usize"));
 
         let attr = match flags {

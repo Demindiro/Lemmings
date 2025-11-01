@@ -2,7 +2,13 @@
 pub use lemmings_x86_64::mmu::PageAttr;
 
 use crate::{KernelEntryToken, sync::SpinLock};
-use core::{mem, num::NonZero, ops::{self, Range}, ptr::NonNull, slice};
+use core::{
+    mem,
+    num::NonZero,
+    ops::{self, Range},
+    ptr::NonNull,
+    slice,
+};
 use lemmings_qemubios::MemoryRegion;
 use lemmings_x86_64::mmu;
 
@@ -81,7 +87,12 @@ impl VirtManager {
     /// # Safety
     ///
     /// The address range must not be actively used.
-    pub unsafe fn map_range(&mut self, range: ops::Range<Virt>, phys: Phys, attr: PageAttr) -> Result<(), OutOfMemory> {
+    pub unsafe fn map_range(
+        &mut self,
+        range: ops::Range<Virt>,
+        phys: Phys,
+        attr: PageAttr,
+    ) -> Result<(), OutOfMemory> {
         let mut va = mmu::Virt::<mmu::A12>::new(range.start.as_ptr() as u64).unwrap();
         let mut pa = mmu::Phys::<mmu::A12>::new(phys.0).unwrap();
         let va_end = mmu::Virt::<mmu::A12>::new(range.end.as_ptr() as u64).unwrap();
@@ -106,7 +117,11 @@ impl VirtManager {
         Ok(())
     }
 
-    pub unsafe fn map_range_zero(&mut self, range: Range<Virt>, attr: PageAttr) -> Result<(), OutOfMemory> {
+    pub unsafe fn map_range_zero(
+        &mut self,
+        range: Range<Virt>,
+        attr: PageAttr,
+    ) -> Result<(), OutOfMemory> {
         let mut va = mmu::Virt::<mmu::A12>::new(range.start.as_ptr() as u64).unwrap();
         let va_end = mmu::Virt::<mmu::A12>::new(range.end.as_ptr() as u64).unwrap();
         let mut root = unsafe { mmu::current_root::<mmu::L4>() };
@@ -125,7 +140,7 @@ impl VirtManager {
 
     unsafe fn unmap_range<F>(&mut self, range: ops::Range<mmu::Virt<mmu::A12>>, mut f: F)
     where
-        F: FnMut(Range<Phys>)
+        F: FnMut(Range<Phys>),
     {
         let _ = (range, f);
         todo!();
@@ -170,16 +185,12 @@ impl From<ReserveRegionError> for AllocGuardedError {
 }
 
 pub fn alloc_one() -> Result<Virt, OutOfMemory> {
-    critical_section::with(|cs| {
-        PAGE.lock(cs).alloc_one()
-    })
+    critical_section::with(|cs| PAGE.lock(cs).alloc_one())
 }
 
 pub fn alloc_one_guarded(attr: PageAttr) -> Result<Virt, AllocGuardedError> {
     critical_section::with(|cs| {
-        let page = {
-            PAGE.lock(cs).alloc_one()?
-        };
+        let page = { PAGE.lock(cs).alloc_one()? };
         {
             let mut virt = VIRT.lock(cs);
             let addr = virt.reserve_region(PAGE_SIZE.try_into().unwrap())?;
@@ -197,7 +208,11 @@ pub fn reserve_region(size: NonZero<usize>) -> Result<Virt, ReserveRegionError> 
 /// # Safety
 ///
 /// The address range must not be actively used.
-pub unsafe fn map_region(region: Range<Virt>, phys_base: Phys, attr: PageAttr) -> Result<(), OutOfMemory> {
+pub unsafe fn map_region(
+    region: Range<Virt>,
+    phys_base: Phys,
+    attr: PageAttr,
+) -> Result<(), OutOfMemory> {
     critical_section::with(|cs| unsafe { VIRT.lock(cs).map_range(region, phys_base, attr) })
 }
 
@@ -224,10 +239,18 @@ fn init_page(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kerne
         }
         let mut a = phys_to_virt(r.start);
         let end = phys_to_virt(r.end);
-        assert!(a.cast::<Page>().is_aligned(), "start not aligned to page boundary");
-        assert!(end.cast::<Page>().is_aligned(), "end not aligned to page boundary");
+        assert!(
+            a.cast::<Page>().is_aligned(),
+            "start not aligned to page boundary"
+        );
+        assert!(
+            end.cast::<Page>().is_aligned(),
+            "end not aligned to page boundary"
+        );
         while a < end {
-            unsafe { a.cast::<Option<Virt>>().write(head); }
+            unsafe {
+                a.cast::<Option<Virt>>().write(head);
+            }
             head = Some(a);
             a = unsafe { a.byte_add(PAGE_SIZE) };
         }

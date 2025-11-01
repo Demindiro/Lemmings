@@ -28,7 +28,10 @@ mod x86 {
 
 mod sys {
     use crate::*;
-    use core::{arch::asm, ptr::{self, NonNull}};
+    use core::{
+        arch::asm,
+        ptr::{self, NonNull},
+    };
 
     #[repr(C)]
     pub struct File {
@@ -102,7 +105,8 @@ mod sys {
 mod alloc {
     use crate::*;
 
-    static mut REGIONS: [boot::MemoryRegion; MAX_REGIONS] = [boot::MemoryRegion::EMPTY; MAX_REGIONS];
+    static mut REGIONS: [boot::MemoryRegion; MAX_REGIONS] =
+        [boot::MemoryRegion::EMPTY; MAX_REGIONS];
 
     pub const PAGE_SIZE: usize = 4096;
     const MAX_REGIONS: usize = 8;
@@ -119,7 +123,12 @@ mod alloc {
         // - we use 0x2000..0x3000 as PDPT
         // - we use 0x3000..0x4000 as PD
         // - we can't safely dereference 0x0 in Rust
-        unsafe { REGIONS[0] = boot::MemoryRegion { start: boot::Phys(0x4000), end: boot::Phys(0xa0000) } }
+        unsafe {
+            REGIONS[0] = boot::MemoryRegion {
+                start: boot::Phys(0x4000),
+                end: boot::Phys(0xa0000),
+            }
+        }
     }
 
     pub fn alloc(byte_count: usize) -> Option<NonNull<u8>> {
@@ -156,14 +165,17 @@ mod alloc {
             list: boot::MemoryRegion {
                 start: boot::Phys(start as u64),
                 end: boot::Phys(end as u64),
-            }
+            },
         }
     }
 }
 
 mod page {
     use crate::*;
-    use core::{ptr::{self, NonNull}, ops};
+    use core::{
+        ops,
+        ptr::{self, NonNull},
+    };
 
     macro_rules! impl_p {
         (T $table:ident $entry:ident) => {
@@ -205,18 +217,23 @@ mod page {
             #[allow(dead_code)]
             impl $entry {
                 pub fn get_table(&self) -> Option<$table> {
-                    self.is_table().then(|| $table(unsafe { NonNull::new_unchecked(self.addr_table_ptr()) }))
+                    self.is_table()
+                        .then(|| $table(unsafe { NonNull::new_unchecked(self.addr_table_ptr()) }))
                 }
 
                 /// # Note
                 ///
                 /// Only inserts a table if not present
                 pub fn get_or_alloc_table(&mut self) -> Option<$table> {
-                    self.get_table().or_else(|| (!self.is_present()).then(|| {
-                        let Some(table) = $table::new() else { fail("out of memory") };
-                        self.set_table_raw(table.as_u64());
-                        table
-                    }))
+                    self.get_table().or_else(|| {
+                        (!self.is_present()).then(|| {
+                            let Some(table) = $table::new() else {
+                                fail("out of memory")
+                            };
+                            self.set_table_raw(table.as_u64());
+                            table
+                        })
+                    })
                 }
 
                 pub fn set_table(&mut self, table: $table) {
@@ -310,8 +327,8 @@ mod page {
         }
     }
 
-    const MASK_4K: u64 = (1<<12)-1;
-    const MASK_2M: u64 = (1<<21)-1;
+    const MASK_4K: u64 = (1 << 12) - 1;
+    const MASK_2M: u64 = (1 << 21) - 1;
 
     pub fn identity_map_rw(range: ops::Range<NonNull<u8>>) {
         let mut start = range.start.addr().get() as u64 & !0xfff;
@@ -322,16 +339,24 @@ mod page {
             let [pd_i, i] = split_bits(i, 9);
             let [pdp_i, i] = split_bits(i, 9);
             let [pml4_i, i] = split_bits(i, 9);
-            if i != 0 { fail("identity_map_rw: out of range") };
+            if i != 0 {
+                fail("identity_map_rw: out of range")
+            };
             assert_eq!(i, 0);
             let mut pml4 = unsafe { sys::pml4() };
-            let Some(mut pdp) = pml4[pml4_i].get_or_alloc_table() else { fail("identity map PDP conflict") };
-            let Some(mut pd) = pdp[pdp_i].get_or_alloc_table() else { fail("identity map PD conflict") };
+            let Some(mut pdp) = pml4[pml4_i].get_or_alloc_table() else {
+                fail("identity map PDP conflict")
+            };
+            let Some(mut pd) = pdp[pdp_i].get_or_alloc_table() else {
+                fail("identity map PD conflict")
+            };
             if start & MASK_2M == 0 && end - start > MASK_2M {
                 pd[pd_i].set_rw(start);
                 start += MASK_2M + 1;
             } else {
-                let Some(mut pt) = pd[pd_i].get_or_alloc_table() else { fail("identity map PT conflict") };
+                let Some(mut pt) = pd[pd_i].get_or_alloc_table() else {
+                    fail("identity map PT conflict")
+                };
                 pt[pt_i].set_rw(start);
                 start += MASK_4K + 1;
             }
@@ -390,7 +415,11 @@ mod elf {
             sys::print("invalid ELF header: ");
             fail(s);
         };
-        let assert = |c: bool, s| if !c { fail(s) };
+        let assert = |c: bool, s| {
+            if !c {
+                fail(s)
+            }
+        };
         assert(file.len() >= 64, "truncated");
         assert(&file[..4] == b"\x7fELF", "bad magic");
         assert(file[4] == 2, "not 64 bit");
@@ -400,7 +429,12 @@ mod elf {
         let ph_offset = bytes_to_u64le(&file[32..40]) as usize;
         let ph_size = bytes_to_u16le(&file[54..56]);
         let ph_count = bytes_to_u16le(&file[56..58]);
-        Header { program_entry, ph_offset, ph_size, ph_count }
+        Header {
+            program_entry,
+            ph_offset,
+            ph_size,
+            ph_count,
+        }
     }
 
     const PH_TY_LOAD: u32 = 1;
@@ -424,19 +458,31 @@ mod elf {
     where
         I: Iterator<Item = ProgramHeader>,
     {
-        assert_eq!(virt_base.addr().get(), 0xffff_8000_0000_0000, "todo: variable virt_base");
+        assert_eq!(
+            virt_base.addr().get(),
+            0xffff_8000_0000_0000,
+            "todo: variable virt_base"
+        );
         let fail = |s| -> ! {
             sys::print("alloc_segments: ");
             fail(s);
         };
-        let assert = |c: bool, s| if !c { fail(s) };
+        let assert = |c: bool, s| {
+            if !c {
+                fail(s)
+            }
+        };
 
         let Some(mut pt) = page::Pt::new() else {
             fail("out of memory");
         };
-        let Some(mut pd) = page::Pd::new() else { fail("out of memory") };
+        let Some(mut pd) = page::Pd::new() else {
+            fail("out of memory")
+        };
         pd[0].set_table(unsafe { core::mem::transmute_copy(&pt) });
-        let Some(mut pdp) = page::Pdp::new() else { fail("out of memory") };
+        let Some(mut pdp) = page::Pdp::new() else {
+            fail("out of memory")
+        };
         pdp[0].set_table(pd);
         let mut pml4 = unsafe { sys::pml4() };
         pml4[256].set_table(pdp);
@@ -447,7 +493,10 @@ mod elf {
                 continue;
             }
             assert(ph.align == alloc::PAGE_SIZE as u64, "unsupported alignment");
-            assert(ph.offset % ph.align == ph.vaddr % ph.align, "segment misaligned");
+            assert(
+                ph.offset % ph.align == ph.vaddr % ph.align,
+                "segment misaligned",
+            );
             let mask = ph.align - 1;
             let mut va = ph.vaddr & !mask;
             let va_end = (ph.vaddr + ph.memsz + mask) & !mask;
@@ -550,11 +599,18 @@ mod elf {
         if header.ph_size != 56 {
             fail("PH entry size not 56 bytes");
         }
-        let virt_base = NonNull::new((usize::MAX << (9*4 + 12 - 1)) as *mut _).unwrap();
-        let ph = slice_fail(file, header.ph_offset, usize::from(header.ph_size) * usize::from(header.ph_count), "PH array truncated");
-        let ph = || ph.chunks_exact(header.ph_size.into())
-            .map(|x| x.try_into().unwrap())
-            .map(ProgramHeader::from_bytes);
+        let virt_base = NonNull::new((usize::MAX << (9 * 4 + 12 - 1)) as *mut _).unwrap();
+        let ph = slice_fail(
+            file,
+            header.ph_offset,
+            usize::from(header.ph_size) * usize::from(header.ph_count),
+            "PH array truncated",
+        );
+        let ph = || {
+            ph.chunks_exact(header.ph_size.into())
+                .map(|x| x.try_into().unwrap())
+                .map(ProgramHeader::from_bytes)
+        };
         alloc_segments(ph(), virt_base);
         copy_segments(file, ph(), virt_base);
         update_dynamic(file, ph(), virt_base);
@@ -573,7 +629,7 @@ mod elf {
         }
         let region = boot::VirtRegion {
             start: boot::Virt(NonNull::new(0xffff8000_00000000u64 as _).unwrap()),
-            end: boot::Virt(NonNull::new((0xffff8000_00000000u64 + (1<<21)) as _).unwrap()),
+            end: boot::Virt(NonNull::new((0xffff8000_00000000u64 + (1 << 21)) as _).unwrap()),
         };
         (unsafe { base.add(hdr.program_entry) }, region)
     }
@@ -672,11 +728,9 @@ mod pcie {
     const COMMAND_MMIO: u16 = 1 << 1;
     const COMMAND_PORTIO: u16 = 1 << 0;
 
-    struct QemuVga {
-    }
+    struct QemuVga {}
 
-    struct Ich9Lpc {
-    }
+    struct Ich9Lpc {}
 
     /// [From QEMU documentation][0]:
     ///
@@ -795,7 +849,12 @@ mod pcie {
         }
 
         fn get_header<'a>(bdf: pci::BDF) -> &'a Header0 {
-            unsafe { Self::BASE.byte_add(4096 * usize::from(bdf.index())).cast::<Header0>().as_ref() }
+            unsafe {
+                Self::BASE
+                    .byte_add(4096 * usize::from(bdf.index()))
+                    .cast::<Header0>()
+                    .as_ref()
+            }
         }
 
         fn configure_device(&mut self, bdf: pci::BDF, framebuffer: &mut boot::FrameBuffer) {
@@ -886,7 +945,10 @@ mod pcie {
                 assert!(0x40 <= O && O + core::mem::size_of::<T>() <= 0x1000);
             }
             unsafe {
-                NonNull::from(self).cast::<VolatileCell<T>>().byte_add(O).as_ref()
+                NonNull::from(self)
+                    .cast::<VolatileCell<T>>()
+                    .byte_add(O)
+                    .as_ref()
             }
         }
 
@@ -1070,7 +1132,10 @@ mod boot {
     }
 
     impl MemoryRegion {
-        pub const EMPTY: Self = Self { start: Phys(0), end: Phys(0) };
+        pub const EMPTY: Self = Self {
+            start: Phys(0),
+            end: Phys(0),
+        };
     }
 
     #[inline(always)]
@@ -1084,7 +1149,9 @@ mod boot {
                     stack: Virt(NonNull::new(0x1000 as _).unwrap()),
                     zero: [Phys(0); 6],
                 },
-                pcie: Pcie { base: Phys(0xb000_0000) },
+                pcie: Pcie {
+                    base: Phys(0xb000_0000),
+                },
                 data: MemoryRegion {
                     start: Phys(data.as_ptr() as _),
                     end: Phys(data.as_ptr().byte_add(data.len()) as _),
@@ -1099,7 +1166,7 @@ struct VolatileCell<T>(UnsafeCell<T>);
 
 impl<T> VolatileCell<T>
 where
-    T: Copy
+    T: Copy,
 {
     fn get(&self) -> T {
         unsafe { core::ptr::read_volatile(self.0.get()) }

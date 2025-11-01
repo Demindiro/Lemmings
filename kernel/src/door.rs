@@ -76,11 +76,14 @@ pub fn list(api: Option<ApiId>, cookie: Cookie) -> Option<(Cookie, Interface<'st
             if api.is_some_and(|x| API_IDS[i] != Some(x)) {
                 continue;
             }
-            return Some((Cookie(id + 1), Interface {
-                api: API_IDS[i].unwrap(),
-                name: NAMES[i].as_str(),
-                table: TABLES[i].unwrap(),
-            }));
+            return Some((
+                Cookie(id + 1),
+                Interface {
+                    api: API_IDS[i].unwrap(),
+                    name: NAMES[i].as_str(),
+                    table: TABLES[i].unwrap(),
+                },
+            ));
         }
     }
     None
@@ -100,7 +103,10 @@ pub unsafe fn register(api: ApiId, name: &str, table: Table) {
 }
 
 fn alloc_name(name: &str) -> Name {
-    assert!((1..=64).contains(&name.len()), "name must be between 1 and 64 bytes");
+    assert!(
+        (1..=64).contains(&name.len()),
+        "name must be between 1 and 64 bytes"
+    );
     #[allow(static_mut_refs)]
     unsafe {
         STRINGS[STRINGS_HEAD..][..name.len()].copy_from_slice(name.as_bytes());

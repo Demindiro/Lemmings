@@ -19,7 +19,11 @@ mod imp {
         }
 
         pub fn lock(&self) {
-            while self.lock.compare_exchange_weak(0, LOCKED, Ordering::Acquire, Ordering::Relaxed).is_err() {
+            while self
+                .lock
+                .compare_exchange_weak(0, LOCKED, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
                 pause();
             }
         }

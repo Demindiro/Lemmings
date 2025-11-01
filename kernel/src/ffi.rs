@@ -34,11 +34,13 @@ impl<T> Slice<T> {
 
 impl<T> Slice<T>
 where
-    T: Copy
+    T: Copy,
 {
     pub unsafe fn copy_from_slice(&mut self, data: &[T]) {
         unsafe {
-            self.base.as_ptr().copy_from_nonoverlapping(data.as_ptr(), data.len());
+            self.base
+                .as_ptr()
+                .copy_from_nonoverlapping(data.as_ptr(), data.len());
         }
     }
 }

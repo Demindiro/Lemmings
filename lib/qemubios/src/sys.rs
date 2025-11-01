@@ -46,12 +46,16 @@ pub static mut ENTRY: *const () = core::ptr::null();
 
 #[inline]
 pub fn print(s: &str) {
-    unsafe { sys!(0 ["rsi" s.as_ptr()] ["rcx" s.len()]); }
+    unsafe {
+        sys!(0 ["rsi" s.as_ptr()] ["rcx" s.len()]);
+    }
 }
 
 #[inline]
 pub fn exit_ok() -> ! {
-    unsafe { sys!(noreturn 1 ["rdx" 0]); }
+    unsafe {
+        sys!(noreturn 1 ["rdx" 0]);
+    }
 }
 
 #[inline]
