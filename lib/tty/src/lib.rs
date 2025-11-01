@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::{alloc::Layout, cell::Cell, ops, ptr::NonNull};
+use core::{alloc::Layout, cell::Cell, fmt, ops, ptr::NonNull};
 
 const CHAR_DATA: (u32, u16, u16, &[u8]) = {
     let &[a, b, c, d, e, f, g, h, ref data @ ..] = include_bytes!("../spleen-6x12.bin");
@@ -155,10 +155,6 @@ impl<'a, const BBP: usize> Tty<'a, BBP> {
         }
     }
 
-    pub fn write_str(&mut self, s: &str) {
-        s.chars().for_each(|c| self.put(c));
-    }
-
     pub fn flush(&mut self) {
         let dim = self.char_dim();
         for y in 0..dim.y {
@@ -296,5 +292,17 @@ where
             x: self.x / rhs.x,
             y: self.y / rhs.y,
         }
+    }
+}
+
+impl<const BBP: usize> fmt::Write for Tty<'_, BBP> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        s.chars().for_each(|c| self.put(c));
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        self.put(c);
+        Ok(())
     }
 }

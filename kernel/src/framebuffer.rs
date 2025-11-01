@@ -71,8 +71,11 @@ pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kernel
     }
 
     let tty = init_tty(fb);
-    tty.write_str("Hello framebuffer!");
-    tty.flush();
+    for i in 0u64.. {
+        use core::fmt::Write;
+        write!(tty, "Hello framebuffer! (nr: {i})\n");
+        tty.flush();
+    }
 
     token
 }
