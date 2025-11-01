@@ -1,0 +1,7 @@
+[package]
+name = "lemmings-tty"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+critical-section = "1.2.0"
