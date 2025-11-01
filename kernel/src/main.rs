@@ -4,8 +4,7 @@
 #![feature(slice_as_chunks)] // stabilized in 1.88, but Guix is on 1.85 as of writing
 
 #[macro_use]
-extern crate lemmings_qemubios;
-
+mod sys;
 #[macro_use]
 mod door;
 
@@ -19,7 +18,6 @@ mod page;
 mod thread;
 mod time;
 mod sync;
-mod sys;
 
 mod private {
     /// This token MUST ONLY be constructed in [`_start`]!
