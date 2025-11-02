@@ -122,22 +122,83 @@ def emit_ffi(outf, idl, sysv):
             nonlocal outf_depth
             outf_depth -= 1
             out(f'}}{self.suffix}')
+    class Impl(Scope):
+        def __init__(self, name):
+            super().__init__(f'impl {name}')
+    class ImplFor(Impl):
+        def __init__(self, trait, name):
+            super().__init__(f'{trait} for {name}')
+    class Fn(Scope):
+        def __init__(self, name, args, ret, *, vis = 'pub(crate) ', macro_public = False, dead_code = False):
+            ret = ret and f' -> {ret}'
+            if macro_public:
+                public = True
+                out('#[doc(hidden)]')
+            if dead_code:
+                out('#[allow(dead_code)]')
+            out('#[inline]')
+            super().__init__(f'{vis}fn {name}({args}){ret}')
+
+    def newtype(name, wrap):
+        out('#[derive(Clone, Copy)]')
+        out('#[repr(transparent)]')
+        out(f'pub struct {name}(pub {wrap});')
 
     def alias(wrap):
         def f(name, ty, sysv_ty):
-            out(f'pub type {name} = {wrap(ty)};')
+            newtype(name, wrap(ty))
         return f
 
     def emit_integer(signed, bits):
-        return alias(lambda _: f'{"ui"[signed]}{bits or "size"}')
+        x = f'{"ui"[signed]}{bits or "size"}'
+        until_limit = 1 << bits if bits else gen.IntegerType.ADDRESS_MAX_EXCL
+        def f(name, ty, sysv_ty):
+            newtype(name, x)
+            is_unit = ty.start + 1 == ty.until
+            full_range = ty.start == 0 and ty.until == until_limit
+            if is_unit:
+                with Scope(f'impl Default for {name}'):
+                    with Scope('fn default() -> Self'):
+                        out(f'Self({ty.start})')
+            with Impl(name):
+                with Fn('is_valid', f'self', 'bool', dead_code = True):
+                    if full_range:
+                        out('true')
+                    elif ty.start == 0:
+                        if ty.start == ty.until - 1:
+                            out(f'{ty.start:#x} == self.0')
+                        else:
+                            out(f'self.0 <= {ty.until - 1:#x}')
+                    else:
+                        if ty.until is gen.IntegerType.ADDRESS_MAX_EXCL or ty.until == (1 << 64):
+                            out(f'{ty.start:#x} <= self.0')
+                        elif ty.start == ty.until - 1:
+                            out(f'{ty.start:#x} == self.0')
+                        else:
+                            out(f'{ty.start:#x} <= self.0 && self.0 <= {ty.until - 1:#x}')
+            with ImplFor(f'From<{name}>', x):
+                with Fn('from', f'x: {name}', 'Self', vis = ''):
+                    out('x.0')
+        return f
+
+    def emit_pointer(name, ty, sysv_ty):
+        newtype(name, f'NonNull<{ty.deref_type}>')
+        with Impl(name):
+            with Fn('is_valid', f'self', 'bool', dead_code = True):
+                out('true')
 
     def emit_record(name, ty, sysv_ty):
         tr = lambda x: f'r#{x}' if x in RESERVED_KEYWORDS else x
+        def members():
+            yield from ((tr(k), v) for k, v in ty.members.items())
         out(f'#[derive(Clone, Copy)]')
         out(f'#[repr(C)]')
         with Scope(f'pub struct {name}'):
             for m_name, m_ty in ty.members.items():
                 out(f'pub {tr(m_name)}: {m_ty},')
+        with Impl(name):
+            with Fn('is_valid', '&self', 'bool', dead_code = True):
+                out(' && '.join(f'self.{m_name}.is_valid()' for m_name, m_ty in members()))
 
     def emit_sum(name, ty, sysv_ty):
         out(f'#[derive(Clone, Copy)]')
@@ -145,6 +206,10 @@ def emit_ffi(outf, idl, sysv):
         with Scope(f'pub union {name}'):
             for v in ty.variants:
                 out(f'pub {v}: {v},')
+        with Impl(name):
+            with Fn('is_valid', f'&self', 'bool', dead_code = True):
+                with Scope('unsafe'):
+                    out(' || '.join(f'self.{v}.is_valid()' for v in ty.variants))
 
     vtbl = {
         gen.RecordType: emit_record,
@@ -154,7 +219,7 @@ def emit_ffi(outf, idl, sysv):
         gen.RoutineType: alias(lambda _: 'NonNull<()>'),
     }
     for x in ('Constant', 'Shared', 'Unique'):
-        vtbl[gen.__dict__[f'{x}PointerType']] = alias(lambda ty: f'NonNull<{ty.deref_type}>')
+        vtbl[gen.__dict__[f'{x}PointerType']] = emit_pointer
     for s in 'US':
         for x in range(3, 8):
             vtbl[gen.__dict__[f'{s}{1 << x}Type']] = emit_integer(s == 'S', 1 << x)
@@ -227,6 +292,12 @@ def emit(outf, idl, sysv):
         sysv_ty = sysv[name]
         # be defensive about alignment, just in case
         return name == 'Void' and sysv_ty.memory_size == 0 and sysv_ty.memory_alignment <= 1
+    def is_unit(name):
+        ty = idl.types[name]
+        if isinstance(ty, gen.IntegerType):
+            if ty.start + 1 == ty.until:
+                return True
+        return False
 
     def ffi_name(name, macro) -> str:
         return f'{"$crate::" if macro else ""}ffi::{name}'
@@ -276,30 +347,19 @@ def emit(outf, idl, sysv):
         x = f'{"ui"[signed]}{bits or "size"}'
         until_limit = 1 << bits if bits else gen.IntegerType.ADDRESS_MAX_EXCL
         def f(name, ty, sysv):
+            # Don't bother with unit integers
+            # They are only relevant for sum types
+            if is_unit(name):
+                return
             full_range = ty.start == 0 and ty.until == until_limit
             emit_documentation(ty)
             out(f'#[derive(Clone, Debug)]')
             out(f'pub struct {name}({x});')
             with Impl(name):
-                with Fn('is_valid', f'{"x_"[full_range]}: {x}', 'bool', dead_code = True):
-                    if full_range:
-                        out('true')
-                    elif ty.start == 0:
-                        if ty.start == ty.until - 1:
-                            out(f'{ty.start:#x} == x')
-                        else:
-                            out(f'x <= {ty.until - 1:#x}')
-                    else:
-                        if ty.until is gen.IntegerType.ADDRESS_MAX_EXCL or ty.until == (1 << 64):
-                            out(f'{ty.start:#x} <= x')
-                        elif ty.start == ty.until - 1:
-                            out(f'{ty.start:#x} == x')
-                        else:
-                            out(f'{ty.start:#x} <= x && x <= {ty.until - 1:#x}')
-                with Fn('from_ffi', f'x: {x}', 'Self', macro_public = True):
-                    out(f'Self(x)')
-                with Fn('to_ffi', 'self', x, macro_public = True):
-                    out('self.0')
+                with Fn('from_ffi', f'x: ffi::{name}', 'Self', macro_public = True):
+                    out(f'Self(x.0)')
+                with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
+                    out(f'ffi::{name}(self.0)')
             with ImplFor(f'From<{name}>', x):
                 with Fn('from', f'x: {name}', 'Self'):
                     out('x.0')
@@ -311,7 +371,7 @@ def emit(outf, idl, sysv):
                 with ImplFor(f'TryFrom<{x}>', name):
                     out('type Error = ();')
                     with Fn('try_from', f'x: {x}', 'Result<Self, Self::Error>'):
-                        out('Self::is_valid(x).then_some(Self(x)).ok_or(())')
+                        out(f'ffi::{name}(x).is_valid().then_some(Self(x)).ok_or(())')
             if type(ty.until) is int and ty.start == ty.until - 1:
                 with ImplFor('Default', name):
                     with Fn('default', '', 'Self'):
@@ -331,12 +391,10 @@ def emit(outf, idl, sysv):
         out(f'pub struct {name}(pub {x});')
         with Impl(name):
             # TODO check for null or nay?
-            with Fn('is_valid', f'_: {x}', 'bool', dead_code = True):
-                out('true')
-            with Fn('from_ffi', f'x: {x}', 'Self', macro_public = True):
-                out('Self(x)')
-            with Fn('to_ffi', 'self', f'{x}', macro_public = True):
-                out('self.0')
+            with Fn('from_ffi', f'x: ffi::{name}', 'Self', macro_public = True):
+                out('Self(x.0)')
+            with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
+                out(f'ffi::{name}(self.0)')
 
     def emit_record(name, ty, sysv_ty):
         if is_void(name):
@@ -346,31 +404,34 @@ def emit(outf, idl, sysv):
         if sysv_ty.memory_size == 0:
             out(f'pub struct {name};')
             return
+        def members():
+            yield from ((tr(k), v) for k, v in ty.members.items())
         with Scope(f'pub struct {name}'):
-            for m_name, m_ty in ty.members.items():
-                out(f'pub {tr(m_name)}: {m_ty},')
+            for m_name, m_ty in members():
+                if is_unit(m_ty):
+                    continue
+                out(f'pub {m_name}: {m_ty},')
         out('')
         with Impl(name):
-            with Fn('is_valid', f'x: ffi::{name}', 'bool', dead_code = True):
-                out(' && '.join(f'{m_ty}::is_valid(x.{tr(m_name)})' for m_name, m_ty in ty.members.items()))
             with Fn('from_ffi', f'x: ffi::{name}', 'Self', macro_public = True):
                 with Scope('Self'):
-                    for m_name, m_ty in ty.members.items():
-                        out(f'{tr(m_name)}: {m_ty}::from_ffi(x.{tr(m_name)}),')
+                    for m_name, m_ty in members():
+                        if is_unit(m_ty):
+                            continue
+                        out(f'{m_name}: {m_ty}::from_ffi(x.{m_name}),')
                     del m_name, m_ty
             with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
                 with Scope(f'ffi::{name}'):
-                    for m_name, m_ty in ty.members.items():
-                        out(f'{tr(m_name)}: self.{tr(m_name)}.to_ffi(),')
-                    del m_name, m_ty
+                    for m_name, m_ty in members():
+                        expr = f'ffi::{m_ty}::default()' if is_unit(m_ty) else f'self.{m_name}.to_ffi()'
+                        out(f'{m_name}: {expr},')
+                    del m_name, m_ty, expr
 
     def emit_routine(name, ty, sysv_ty):
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
         out(f'pub struct {name}(pub unsafe extern "sysv64" fn());')
         with Impl(name):
-            with Fn('is_valid', 'x: usize', 'bool', dead_code = True):
-                out('x != 0')
             with Fn('from_ffi', 'x: usize', 'Self'):
                 out('assert_ne!(x, 0, "Function pointer is null");')
                 out('Self(unsafe { core::mem::transmute(x) })')
@@ -382,24 +443,25 @@ def emit(outf, idl, sysv):
         out(f'#[derive(Clone, Debug)]')
         with Scope(f'pub enum {name}'):
             for v in ty.variants:
-                out(f'{v}({v}),')
+                out(f'{v},' if is_unit(v) else f'{v}({v}),')
         if sysv_ty.memory_size == 0:
             return
         with Impl(name):
-            with Fn('is_valid', f'x: ffi::{name}', 'bool', dead_code = True):
-                with Scope('unsafe'):
-                    out(' || '.join(f'{v}::is_valid(x.{v})' for v in ty.variants))
             with Fn('from_ffi', f'x: ffi::{name}', 'Self', macro_public = True):
                 with Scope('unsafe'):
                     with Scope('match x'):
                         for v in ty.variants:
-                            out(f'x if {v}::is_valid(x.{v}) => Self::{v}({v}::from_ffi(x.{v})),')
-                        del v
+                            expr = '' if is_unit(v) else f'({v}::from_ffi(x.{v}))'
+                            out(f'x if x.{v}.is_valid() => Self::{v}{expr},')
+                        del v, expr
                         out('_ => panic!("invalid variant"),')
             with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
                 with Scope('match self'):
                     for v in ty.variants:
-                        out(f'Self::{v}(x) => ffi::{name} {{ {v}: x.to_ffi() }},')
+                        if is_unit(v):
+                            out(f'Self::{v} => ffi::{name} {{ {v}: ffi::{v}::default() }},')
+                        else:
+                            out(f'Self::{v}(x) => ffi::{name} {{ {v}: x.to_ffi() }},')
 
     vtbl = {
         gen.IntegerType: emit_integer,
