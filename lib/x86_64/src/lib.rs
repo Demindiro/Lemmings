@@ -89,14 +89,20 @@ macro_rules! reg {
                 unsafe { core::arch::asm!($set_instr, in(reg) value, options(nostack, preserves_flags)) }
             }
 
+            /// # Returns
+            ///
+            /// The value *before* updating.
+            ///
             /// # Safety
             ///
             /// TODO
-            pub unsafe fn update<F>(f: F)
+            pub unsafe fn update<F>(f: F) -> u64
             where
                 F: FnOnce(u64) -> u64,
             {
-                unsafe { set(f(get())) }
+                let x = get();
+                unsafe { set(f(x)); }
+                x
             }
         }
     )*}

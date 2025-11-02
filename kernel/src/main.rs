@@ -2,6 +2,7 @@
 #![no_main]
 #![deny(improper_ctypes_definitions)]
 #![feature(slice_as_chunks)] // stabilized in 1.88, but Guix is on 1.85 as of writing
+#![feature(naked_functions)] // stabilized in 1.88
 
 #[macro_use]
 mod sys;

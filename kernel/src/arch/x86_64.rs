@@ -3,7 +3,7 @@ use crate::{
     sync::{SpinLock, SpinLockGuard},
     thread::{self, RoundRobinQueue, ThreadHandle},
 };
-use core::mem::MaybeUninit;
+use core::{arch::naked_asm, mem::MaybeUninit};
 use critical_section::CriticalSection;
 use lemmings_x86_64::{
     apic::{
@@ -192,6 +192,7 @@ fn init_idt(root: &mmu::Root<mmu::L4>) {
     let idt = unsafe { &mut *(&raw mut IDT) };
 
     idt.set_handler(idt::nr::DOUBLE_FAULT, double_fault as _);
+    idt.set_handler(idt::nr::PAGE_FAULT, page_fault as _);
     idt.set_handler(VECTOR_TIMER, timer_handler as _);
     for i in VECTOR_STUB_OFFSET..=u8::MAX {
         unsafe {
@@ -221,6 +222,21 @@ fn init_apic() {
 
 extern "sysv64" fn double_fault() {
     panic!("Double fault!");
+}
+
+#[naked]
+unsafe fn page_fault() {
+    unsafe {
+        naked_asm! {
+            "pop rdi",
+            "call {handler}",
+            handler = sym handler,
+        }
+    }
+    extern "sysv64" fn handler(error_code: u32) {
+        let addr = lemmings_x86_64::cr2::get();
+        panic!("Page fault! (code: {error_code:#08x}, address: {addr:#016x})");
+    }
 }
 
 extern "sysv64" fn irq_handler<'a>(irq: u8) {

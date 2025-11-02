@@ -15,7 +15,6 @@ const RELAENT: u64 = 9;
 pub enum LoadError {
     BadMagic,
     EntryOutOfBounds,
-    FileNotAligned,
     Not64Bit,
     NotLittleEndian,
     NotRelocatable,
@@ -25,6 +24,7 @@ pub enum LoadError {
     UnexpectedProgramHeaderSize,
     UnsupportedArchitecture,
     UnsupportedVersion,
+    UnsupportedSegmentFlags,
     VirtualSizeZero,
     OutOfMemory,
     OutOfVirtSpace,
@@ -35,7 +35,7 @@ pub struct Entry(NonNull<u8>);
 
 struct ElfMapper<'a> {
     virt_base: page::Virt,
-    phys_base: page::Phys,
+    file: &'a [u8],
     dyn_rela: &'a [[u8; 24]],
 }
 
@@ -53,7 +53,6 @@ impl fmt::Debug for LoadError {
         let s = match self {
             Self::BadMagic => "bad magic",
             Self::EntryOutOfBounds => "entry out of bounds",
-            Self::FileNotAligned => "file not aligned",
             Self::Not64Bit => "not 64 bit",
             Self::NotLittleEndian => "not little endian",
             Self::NotRelocatable => "not relocatable (DYN)",
@@ -63,6 +62,7 @@ impl fmt::Debug for LoadError {
             Self::UnexpectedProgramHeaderSize => "unexpected program header size",
             Self::UnsupportedArchitecture => "unsupported architecture",
             Self::UnsupportedVersion => "unsupported version",
+            Self::UnsupportedSegmentFlags => "unsupported segment flags",
             Self::VirtualSizeZero => "virtual size is zero",
             Self::OutOfMemory => "out of memory",
             Self::OutOfVirtSpace => "out of virtual memory space",
@@ -71,7 +71,7 @@ impl fmt::Debug for LoadError {
     }
 }
 
-pub fn load(file: &'static [u8]) -> Result<Entry, LoadError> {
+pub fn load(file: &[u8]) -> Result<Entry, LoadError> {
     use LoadError::*;
     let header: &[u8; 64] = file
         .get(..64)
@@ -89,20 +89,18 @@ pub fn load(file: &'static [u8]) -> Result<Entry, LoadError> {
     assert(header[18..20] == ARCH, UnsupportedArchitecture)?;
     let entry = u64(&header[24..32]).try_into().expect("usize == u64");
     let program_headers = program_headers(file, header)?;
-    if !file.as_ptr().cast::<page::Page>().is_aligned() {
-        return Err(FileNotAligned);
-    }
     let (virt_size, dyn_rela) = parse_program_headers(file, program_headers)?;
     if entry >= virt_size {
         return Err(EntryOutOfBounds);
     }
     let mapper = ElfMapper {
         virt_base: page::reserve_region(virt_size.try_into().map_err(|_| VirtualSizeZero)?)?,
-        phys_base: page::virt_to_phys(NonNull::from(&file[0])),
+        file,
         dyn_rela,
     };
     mapper.check_segments(&program_headers)?;
-    mapper.map_segments(&program_headers);
+    mapper.alloc_segments(&program_headers)?;
+    mapper.copy_segments(&program_headers);
     mapper.patch_dynamic();
     // SAFETY:
     // - entry is between 0..virt_size and hence is guaranteed
@@ -186,55 +184,72 @@ impl<'a> ElfMapper<'a> {
         Ok(())
     }
 
-    fn map_segments(&self, program_headers: &[[u8; PH_ENTSIZE]]) {
-        // at this point, the ELF file should be fully validated.
-        // if any unexpected conditions occur, just panic.
-        //
-        // TODO what about OOM errors?
-        for ph in program_headers {
-            match u32(&ph[..4]) {
-                self::PT_LOAD => self.load_segment(ph),
-                _ => {}
+    fn alloc_segments(&self, program_headers: &[[u8; PH_ENTSIZE]]) -> Result<(), LoadError> {
+        for (i, ph) in program_headers.iter().enumerate() {
+            if u32(&ph[..4]) != self::PT_LOAD {
+                continue;
             }
+            let err = match self.alloc_one_segment(ph) {
+                Ok(()) => continue,
+                Err(e) => e,
+            };
+            for _k in 0..i {
+                todo!("free allocated segments");
+            }
+        }
+        Ok(())
+    }
+
+    fn copy_segments(&self, program_headers: &[[u8; PH_ENTSIZE]]) {
+        for ph in program_headers {
+            if u32(&ph[..4]) != self::PT_LOAD {
+                continue;
+            }
+            self.copy_one_segment(ph);
         }
     }
 
-    fn load_segment(&self, ph: &[u8; PH_ENTSIZE]) {
+    fn alloc_one_segment(&self, ph: &[u8; PH_ENTSIZE]) -> Result<(), LoadError> {
         let flags = u32(&ph[4..8]);
-        let offset = u64(&ph[8..16]);
-        let vaddr = u64(&ph[16..24]);
-        let filesz = u64(&ph[32..40]);
-        let memsz = u64(&ph[40..48]);
+        let vaddr = u64_to_usize(&ph[16..24]);
+        let memsz = u64_to_usize(&ph[40..48]);
 
-        let floor = |x: u64| floor_p2(x.try_into().expect("u64 == usize"), page::PAGE_SIZE);
-        let ceil = |x: u64| ceil_p2(x.try_into().expect("u64 == usize"), page::PAGE_SIZE);
-        let pa = floor(offset);
+        let floor = |x| floor_p2(x, page::PAGE_SIZE);
+        let ceil = |x| ceil_p2(x, page::PAGE_SIZE);
         let va = floor(vaddr);
-        let pa_end = ceil(offset + filesz);
         let va_end = ceil(vaddr + memsz);
-        let va_mid = va + (pa_end - pa);
 
-        let [va, va_mid, va_end] =
-            [va, va_mid, va_end].map(|x| unsafe { self.virt_base.byte_add(x) });
-        let pa = page::Phys(self.phys_base.0 + u64::try_from(pa).expect("u64 == usize"));
+        let [va, va_end] = [va, va_end].map(|x| unsafe { self.virt_base.byte_add(x) });
 
-        let attr = match flags {
-            0b100 => page::PageAttr::R,
-            0b101 => page::PageAttr::RX,
-            0b110 => page::PageAttr::RW,
-            0b111 => page::PageAttr::RWX,
-            _ => panic!("unsupported flags"),
-        };
+        let attr = flags_to_attr(flags).ok_or(LoadError::UnsupportedSegmentFlags)?;
+        unsafe { page::map_region_zero(va..va_end, attr)? };
+        Ok(())
+    }
 
-        // TODO handle properly
-        unsafe { page::map_region(va..va_mid, pa, attr).unwrap() };
-        unsafe { page::map_region_zero(va_mid..va_end, attr).unwrap() };
+    fn copy_one_segment(&self, ph: &[u8; PH_ENTSIZE]) {
+        let flags = u32(&ph[4..8]);
+        let offset = u64_to_usize(&ph[8..16]);
+        let vaddr = u64_to_usize(&ph[16..24]);
+        let filesz = u64_to_usize(&ph[32..40]);
+
+        let [va, va_end] = [vaddr, vaddr + filesz].map(|x| unsafe { self.virt_base.byte_add(x) });
+        let src = &self.file[offset..offset + filesz];
+
+        unsafe {
+            page::copy_to_region(va, src);
+        }
     }
 
     fn patch_dynamic(&self) {
         for _e in self.dyn_rela {
             todo!("dynamic");
         }
+    }
+}
+
+impl From<page::OutOfMemory> for LoadError {
+    fn from(_: page::OutOfMemory) -> Self {
+        Self::OutOfMemory
     }
 }
 
@@ -257,6 +272,12 @@ fn u32(s: &[u8]) -> u32 {
 
 #[track_caller]
 #[inline(always)]
+fn u64_to_usize(s: &[u8]) -> usize {
+    u64(s).try_into().expect("u64 == usize")
+}
+
+#[track_caller]
+#[inline(always)]
 fn u16(s: &[u8]) -> u16 {
     u16::from_le_bytes(s.try_into().expect("2 bytes"))
 }
@@ -267,4 +288,14 @@ fn ceil_p2(x: usize, n: usize) -> usize {
 
 fn floor_p2(x: usize, n: usize) -> usize {
     x & !(n - 1)
+}
+
+fn flags_to_attr(flags: u32) -> Option<page::PageAttr> {
+    Some(match flags {
+        0b100 => page::PageAttr::R,
+        0b101 => page::PageAttr::RX,
+        0b110 => page::PageAttr::RW,
+        0b111 => page::PageAttr::RWX,
+        _ => return None,
+    })
 }
