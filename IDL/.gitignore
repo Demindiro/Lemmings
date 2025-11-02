@@ -1,3 +1,4 @@
 /rust/*/
 !/rust/_/
 /__pycache__/
+Cargo.lock
