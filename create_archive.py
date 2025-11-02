@@ -16,40 +16,11 @@ Immediately followed by name strings:
 If the type is 0, it is a regular file.
 If the type is 1, it is a directory.
 Empty names are not valid. To statically rule out empty names, the length is in the range [1;128].
-
-# Alignment
-
-Some files, such as ELF, require page alignment.
-Archivers should account for this and be configurable by the user.
-Alignment can easily be checked by testing the low bits of the offset *and* the length.
 """
 
 from pathlib import Path
 
-DEFAULT_ALIGNMENT = 1
 MAGIC = b'Lemmings archive'
-
-def determine_alignment(x):
-    with x.open('rb') as f:
-        header = f.read(4)
-        if header == b'\x7fELF':
-            return 1 << 12
-    return 1
-
-def collect_dir(path, buckets):
-    entries = {}
-    for x in path.iterdir():
-        if x.is_file():
-            print(f'f {x}')
-            entries[x.name.encode('utf-8')] = x
-            buckets.setdefault(determine_alignment(x), set()).add(x)
-        elif x.is_dir():
-            print(f'd {x}')
-            entries[x.name.encode('utf-8')] = collect_dir(x, buckets)
-        else:
-            print(f'warning: unknown type for {x}, skipping')
-    # https://stackoverflow.com/a/47017849
-    return dict(sorted(entries.items()))
 
 def list_archive_contents(path):
     with path.open('rb') as f:
@@ -80,80 +51,69 @@ def list_archive_contents(path):
         iter_dir(16, 0)
 
 def create_archive(out, root):
-    def align(n):
-        assert bin(n).count('1') == 1
-        n -= 1
-        return lambda x: (x + n) & ~n
-    align_dir = align(4)
-
-    # For efficiency, we'll do 2 passes:
-    # - one for collecting file names for determining ideal packing (accounting for alignment)
-    # - second for copying
-    buckets = {}
-    fs = collect_dir(Path(root), buckets)
-    buckets = {k: sorted(buckets[k]) for k in sorted(buckets, reverse=True)}
-
-    align_files = align(max([1, *(k for k in buckets)]))
-
-    size = 16
-    def calc_dir_size(fs):
-        return align_dir(4 + (4*2+1)*len(fs) + sum(map(len, fs)))
-    def calc_dir_offsets(fs):
-        nonlocal size
-        offset = size
-        assert offset == align_dir(offset)
-        size += calc_dir_size(fs)
-        child_offsets = {}
-        for k, v in fs.items():
-            if type(v) is dict:
-                child_offsets[k] = calc_dir_offsets(v)
-        return offset, child_offsets
-    dir_offsets = calc_dir_offsets(fs)
-    size = files_start = align_files(size)
-    file_offsets = {}
-    for align in buckets:
-        mask = align - 1
-        for x in buckets[align]:
-            l = x.stat().st_size
-            file_offsets[x] = (size, l)
-            size += (l + mask) & ~mask
-            del x
+    log_depth = 0
+    def log(s):
+        nonlocal log_depth
+        print('  ' * log_depth, s, sep='')
 
     with Path(out).open('wb') as f:
         f.write(MAGIC)
+
         def u32(x):
-            f.write(x.to_bytes(4, byteorder='little'))
-        def write_dir(fs, dir_offsets):
-            u32(len(fs))
-            for k, v in fs.items():
-                if type(v) is dict:
-                    o, _ = dir_offsets[k]
-                    l = calc_dir_size(v)
+            return x.to_bytes(4, byteorder='little')
+
+        def collect_file(path: Path) -> (int, int):
+            """
+            :returns: offset, length
+            """
+            offt = f.tell()
+            with path.open('rb') as g:
+                data = g.read()
+                f.write(data)
+            return offt, len(data)
+
+        def collect_dir(path: Path) -> (int, int):
+            """
+            :returns: offset, length
+            """
+            nonlocal log_depth
+            import os
+            paths = []
+            for x in path.iterdir():
+                assert 1 <= len(x.name.encode('utf-8')) <= 128
+                if not (x.is_file() or x.is_dir()):
+                    log(f'warning: unknown type for {x}, skipping')
+                    continue
+                paths.append(x)
+            paths.sort()
+            length = 4 + (4 * 2 * len(paths)) + sum(1 + len(x.name) for x in paths)
+            f_cur = f.tell()
+            f_end = f.tell() + length
+            f.seek(f_end, os.SEEK_CUR)
+            table = []
+            for x in paths:
+                if x.is_file():
+                    log(f'f {x}')
+                    table.append(collect_file(x))
+                elif x.is_dir():
+                    log(f'd {x}')
+                    log_depth += 1
+                    table.append(collect_dir(x))
+                    log_depth -= 1
                 else:
-                    o, l = file_offsets[v]
-                u32(o), u32(l)
-            for k, v in fs.items():
-                l = len(k) - 1
-                if type(v) is dict:
-                    l |= 1 << 7
-                f.write(bytes([l]) + k)
-            f.seek(align_dir(f.tell()))
-        def write_dirs(fs, dir_offsets):
-            write_dir(fs, dir_offsets)
-            for k, v in fs.items():
-                if type(v) is dict:
-                    write_dirs(v, dir_offsets[k][1])
-        write_dirs(fs, dir_offsets[1])
+                    assert 0, f'unsupported type for {x}'
+            f.seek(f_cur, os.SEEK_SET)
+            f.write(u32(len(table)))
+            f.write(b''.join(u32(x) + u32(y) for x, y in table))
+            def name(x):
+                n = x.name.encode('utf-8')
+                return bytes([(len(n) - 1) | (x.is_dir() << 7)]) + n
+            f.write(b''.join(name(x) for x in paths))
+            assert f.tell() == f_end, f'{f.tell()} ? {f_end}'
+            return f_cur, length
 
-        f.seek(align_files(f.tell()))
+        collect_dir(Path(root))
 
-        assert f.tell() == files_start, f'{f.tell()} ? {files_start}'
-        for x in file_offsets:
-            o, l = file_offsets[x]
-            print(o, l, x)
-            f.seek(o)
-            with x.open('rb') as g:
-                f.write(g.read(l))
 
 def main(args):
     if args[0] in ('--list', '-l'):
