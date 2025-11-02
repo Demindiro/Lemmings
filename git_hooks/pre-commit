@@ -1,5 +1,25 @@
 #!/bin/sh
 
+
+### BUILD CHECK ###
+
+git stash push -u -k
+./build.sh
+result=$?
+git stash pop
+
+if test $result -ne 0
+then
+	echo
+	echo "  == [[   Staged changes failed to build   ]] =="
+	echo "  == [[    Please fix before committing    ]] =="
+	echo
+	exit 1
+fi
+
+
+### STYLE CHECK ###
+
 # Shamelessly stolen from https://eugene-babichenko.github.io/blog/2018/11/08/rustfmt-git-hook/
 
 HAS_ISSUES=0
