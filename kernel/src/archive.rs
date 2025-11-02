@@ -44,7 +44,7 @@ pub mod door {
                 stub: Stub::from(0),
             });
         };
-        *cookie = Cookie::from(c);
+        *cookie = c;
         let n = NonNull::from(n.as_bytes());
         unsafe { name.base.0.copy_from_nonoverlapping(n.cast(), n.len()) }
         match item {
