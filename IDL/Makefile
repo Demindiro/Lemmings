@@ -16,5 +16,8 @@ check-rust: $(IDL_TO_RUST)
 %/:
 	mkdir -p $@
 
+clean:
+	rm -fr $(IDL_TO_RUST)
+
 
 .PHONY: rust check check-rust
