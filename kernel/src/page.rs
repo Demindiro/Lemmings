@@ -200,6 +200,27 @@ pub fn alloc_one_guarded(attr: PageAttr) -> Result<Virt, AllocGuardedError> {
     })
 }
 
+/// Copy `data` to `base`.
+///
+/// This routine bypasses write protections protections.
+pub unsafe fn copy_to_region(base: Virt, data: &[u8]) {
+    // We will temporarily disable write-protection.
+    // To avoid having this protection disabled while running other code,
+    // disable interrupts too.
+    //
+    // TODO: break up large copies into smaller chunks so we don't keep
+    // interrupts disabled for excessively long periods
+    use lemmings_x86_64::cr0;
+    critical_section::with(|_| {
+        let og_cr0 = cr0::update(|x| x & !cr0::WRITE_PROTECT);
+        unsafe {
+            base.as_ptr()
+                .copy_from_nonoverlapping(data.as_ptr(), data.len())
+        };
+        cr0::set(og_cr0);
+    });
+}
+
 /// Automatically puts guard pages of minimum 4K around the region.
 pub fn reserve_region(size: NonZero<usize>) -> Result<Virt, ReserveRegionError> {
     critical_section::with(|cs| VIRT.lock(cs).reserve_region(size))
