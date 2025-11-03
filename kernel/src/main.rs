@@ -51,6 +51,7 @@ fn main_init() -> elf::Entry {
     arch::door::register();
     archive::door::register();
     //framebuffer::door::register();
+    elf::door::register();
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
     let init = elf::load(init.data()).expect("failed to parse init");

@@ -12,6 +12,37 @@ const RELA: u64 = 7;
 const RELASZ: u64 = 8;
 const RELAENT: u64 = 9;
 
+pub mod door {
+    use core::{ptr::NonNull, slice};
+    use lemmings_idl_loader_elf::*;
+
+    door! {
+        [lemmings_idl_loader_elf Loader "ELF loader"]
+        load
+    }
+
+    unsafe fn load(x: Load) -> LoadResult {
+        let Load {
+            elf_base,
+            elf_len,
+            reason_base,
+            reason_len,
+        } = x;
+        let elf =
+            unsafe { slice::from_raw_parts(elf_base.0.as_ptr().cast::<u8>(), elf_len.into()) };
+        let reason = unsafe {
+            slice::from_raw_parts_mut(
+                reason_base.0.as_ptr().cast::<u8>(),
+                u16::from(reason_len).into(),
+            )
+        };
+        match super::load(elf) {
+            Ok(entry) => todo!("entry"),
+            Err(e) => todo!("fail {e:?}"),
+        }
+    }
+}
+
 pub enum LoadError {
     BadMagic,
     EntryOutOfBounds,
