@@ -1,0 +1,75 @@
+-- This interface exposes *local* PCI devices.
+--
+-- Given that PCI devices make extensive use of MMIO,
+-- it is assumed any direct use of such devices will occur
+-- on a system with a shared memory bus.
+-- Hence, routines return direct pointers to these devices.
+--
+-- The primary purpose of this interface is to:
+-- - Efficiently enumerate all PCI devices in the system
+-- - Enforce exclusive access to devices.
+-- - Help set up interrupts (abstracting out platform-specific details)
+-- - Resize/remap BARs
+door Pci {
+
+	-- Acquire exclusive access to a device.
+	acquire_dev = Bdf -> AcquireResult
+
+	-- Release exclusive access to a device.
+	release_dev = Bdf -> Void
+
+	-- Allocate a vector for an MSI
+	map_msi = Void -> MaybeMsiVector
+
+	-- Release a vector for an MSI
+	unmap_msi = Vector -> Void
+
+	-- Wait for a MSI interrupt
+	wait_msi = Vector -> Void
+
+	-- Allocate 32-bit MMIO space.
+	--
+	-- This space can be used for mapping BARs.
+	allocate_mmio32 = AllocateMmio32 -> Addr32
+
+	-- Allocate 64-bit MMIO space.
+	--
+	-- This space can be used for mapping BARs.
+	allocate_mmio64 = AllocateMmio64 -> Addr64
+
+	-- Free MMIO space.
+	release_mmio = Addr64 -> Void
+}
+
+record Void {
+}
+
+u16 Bdf = 0 to 0xffff
+
+u8 GotLock = 0
+u8 AlreadyLocked = 1
+sum AcquireResult = GotLock | AlreadyLocked
+
+record MsiVector {
+	address = MsiAddress
+	value = MsiValue
+	vector = Vector
+}
+record NoMsiVector {
+	address = NoMsiAddress
+	value = MsiValue
+	vector = Vector
+}
+sum MaybeMsiVector = MsiVector | NoMsiVector
+
+u64 NoMsiAddress = 0
+u64 MsiAddress = 1 to 0xffff_ffff_ffff_ffff
+
+u32 MsiValue = 0 to 0xffff_ffff
+
+u32 Vector = 0 until 0xffff_ffff
+
+u8 AllocateMmio32 = 4 to 31
+u8 AllocateMmio64 = 4 to 63
+u32 Addr32 = 0 until 0xffff_ffff
+u64 Addr64 = 0 until 0xffff_ffff_ffff_ffff
