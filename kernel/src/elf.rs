@@ -315,8 +315,16 @@ impl<'a> ElfMapper<'a> {
     }
 
     fn patch_dynamic(&self) {
-        for _e in self.dyn_rela {
-            todo!("dynamic");
+        for e in self.dyn_rela {
+            let offset = u64_to_usize(&e[0..8]);
+            let addend = u64_to_usize(&e[16..24]);
+            // TODO we don't need to disable write protection?
+            // ... this indicates we may need to clear the R/W bit ourselves,
+            // which is annoying.
+            unsafe {
+                let p = self.virt_base.byte_add(offset).cast::<usize>();
+                p.write_unaligned(self.virt_base.as_ptr().addr() + addend);
+            }
         }
     }
 }
