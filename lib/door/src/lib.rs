@@ -13,6 +13,19 @@ use lemmings_x86_64 as x64;
 mod ffi {
     use core::arch::asm;
 
+    pub unsafe fn syscall_0_1<const ID: usize>() -> u64 {
+        let x: u64;
+        unsafe {
+            asm! {
+                "call gs:[8 * {ID}]",
+                ID = const ID,
+                out("rax") x,
+                clobber_abi("sysv64"),
+            }
+        }
+        x
+    }
+
     pub unsafe fn syscall_2_0<const ID: usize>(a: u64, b: u64) {
         unsafe {
             asm! {
@@ -21,6 +34,18 @@ mod ffi {
                 in("rdi") a,
                 in("rsi") b,
                 clobber_abi("sysv64"),
+            }
+        }
+    }
+
+    pub unsafe fn syscall_1_noreturn<const ID: usize>(a: u64) -> ! {
+        unsafe {
+            asm! {
+                "call gs:[8 * {ID}]",
+                ID = const ID,
+                in("rdi") a,
+                clobber_abi("sysv64"),
+                options(noreturn),
             }
         }
     }
@@ -36,6 +61,22 @@ mod ffi {
                 options(noreturn),
             }
         }
+    }
+
+    pub unsafe fn syscall_3_1<const ID: usize>(a: u64, b: u64, c: u64) -> u64 {
+        let x: u64;
+        unsafe {
+            asm! {
+                "call gs:[8 * {ID}]",
+                ID = const ID,
+                in("rdi") a,
+                in("rsi") b,
+                in("rdx") c,
+                lateout("rax") x,
+                clobber_abi("sysv64"),
+            }
+        }
+        x
     }
 
     pub unsafe fn syscall_4_2<const ID: usize>(a: u64, b: u64, c: u64, d: u64) -> [u64; 2] {
@@ -85,6 +126,9 @@ mod sys {
     pub const PANIC: usize = 1;
     pub const DOOR_LIST: usize = 2;
     pub const DOOR_REGISTER: usize = 3;
+    pub const PANIC_BEGIN: usize = 4;
+    pub const PANIC_PUSH: usize = 5;
+    pub const PANIC_END: usize = 6;
 }
 
 #[derive(Clone, Debug)]
@@ -109,11 +153,30 @@ pub struct Door<'table, 'name> {
     pub name: &'name str,
 }
 
+struct Panic(*const u8);
+
 #[repr(C)]
 struct InterfaceInfo {
     api: ApiId,
     name_ptr: NonNull<u8>,
     name_len: usize,
+}
+
+impl Panic {
+    fn new() -> Self {
+        unsafe { Self(panic_begin()) }
+    }
+
+    fn end(self) -> ! {
+        unsafe { panic_end(self.0) }
+    }
+}
+
+impl fmt::Write for Panic {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.0 = unsafe { panic_push(self.0, s) };
+        Ok(())
+    }
 }
 
 #[inline(always)]
@@ -124,6 +187,23 @@ pub fn log(msg: &str) {
 #[inline(always)]
 pub fn panic(msg: &str) -> ! {
     unsafe { ffi::syscall_2_noreturn::<{ sys::PANIC }>(msg.as_ptr() as _, msg.len() as _) }
+}
+
+#[inline(always)]
+unsafe fn panic_begin() -> *const u8 {
+    unsafe { ffi::syscall_0_1::<{ sys::PANIC_BEGIN }>() as _ }
+}
+
+#[inline(always)]
+unsafe fn panic_push(handle: *const u8, msg: &str) -> *const u8 {
+    unsafe {
+        ffi::syscall_3_1::<{ sys::PANIC_PUSH }>(handle as _, msg.as_ptr() as _, msg.len() as _) as _
+    }
+}
+
+#[inline(always)]
+unsafe fn panic_end(handle: *const u8) -> ! {
+    unsafe { ffi::syscall_1_noreturn::<{ sys::PANIC_END }>(handle as _) }
 }
 
 #[inline(always)]
@@ -163,5 +243,7 @@ pub unsafe fn door_register(door: Door<'static, '_>) -> Result<(), HallwayIsFull
 
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
-    panic("TODO message");
+    let mut panic = Panic::new();
+    let _ = write!(&mut panic, "{info}");
+    panic.end()
 }

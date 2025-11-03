@@ -65,6 +65,9 @@ systable! {
     1 panic
     2 door_list
     3 door_register
+    4 panic_begin
+    5 panic_push
+    6 panic_end
 }
 
 pub struct Log<'cs> {
@@ -107,6 +110,45 @@ unsafe extern "sysv64" fn panic(msg: Slice<u8>) -> ! {
     todo!("handle thread panic (message: {msg:?})");
 }
 
+/// Begin panicking.
+///
+/// This version allows formatting a panic message in multiple steps,
+/// which is useful for printing complex structures without preallocating a large buffer.
+///
+/// # Returns
+///
+/// A handle which must be used for [`panic_push`] and [`panic_end`]
+unsafe extern "sysv64" fn panic_begin() -> *const u8 {
+    let _ = with_log(|mut log| log.write_str("Oh no! "));
+    core::ptr::null()
+}
+
+/// Push part of a panic message
+///
+/// # Returns
+///
+/// A new handle.
+///
+/// # Safety
+///
+/// - `panic_begin` must have been called first.
+/// - `msg` must point to a valid UTF-8 string.
+unsafe extern "sysv64" fn panic_push(handle: *const u8, msg: Slice<u8>) -> *const u8 {
+    let msg = unsafe { msg.as_str() };
+    let _ = with_log(|mut log| log.write_str(msg));
+    core::ptr::null()
+}
+
+/// Truly start panicking.
+///
+/// # Safety
+///
+/// - `panic_begin` must have been called first.
+unsafe extern "sysv64" fn panic_end(handle: *const u8) -> ! {
+    let _ = with_log(|mut log| log.write_char('\n'));
+    todo!("handle panic_end");
+}
+
 // XXX: u128 ought to be FFI-safe
 #[allow(improper_ctypes_definitions)]
 unsafe extern "sysv64" fn door_list(
@@ -132,9 +174,9 @@ unsafe extern "sysv64" fn door_register(api: ApiId, name: Slice<u8>, table: Tabl
     unsafe { door::register(api, name, table) };
 }
 
-pub fn with_log<F>(f: F)
+pub fn with_log<F, R>(f: F) -> R
 where
-    F: FnOnce(Log<'_>),
+    F: FnOnce(Log<'_>) -> R,
 {
     critical_section::with(|cs| {
         f(Log {
