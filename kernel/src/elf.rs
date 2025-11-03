@@ -37,7 +37,10 @@ pub mod door {
             )
         };
         match super::load(elf) {
-            Ok(entry) => todo!("entry"),
+            Ok(entry) => LoadResult::LoadOk(LoadOk {
+                entry: unsafe { core::mem::transmute(entry) },
+                reason_len: 0.into(),
+            }),
             Err(e) => todo!("fail {e:?}"),
         }
     }
