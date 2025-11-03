@@ -57,6 +57,10 @@ archive->root
 archive-read
 string-as-range 1 0 loader-elf->load
 
+#drop
+if #dup 0 = then "Failed to load virtio-net" Sys panic end
+Sys become:0
+
 shutdown
 
 : IO_DATA    0x60 ;
