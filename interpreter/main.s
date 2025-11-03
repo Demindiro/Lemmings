@@ -1160,6 +1160,11 @@ dict_begin Sys
 		syscall_panic
 	enddef
 
+	def_as "become:0" Sys.become_0
+		_start_exit
+		jmp [NUM_STACK_HEAD]
+	enddef
+
 	def_as "call:0->0" Sys.call_0_0
 		call [NUM_STACK_HEAD]
 		num_drop
