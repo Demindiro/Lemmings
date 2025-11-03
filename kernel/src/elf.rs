@@ -41,7 +41,32 @@ pub mod door {
                 entry: unsafe { core::mem::transmute(entry) },
                 reason_len: 0.into(),
             }),
-            Err(e) => todo!("fail {e:?}"),
+            Err(err) => {
+                use super::LoadError as E;
+                // TODO write reason string.
+                let reason_len = 0;
+                let _ = reason;
+                LoadResult::LoadFail(LoadFail {
+                    reason: match err {
+                        E::Not64Bit
+                        | E::NotLittleEndian
+                        | E::NotRelocatable
+                        | E::UnsupportedArchitecture
+                        | E::UnsupportedVersion
+                        | E::UnsupportedSegmentFlags => Reason::Unsupported,
+                        E::BadMagic
+                        | E::EntryOutOfBounds
+                        | E::ProgramHeadersTruncated
+                        | E::SegmentNotAligned
+                        | E::TruncatedHeader
+                        | E::UnexpectedProgramHeaderSize
+                        | E::VirtualSizeZero => Reason::Malformed,
+                        E::OutOfMemory => Reason::OutOfMemory,
+                        E::OutOfVirtSpace => Reason::OutOfVirtualSpace,
+                    },
+                    reason_len: reason_len.into(),
+                })
+            }
         }
     }
 }
