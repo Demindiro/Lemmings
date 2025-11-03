@@ -1116,6 +1116,18 @@ dict_begin _
 	def_as "#not" int_not
 		not qword ptr [NUM_STACK_HEAD]
 	enddef
+
+	def_as "#sign-ext-8" sign_ext_8
+		num_peek rax
+		movsx rax, al
+		num_replace rax
+	enddef
+
+	def_as "#zero-ext-8" zero_ext_8
+		num_peek rax
+		movzx eax, al
+		num_replace rax
+	enddef
 dict_end _
 
 
