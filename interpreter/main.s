@@ -1159,6 +1159,11 @@ dict_begin Sys
 		mov esi, [rdi - 8]
 		syscall_panic
 	enddef
+
+	def_as "call:0->0" Sys.call_0_0
+		call [NUM_STACK_HEAD]
+		num_drop
+	enddef
 dict_end Sys
 
 
