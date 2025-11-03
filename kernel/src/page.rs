@@ -9,6 +9,7 @@ use core::{
     ptr::NonNull,
     slice,
 };
+use critical_section::CriticalSection;
 use lemmings_qemubios::MemoryRegion;
 use lemmings_x86_64::mmu;
 
@@ -210,15 +211,23 @@ pub unsafe fn copy_to_region(base: Virt, data: &[u8]) {
     //
     // TODO: break up large copies into smaller chunks so we don't keep
     // interrupts disabled for excessively long periods
-    use lemmings_x86_64::cr0;
-    critical_section::with(|_| {
-        let og_cr0 = cr0::update(|x| x & !cr0::WRITE_PROTECT);
-        unsafe {
+    critical_section::with(|cs| {
+        disable_write_protection(cs, || unsafe {
             base.as_ptr()
                 .copy_from_nonoverlapping(data.as_ptr(), data.len())
-        };
-        cr0::set(og_cr0);
+        })
     });
+}
+
+/// Disable write protections for the duration of `f`.
+pub unsafe fn disable_write_protection<F>(_cs: CriticalSection<'_>, f: F)
+where
+    F: FnOnce(),
+{
+    use lemmings_x86_64::cr0;
+    let og_cr0 = cr0::update(|x| x & !cr0::WRITE_PROTECT);
+    (f)();
+    cr0::set(og_cr0);
 }
 
 /// Automatically puts guard pages of minimum 4K around the region.
