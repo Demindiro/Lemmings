@@ -143,6 +143,21 @@ where
     })
 }
 
+#[allow(dead_code)]
+pub fn hexdump(data: &[u8]) {
+    with_log(|mut log| {
+        for b in data.chunks(32) {
+            for (i, b) in b.iter().enumerate() {
+                if i % 4 == 0 {
+                    let _ = write!(&mut log, " ");
+                }
+                let _ = write!(&mut log, "{b:02x}");
+            }
+            let _ = writeln!(&mut log);
+        }
+    });
+}
+
 #[inline]
 pub fn init(_: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
     unsafe { lemmings_x86_64::set_gs(TABLE.as_ptr() as *mut _) };
