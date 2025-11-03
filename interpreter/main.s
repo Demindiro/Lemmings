@@ -1270,6 +1270,20 @@ dict_end Immediate
 
 
 dict_begin String
+	def concat
+		obj_pop rbx
+		obj_pop rsi
+		mov ecx, [rbx - 8]
+		add ecx, [rsi - 8]
+		call str_reserve
+		obj_push rdi
+		mov ecx, [rsi - 8]
+		rep movsb
+		mov rsi, rbx
+		mov ecx, [rsi - 8]
+		rep movsb
+	enddef
+
 	def natural
 		num_pop rax
 		# write to stack first so we don't
