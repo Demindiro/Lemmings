@@ -1211,6 +1211,36 @@ dict_begin Sys.Door
 		num_pop rdi
 		call [rbx + rax * 8]
 	enddef
+
+	def_as "call:3->1" call_3_1
+		call call_3_0
+		num_push rax
+	enddef
+
+	def_as "call:3->2" call_3_2
+		call call_3_1
+		num_push rdx
+	enddef
+
+	def_as "call:4->0" call_4_0
+		num_pop rbx
+		num_pop rax
+		num_pop rcx
+		num_pop rdx
+		num_pop rsi
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:4->1" call_4_1
+		call call_4_0
+		num_push rax
+	enddef
+
+	def_as "call:4->2" call_4_2
+		call call_4_1
+		num_push rdx
+	enddef
 dict_end Sys.Door
 
 
