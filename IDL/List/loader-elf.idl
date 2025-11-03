@@ -1,0 +1,46 @@
+-- Program loader for ELF files
+door Loader {
+	-- Load the ELF file located in memory.
+	--
+	-- Returns a non-zero entry point on success.
+	load = Load -> LoadResult
+}
+
+record Load {
+	elf_base = ElfBase
+	elf_len = ElfLen
+	reason_base = ReasonBase
+	reason_len = ReasonLen
+}
+
+record LoadOk {
+	entry = Entry
+	reason = NoReason
+	reason_len = ReasonLen
+}
+record LoadFail {
+	entry = NoEntry
+	reason = Reason
+	reason_len = ReasonLen
+}
+sum LoadResult = LoadOk | LoadFail
+
+pointer ElfBase = constant Byte
+uptr ElfLen = 0 to address_max
+u8 Byte = 0 to 0xff
+
+u8 NoReason = 0
+u8 Malformed = 1
+u8 Unsupported = 2
+u8 OutOfMemory = 3
+u8 OutOfVirtualSpace = 4
+sum Reason = Malformed | Unsupported | OutOfMemory | OutOfVirtualSpace
+
+pointer ReasonBase = unique Byte
+u16 ReasonLen = 0 to 0xffff
+
+null NoEntry = Entry
+routine Entry = Undefined -> Undefined
+
+record Undefined {
+}
