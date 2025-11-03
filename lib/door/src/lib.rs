@@ -246,3 +246,45 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
     let _ = write!(&mut panic, "{info}");
     panic.end()
 }
+
+// compiler_builtins doesn't build???
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memset(dst: *mut u8, c: i32, n: usize) -> *mut u8 {
+    unsafe {
+        core::arch::asm! {
+            "rep stosb",
+            in("al") c as u8,
+            inout("rdi") dst => _,
+            inout("rcx") n => _,
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    unsafe {
+        core::arch::asm! {
+            "rep movsb",
+            inout("rdi") dst => _,
+            inout("rsi") src => _,
+            inout("rcx") n => _,
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memcmp(mut x: *const u8, mut y: *const u8, n: usize) -> i32 {
+    // rep cmpsb is slow, so do a manual loop
+    unsafe {
+        for _ in 0..n {
+            if x.read() != y.read() {
+                return i32::from(x.read()) - i32::from(y.read());
+            }
+            x = x.byte_add(1);
+            y = y.byte_add(1);
+        }
+    }
+    0
+}
