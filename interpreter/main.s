@@ -1270,6 +1270,12 @@ dict_end Immediate
 
 
 dict_begin String
+	def len
+		obj_pop rax
+		mov eax, [rax - 8]
+		num_push rax
+	enddef
+
 	def concat
 		obj_pop rbx
 		obj_pop rsi
