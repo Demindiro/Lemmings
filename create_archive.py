@@ -32,6 +32,17 @@ def list_archive_contents(path):
             b = f.read(4)
             assert len(b) == 4
             return int.from_bytes(b, byteorder='little')
+        def dump_file(offset, length, depth):
+            og_pos = f.tell()
+            f.seek(offset)
+            STRIDE = 32
+            for x in range(0, length, STRIDE):
+                print('  ' * depth, end='')
+                x = f.read(min(STRIDE, length - x))
+                for i, b in enumerate(x):
+                    print('', f'{b:02x}', sep='' if i % 4 else ' ', end='')
+                print()
+            f.seek(og_pos)
         def iter_dir(offset, depth):
             og_pos = f.tell()
             f.seek(offset)
@@ -47,6 +58,8 @@ def list_archive_contents(path):
                 print('fd'[typ], f'0x{data_offset:<8x} 0x{data_offset + data_len:<8x}', name)
                 if typ:
                     iter_dir(data_offset, depth + 1)
+                else:
+                    dump_file(data_offset, data_len, depth + 1)
             f.seek(og_pos)
         iter_dir(16, 0)
 
