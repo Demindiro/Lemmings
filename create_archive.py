@@ -101,8 +101,8 @@ def create_archive(out, root):
             paths.sort()
             length = 4 + (4 * 2 * len(paths)) + sum(1 + len(x.name) for x in paths)
             f_cur = f.tell()
-            f_end = f.tell() + length
-            f.seek(f_end, os.SEEK_CUR)
+            f_end = f_cur + length
+            f.seek(f_end, os.SEEK_SET)
             table = []
             for x in paths:
                 if x.is_file():
@@ -115,6 +115,7 @@ def create_archive(out, root):
                     log_depth -= 1
                 else:
                     assert 0, f'unsupported type for {x}'
+            f_reset = f.tell()
             f.seek(f_cur, os.SEEK_SET)
             f.write(u32(len(table)))
             f.write(b''.join(u32(x) + u32(y) for x, y in table))
@@ -123,6 +124,7 @@ def create_archive(out, root):
                 return bytes([(len(n) - 1) | (x.is_dir() << 7)]) + n
             f.write(b''.join(name(x) for x in paths))
             assert f.tell() == f_end, f'{f.tell()} ? {f_end}'
+            f.seek(f_reset, os.SEEK_SET)
             return f_cur, length
 
         collect_dir(Path(root))
