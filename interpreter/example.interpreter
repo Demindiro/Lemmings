@@ -51,14 +51,21 @@
 	0 #swap #dup String !reserve #swap archive->file_read #drop
 	String !commit ;
 
+"looking for virtio-net" Sys log
 archive->root
+"got /" Sys log
 "driver"     archive-find-dir
+"got /driver/" Sys log
 "virtio-net" archive-find-file
+"got /driver/virtio-net" Sys log
+"reading /driver/virtio-net" Sys log
 archive-read
+"loading /driver/virtio-net" Sys log
 string-as-range 1 0 loader-elf->load
 
 #drop
 if #dup 0 = then "Failed to load virtio-net" Sys panic end
+"Starting virtio-net" Sys log
 Sys become:0
 
 shutdown
