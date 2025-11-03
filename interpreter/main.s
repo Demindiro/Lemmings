@@ -1371,7 +1371,7 @@ dict_end X86.Io
 .endm
 	f num_stack (1 << 12)
 	f obj_stack (1 << 12)
-	f obj_heap  (1 << 16)
+	f obj_heap  (1 << 18)
 	f word_dict (1 << 12)
 	f code_heap (1 << 16)
 .purgem f
