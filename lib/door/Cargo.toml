@@ -1,0 +1,7 @@
+[package]
+name = "lemmings-door"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lemmings-x86_64 = { path = "../x86_64" }

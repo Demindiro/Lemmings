@@ -1,9 +1,16 @@
 "Hello interpreter!" Sys log
 
-0xff2ad0f92941f6c6 0x02e8903cae084b61 Sys Door find
-if dup 0 = then
-	"Failed to find interrupt door" Sys panic
-end
+: shutdown 0x2000 0x604 X86 Io out16 ;
+
+: find-door
+	Sys Door find
+	if #dup 0 = then
+		"Failed to find " @swap String concat " door" String concat Sys panic
+	else
+		@drop
+	end ;
+
+0xff2ad0f92941f6c6 0x02e8903cae084b61 "interrupt" find-door
 : interrupt-door ! const ;
 : interrupt->wait    0 interrupt-door Sys Door call:2->0 ;
 : interrupt->done    1 interrupt-door Sys Door call:2->0 ;
@@ -12,6 +19,45 @@ end
 : interrupt->map     4 interrupt-door Sys Door call:3->0 ;
 : interrupt->LEVEL 0 ;
 : interrupt->EDGE  1 ;
+
+0x1bca7b88685b852b 0x9f0f280f34d8dae9 "ELF loader" find-door
+: loader-elf-door ! const ;
+: loader-elf->load  0 loader-elf-door Sys Door call:4->2 ;
+
+0x12586ddb4350e1b6 0xc469fb24bb9a89c6 "archive" find-door
+: archive-door ! const ;
+: archive->root      0 archive-door Sys Door call:0->1 ;
+: archive->dir_iter  1 archive-door Sys Door call:4->2 ;
+: archive->dir_find  2 archive-door Sys Door call:3->2 ;
+// actually returns 2 values, but we don't care about the latter
+: archive->file_read 3 archive-door Sys Door call:4->1 ;
+
+: trace-num  #dup String natural  Sys log ;
+
+: string-as-range @dup String !address String len ;
+
+: panic-prefix @swap String concat Sys panic ;
+: archive-find
+	@dup string-as-range archive->dir_find
+	if #swap #sign-ext-8 #dup -1 = then "item not found: " panic-prefix end
+	@drop ;
+: archive-assert-xxx if <> then panic-prefix end @drop ;
+: archive-assert-file 0 "not a file: "      archive-assert-xxx ;
+: archive-assert-dir  1 "not a directory: " archive-assert-xxx ;
+: archive-find-file @dup archive-find archive-assert-file ;
+: archive-find-dir  @dup archive-find archive-assert-dir  ;
+: archive-read
+	#dup 0 1 0 archive->file_read
+	0 #swap #dup String !reserve #swap archive->file_read #drop
+	String !commit ;
+
+archive->root
+"driver"     archive-find-dir
+"virtio-net" archive-find-file
+archive-read
+string-as-range 1 0 loader-elf->load
+
+shutdown
 
 : IO_DATA    0x60 ;
 : IO_STATUS  0x64 ;
