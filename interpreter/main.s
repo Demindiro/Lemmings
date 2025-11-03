@@ -1270,6 +1270,21 @@ dict_end Immediate
 
 
 dict_begin String
+	def_as "!address" String.as_address
+		obj_pop rax
+		num_push rax
+	enddef
+
+	def_as "!reserve" String.reserve
+		num_pop rcx
+		call str_reserve
+		obj_push rdi
+		num_push rdi # the unsafe part
+	enddef
+
+	def_as "!commit" String.commit
+	enddef
+
 	def len
 		obj_pop rax
 		mov eax, [rax - 8]
