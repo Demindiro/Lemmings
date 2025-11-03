@@ -29,7 +29,7 @@
     "std": false
   },
   "plt-by-default": false,
-  "relro-level": "partial",
+  "relro-level": "full",
   "stack-probes": {
     "kind": "inline"
   },
