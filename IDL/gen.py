@@ -44,6 +44,15 @@ for s in 'us':
 class UPtrType(IntegerType): __slots__ = ()
 class SPtrType(IntegerType): __slots__ = ()
 
+class NullType(Type):
+    __slots__ = 'type',
+    def __init__(self, ty: str):
+        assert type(ty) is str
+        super().__init__()
+        self.type = ty
+    def __repr__(self):
+        return f'null({self.type})'
+
 class PointerType(Type):
     __slots__ = 'deref_type',
     def __init__(self, deref_type: str):
@@ -189,6 +198,8 @@ class DoorBuilder:
                 ser.pushN(ty.start & m, bits)
                 ser.pushN((ty.until - 1) & m, bits)
             return f
+        def ser_null(ty):
+            ser.pushstr(ty.type)
         def ser_ptr(ty):
             ser.pushstr(ty.deref_type)
         def ser_record(ty):
@@ -218,6 +229,7 @@ class DoorBuilder:
             RecordType: (0x30, ser_record),
             SumType:    (0x31, ser_sum),
             RoutineType: (0x40, ser_routine),
+            NullType: (0x50, ser_null),
         }
         for name in sorted(self.types):
             ty = self.types[name]
@@ -312,6 +324,10 @@ def parse_idl(text) -> Door:
             return name, Ty(start, until)
         return f
 
+    def parse_null(line):
+        name, ty = strip_split(line, '=')
+        return name, NullType(ty)
+
     def parse_pointer(line):
         name, ty = strip_split(line, '=')
         access, ty = strip_split(ty, ' ')
@@ -347,6 +363,7 @@ def parse_idl(text) -> Door:
 
     vtbl = {
         'door': parse_door,
+        'null': parse_null,
         'pointer': parse_pointer,
         'record': parse_record,
         'routine': parse_routine,

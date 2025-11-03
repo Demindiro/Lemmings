@@ -51,6 +51,9 @@ def types_to_sysv64(idl):
             return Sysv64Type(1 << x, 1 << x)
         return f
 
+    def from_null(ty):
+        return resolve(ty.type)
+
     def from_pointer(ty):
         return Sysv64Type(8, 8)
 
@@ -77,6 +80,7 @@ def types_to_sysv64(idl):
 
     vtbl = {
         gen.IntegerType: from_integer,
+        gen.NullType: from_null,
         gen.RecordType: from_record,
         gen.SumType: from_sum,
         gen.UPtrType: from_integer(False, None),
@@ -144,11 +148,6 @@ def emit_ffi(outf, idl, sysv):
         out('#[repr(transparent)]')
         out(f'pub struct {name}(pub {wrap});')
 
-    def alias(wrap):
-        def f(name, ty, sysv_ty):
-            newtype(name, wrap(ty))
-        return f
-
     def emit_integer(signed, bits):
         x = f'{"ui"[signed]}{bits or "size"}'
         until_limit = 1 << bits if bits else gen.IntegerType.ADDRESS_MAX_EXCL
@@ -181,11 +180,21 @@ def emit_ffi(outf, idl, sysv):
                     out('x.0')
         return f
 
-    def emit_pointer(name, ty, sysv_ty):
-        newtype(name, f'NonNull<{ty.deref_type}>')
+    def emit_null(name, ty, sysv_ty):
+        x = idl.types[name].type
+        newtype(name, x)
         with Impl(name):
             with Fn('is_valid', f'self', 'bool', dead_code = True):
-                out('true')
+                out('self.0.0.is_none()')
+        with ImplFor('Default', name):
+            with Fn('default', '', 'Self', vis = ''):
+                out(f'Self({x}(None))')
+
+    def emit_pointer(name, ty, sysv_ty):
+        newtype(name, f'Option<NonNull<{ty.deref_type}>>')
+        with Impl(name):
+            with Fn('is_valid', f'self', 'bool', dead_code = True):
+                out('self.0.is_some()')
 
     def emit_record(name, ty, sysv_ty):
         tr = lambda x: f'r#{x}' if x in RESERVED_KEYWORDS else x
@@ -200,6 +209,12 @@ def emit_ffi(outf, idl, sysv):
             with Fn('is_valid', '&self', 'bool', dead_code = True):
                 out(' && '.join(f'self.{m_name}.is_valid()' for m_name, m_ty in members()))
 
+    def emit_routine(name, ty, sysv_ty):
+        newtype(name, f'Option<unsafe extern "sysv64" fn()>')
+        with Impl(name):
+            with Fn('is_valid', f'self', 'bool', dead_code = True):
+                out('self.0.is_some()')
+
     def emit_sum(name, ty, sysv_ty):
         out(f'#[derive(Clone, Copy)]')
         out(f'#[repr(C)]')
@@ -212,11 +227,12 @@ def emit_ffi(outf, idl, sysv):
                     out(' || '.join(f'self.{v}.is_valid()' for v in ty.variants))
 
     vtbl = {
+        gen.NullType: emit_null,
         gen.RecordType: emit_record,
         gen.SumType: emit_sum,
         gen.UPtrType: emit_integer(False, None),
         gen.SPtrType: emit_integer(True, None),
-        gen.RoutineType: alias(lambda _: 'NonNull<()>'),
+        gen.RoutineType: emit_routine,
     }
     for x in ('Constant', 'Shared', 'Unique'):
         vtbl[gen.__dict__[f'{x}PointerType']] = emit_pointer
@@ -294,6 +310,8 @@ def emit(outf, idl, sysv):
         return name == 'Void' and sysv_ty.memory_size == 0 and sysv_ty.memory_alignment <= 1
     def is_unit(name):
         ty = idl.types[name]
+        if type(ty) is gen.NullType:
+            return True
         if isinstance(ty, gen.IntegerType):
             if ty.start + 1 == ty.until:
                 return True
@@ -384,6 +402,9 @@ def emit(outf, idl, sysv):
             '''
         return f
 
+    def emit_null(name, ty, sysv):
+        pass
+
     def emit_pointer(name, ty, sysv):
         x = f'NonNull<ffi::{ty.deref_type}>'
         emit_documentation(ty)
@@ -392,9 +413,9 @@ def emit(outf, idl, sysv):
         with Impl(name):
             # TODO check for null or nay?
             with Fn('from_ffi', f'x: ffi::{name}', 'Self', macro_public = True):
-                out('Self(x.0)')
+                out('Self(x.0.expect("pointer is null"))')
             with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
-                out(f'ffi::{name}(self.0)')
+                out(f'ffi::{name}(Some(self.0))')
 
     def emit_record(name, ty, sysv_ty):
         if is_void(name):
@@ -432,11 +453,10 @@ def emit(outf, idl, sysv):
         out(f'#[derive(Clone, Debug)]')
         out(f'pub struct {name}(pub unsafe extern "sysv64" fn());')
         with Impl(name):
-            with Fn('from_ffi', 'x: usize', 'Self'):
-                out('assert_ne!(x, 0, "Function pointer is null");')
-                out('Self(unsafe { core::mem::transmute(x) })')
-            with Fn('to_ffi', 'self', 'usize'):
-                out('self.0 as _')
+            with Fn('from_ffi', f'x: ffi::{name}', 'Self'):
+                out('Self(x.0.expect("function pointer is null"))')
+            with Fn('to_ffi', 'self', f'ffi::{name}'):
+                out(f'ffi::{name}(Some(self.0))')
 
     def emit_sum(name, ty, sysv_ty):
         emit_documentation(ty)
@@ -465,6 +485,7 @@ def emit(outf, idl, sysv):
 
     vtbl = {
         gen.IntegerType: emit_integer,
+        gen.NullType: emit_null,
         gen.RecordType: emit_record,
         gen.SumType: emit_sum,
         gen.UPtrType: emit_integer(False, None),
