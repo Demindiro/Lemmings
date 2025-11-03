@@ -1,4 +1,4 @@
-use core::{arch::asm, fmt};
+use core::arch::asm;
 
 macro_rules! sys {
     ($nr:literal ["rsi" $val:expr] ["rcx" $val2:expr]) => {{

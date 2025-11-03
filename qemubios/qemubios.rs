@@ -1122,6 +1122,7 @@ mod boot {
         pub format: ColorFormat,
     }
 
+    #[allow(dead_code)]
     #[derive(Default)]
     #[repr(u16)]
     pub enum ColorFormat {

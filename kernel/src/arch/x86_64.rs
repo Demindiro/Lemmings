@@ -225,7 +225,7 @@ extern "sysv64" fn double_fault() {
 }
 
 #[naked]
-unsafe fn page_fault() {
+unsafe extern "C" fn page_fault() {
     unsafe {
         naked_asm! {
             "pop rdi",
