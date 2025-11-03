@@ -512,6 +512,7 @@ routine parse_input
 	movzx eax, byte ptr [rsi]
 	ifeq al, '"', .Lparse_input.string
 	ifeq al, '\'', .Lparse_input.char
+	ifeq al, '-', .Lparse_input.number_neg
 	sub eax, '0'
 	ifltu al, 10, .Lparse_input.number
 .Lparse_input.word:
@@ -542,6 +543,12 @@ routine parse_input
 	jmp .Lparse_input.loop
 .Lparse_input.char:
 	call parse_char
+	jmp .Lparse_input.num_push
+.Lparse_input.number_neg:
+	inc rsi
+	dec ecx
+	call parse_number
+	neg rax
 	jmp .Lparse_input.num_push
 .Lparse_input.number:
 	call parse_number
