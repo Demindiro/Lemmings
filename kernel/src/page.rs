@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(dead_code)]
 pub use lemmings_x86_64::mmu::PageAttr;
 
 use crate::{KernelEntryToken, sync::SpinLock};
@@ -139,7 +139,7 @@ impl VirtManager {
         Ok(())
     }
 
-    unsafe fn unmap_range<F>(&mut self, range: ops::Range<mmu::Virt<mmu::A12>>, mut f: F)
+    unsafe fn unmap_range<F>(&mut self, range: ops::Range<mmu::Virt<mmu::A12>>, f: F)
     where
         F: FnMut(Range<Phys>),
     {
@@ -211,8 +211,8 @@ pub unsafe fn copy_to_region(base: Virt, data: &[u8]) {
     //
     // TODO: break up large copies into smaller chunks so we don't keep
     // interrupts disabled for excessively long periods
-    critical_section::with(|cs| {
-        disable_write_protection(cs, || unsafe {
+    critical_section::with(|cs| unsafe {
+        disable_write_protection(cs, || {
             base.as_ptr()
                 .copy_from_nonoverlapping(data.as_ptr(), data.len())
         })
@@ -225,9 +225,9 @@ where
     F: FnOnce(),
 {
     use lemmings_x86_64::cr0;
-    let og_cr0 = cr0::update(|x| x & !cr0::WRITE_PROTECT);
+    let og_cr0 = unsafe { cr0::update(|x| x & !cr0::WRITE_PROTECT) };
     (f)();
-    cr0::set(og_cr0);
+    unsafe { cr0::set(og_cr0) };
 }
 
 /// Automatically puts guard pages of minimum 4K around the region.

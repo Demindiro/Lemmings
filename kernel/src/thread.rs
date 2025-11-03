@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(dead_code)]
 //! This kernel supports real-time scheduling with `O(1)` time complexity
 //! and no additional space overhead.
 
@@ -6,7 +6,6 @@ use crate::{
     KernelEntryToken,
     page::{self, PAGE_SIZE, PageAttr},
     sync::SpinLock,
-    time::Monotonic,
 };
 use core::{arch::asm, cell::Cell, fmt, mem, ops, ptr::NonNull};
 use critical_section::CriticalSection;
@@ -73,7 +72,6 @@ impl ThreadManager {
     }
 
     /// Create a new thread and put it at the *end* of the queue.
-    #[allow(unused)]
     pub fn spawn(
         &mut self,
         priority: Priority,
@@ -185,7 +183,7 @@ impl ThreadRef {
     /// - Must not be dereferenced before initialization.
     /// - Must point to the TCB!
     pub unsafe fn wrap_tcb(ptr: NonNull<ThreadControlBlock>) -> Self {
-        unsafe { Self(ptr.cast()) }
+        Self(ptr.cast())
     }
 }
 
@@ -204,7 +202,7 @@ impl Thread {
     }
 
     /// Enter this thread, saving the state of the current thread before entering.
-    fn resume(&self, cs: CriticalSection<'_>) {
+    fn resume(&self, _cs: CriticalSection<'_>) {
         let current = current();
         unsafe {
             set_current(self);
@@ -330,7 +328,7 @@ pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
 }
 
 /// Save thread state, enable interrupts and halt until the thread is resumed.
-fn wait(cs: CriticalSection<'_>) {
+fn wait(_cs: CriticalSection<'_>) {
     let current = current();
     unsafe {
         asm! {

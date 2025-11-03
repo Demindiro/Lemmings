@@ -13,7 +13,7 @@ const RELASZ: u64 = 8;
 const RELAENT: u64 = 9;
 
 pub mod door {
-    use core::{ptr::NonNull, slice};
+    use core::slice;
     use lemmings_idl_loader_elf::*;
 
     door! {
@@ -294,6 +294,7 @@ impl<'a> ElfMapper<'a> {
             for _k in 0..i {
                 todo!("free allocated segments");
             }
+            return Err(err);
         }
         Ok(())
     }
@@ -329,13 +330,12 @@ impl<'a> ElfMapper<'a> {
 
     fn copy_one_segment(&self, ph: ProgramHeader) {
         let ProgramHeader {
-            flags,
             offset,
             vaddr,
             filesz,
             ..
         } = ph;
-        let [va, va_end] = [vaddr, vaddr + filesz].map(|x| unsafe { self.virt_base.byte_add(x) });
+        let va = unsafe { self.virt_base.byte_add(vaddr) };
         let src = &self.file[offset..offset + filesz];
         unsafe {
             page::copy_to_region(va, src);
