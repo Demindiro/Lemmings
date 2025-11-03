@@ -146,9 +146,11 @@ impl RoundRobinQueue {
             return;
         };
         // L <-> cur <-> R ==> L <-> cur <-> thread <-> R
+        let r = cur.right.get();
         thread.left.set(cur);
-        thread.right.set(cur.right.get());
+        thread.right.set(r);
         cur.right.set(thread);
+        r.left.set(thread)
     }
 
     pub fn dequeue_first(&mut self) -> Option<ThreadHandle> {
