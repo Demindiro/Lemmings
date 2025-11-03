@@ -512,6 +512,7 @@ routine parse_input
 	movzx eax, byte ptr [rsi]
 	ifeq al, '"', .Lparse_input.string
 	ifeq al, '\'', .Lparse_input.char
+	ifeq al, '-', .Lparse_input.number_neg
 	sub eax, '0'
 	ifltu al, 10, .Lparse_input.number
 .Lparse_input.word:
@@ -542,6 +543,12 @@ routine parse_input
 	jmp .Lparse_input.loop
 .Lparse_input.char:
 	call parse_char
+	jmp .Lparse_input.num_push
+.Lparse_input.number_neg:
+	inc rsi
+	dec ecx
+	call parse_number
+	neg rax
 	jmp .Lparse_input.num_push
 .Lparse_input.number:
 	call parse_number
@@ -1036,18 +1043,41 @@ dict_begin _
 		call branch_end
 	enddef
 
-	def dup
+	def_as "#dup" num_dup
 		num_peek rax
 		num_push rax
 	enddef
 
-	def dup2
+	def_as "#dup2" num_dup2
 		mov rax, [NUM_STACK_HEAD + 8*1]
 		num_push rax
 	enddef
 
-	def drop
+	def_as "#drop" num_drop
 		num_drop
+	enddef
+
+	def_as "#swap" num_swap
+		mov rax, [NUM_STACK_HEAD + 8*0]
+		mov rcx, [NUM_STACK_HEAD + 8*1]
+		mov [NUM_STACK_HEAD + 8*0], rcx
+		mov [NUM_STACK_HEAD + 8*1], rax
+	enddef
+
+	def_as "@dup" obj_dup
+		obj_peek rax
+		obj_push rax
+	enddef
+
+	def_as "@drop" obj_drop
+		obj_drop
+	enddef
+
+	def_as "@swap" obj_swap
+		mov rax, [OBJ_STACK_HEAD + 8*0]
+		mov rcx, [OBJ_STACK_HEAD + 8*1]
+		mov [OBJ_STACK_HEAD + 8*0], rcx
+		mov [OBJ_STACK_HEAD + 8*1], rax
 	enddef
 
 	def_as "=" int_eq
@@ -1086,6 +1116,18 @@ dict_begin _
 	def_as "#not" int_not
 		not qword ptr [NUM_STACK_HEAD]
 	enddef
+
+	def_as "#sign-ext-8" sign_ext_8
+		num_peek rax
+		movsx rax, al
+		num_replace rax
+	enddef
+
+	def_as "#zero-ext-8" zero_ext_8
+		num_peek rax
+		movzx eax, al
+		num_replace rax
+	enddef
 dict_end _
 
 
@@ -1116,6 +1158,11 @@ dict_begin Sys
 		obj_pop rdi
 		mov esi, [rdi - 8]
 		syscall_panic
+	enddef
+
+	def_as "call:0->0" Sys.call_0_0
+		call [NUM_STACK_HEAD]
+		num_drop
 	enddef
 dict_end Sys
 
@@ -1169,6 +1216,36 @@ dict_begin Sys.Door
 		num_pop rdi
 		call [rbx + rax * 8]
 	enddef
+
+	def_as "call:3->1" call_3_1
+		call call_3_0
+		num_push rax
+	enddef
+
+	def_as "call:3->2" call_3_2
+		call call_3_1
+		num_push rdx
+	enddef
+
+	def_as "call:4->0" call_4_0
+		num_pop rbx
+		num_pop rax
+		num_pop rcx
+		num_pop rdx
+		num_pop rsi
+		num_pop rdi
+		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:4->1" call_4_1
+		call call_4_0
+		num_push rax
+	enddef
+
+	def_as "call:4->2" call_4_2
+		call call_4_1
+		num_push rdx
+	enddef
 dict_end Sys.Door
 
 
@@ -1193,6 +1270,41 @@ dict_end Immediate
 
 
 dict_begin String
+	def_as "!address" String.as_address
+		obj_pop rax
+		num_push rax
+	enddef
+
+	def_as "!reserve" String.reserve
+		num_pop rcx
+		call str_reserve
+		obj_push rdi
+		num_push rdi # the unsafe part
+	enddef
+
+	def_as "!commit" String.commit
+	enddef
+
+	def len
+		obj_pop rax
+		mov eax, [rax - 8]
+		num_push rax
+	enddef
+
+	def concat
+		obj_pop rbx
+		obj_pop rsi
+		mov ecx, [rbx - 8]
+		add ecx, [rsi - 8]
+		call str_reserve
+		obj_push rdi
+		mov ecx, [rsi - 8]
+		rep movsb
+		mov rsi, rbx
+		mov ecx, [rsi - 8]
+		rep movsb
+	enddef
+
 	def natural
 		num_pop rax
 		# write to stack first so we don't

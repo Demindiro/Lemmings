@@ -2,6 +2,9 @@
 set -xe
 
 . ./config.env
+
+export RUSTC_BOOTSTRAP=1
+
 export tmp="/tmp/lemmings.tmp"
 export out="/tmp"
 export databin="$out/data.bin.dir"
@@ -15,7 +18,10 @@ make -C IDL
 (cd qemubios && ./build.sh)
 (cd kernel && ./build.sh)
 (cd interpreter && ./build.sh)
+(cd driver/virtio-net && cargo b --release -Zbuild-std=core)
 
 cp interpreter/example.interpreter "$databin/interpreter.init"
+mkdir -p "$databin/driver"
+cp "$RUST_TARGET/release/lemmings-driver-virtio-net" "$databin/driver/virtio-net"
 
 ./create_archive.py "$out/data.bin" "$databin"

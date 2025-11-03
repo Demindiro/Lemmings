@@ -1,0 +1,8 @@
+[package]
+name = "lemmings-driver-virtio-net"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lemmings-idl-pci = { path = "../../IDL/rust/pci" }
+lemmings-door = { path = "../../lib/door" }

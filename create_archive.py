@@ -32,6 +32,17 @@ def list_archive_contents(path):
             b = f.read(4)
             assert len(b) == 4
             return int.from_bytes(b, byteorder='little')
+        def dump_file(offset, length, depth):
+            og_pos = f.tell()
+            f.seek(offset)
+            STRIDE = 32
+            for x in range(0, length, STRIDE):
+                print('  ' * depth, end='')
+                x = f.read(min(STRIDE, length - x))
+                for i, b in enumerate(x):
+                    print('', f'{b:02x}', sep='' if i % 4 else ' ', end='')
+                print()
+            f.seek(og_pos)
         def iter_dir(offset, depth):
             og_pos = f.tell()
             f.seek(offset)
@@ -47,6 +58,8 @@ def list_archive_contents(path):
                 print('fd'[typ], f'0x{data_offset:<8x} 0x{data_offset + data_len:<8x}', name)
                 if typ:
                     iter_dir(data_offset, depth + 1)
+                else:
+                    dump_file(data_offset, data_len, depth + 1)
             f.seek(og_pos)
         iter_dir(16, 0)
 
@@ -88,8 +101,8 @@ def create_archive(out, root):
             paths.sort()
             length = 4 + (4 * 2 * len(paths)) + sum(1 + len(x.name) for x in paths)
             f_cur = f.tell()
-            f_end = f.tell() + length
-            f.seek(f_end, os.SEEK_CUR)
+            f_end = f_cur + length
+            f.seek(f_end, os.SEEK_SET)
             table = []
             for x in paths:
                 if x.is_file():
@@ -102,6 +115,7 @@ def create_archive(out, root):
                     log_depth -= 1
                 else:
                     assert 0, f'unsupported type for {x}'
+            f_reset = f.tell()
             f.seek(f_cur, os.SEEK_SET)
             f.write(u32(len(table)))
             f.write(b''.join(u32(x) + u32(y) for x, y in table))
@@ -110,6 +124,7 @@ def create_archive(out, root):
                 return bytes([(len(n) - 1) | (x.is_dir() << 7)]) + n
             f.write(b''.join(name(x) for x in paths))
             assert f.tell() == f_end, f'{f.tell()} ? {f_end}'
+            f.seek(f_reset, os.SEEK_SET)
             return f_cur, length
 
         collect_dir(Path(root))

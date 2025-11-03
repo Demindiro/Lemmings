@@ -66,7 +66,7 @@ pub mod door {
         critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).reserve())
             .map(u32::from)
             .map_or_else(
-                || MaybeVector::NoVector(NoVector::default()),
+                || MaybeVector::NoVector,
                 |x| MaybeVector::Vector(Vector::try_from(u32::from(x)).unwrap()),
             )
     }
@@ -81,8 +81,8 @@ pub mod door {
         let irq = u32::from(irq).try_into().expect("invalid IRQ");
         let vector = u32::from(vector).try_into().expect("invalid vector");
         let edge = match mode {
-            TriggerMode::Level(_) => false,
-            TriggerMode::Edge(_) => true,
+            TriggerMode::Level => false,
+            TriggerMode::Edge => true,
         };
         critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).map(irq, vector, edge));
     }

@@ -40,20 +40,15 @@ pub mod door {
         let cookie = unsafe { cookie.0.as_mut() };
         let Some((c, (n, item))) = from_dir(dir).iter_next(cookie.clone().into()) else {
             return FindResult::ItemNone(ItemNone {
-                r#type: NotFound::default(),
                 stub: Stub::from(0),
             });
         };
-        *cookie = c;
+        cookie.0 = c;
         let n = NonNull::from(n.as_bytes());
         unsafe { name.base.0.copy_from_nonoverlapping(n.cast(), n.len()) }
         match item {
-            super::Item::Dir(dir) => FindResult::ItemDir(ItemDir {
-                r#type: IsDir::default(),
-                dir: to_dir(dir),
-            }),
+            super::Item::Dir(dir) => FindResult::ItemDir(ItemDir { dir: to_dir(dir) }),
             super::Item::File(file) => FindResult::ItemFile(ItemFile {
-                r#type: IsFile::default(),
                 file: to_file(file),
             }),
         }
@@ -67,15 +62,10 @@ pub mod door {
         //let name = unsafe { name.as_str() };
         match from_dir(dir).get(name) {
             None => FindResult::ItemNone(ItemNone {
-                r#type: NotFound::default(),
                 stub: Stub::from(0),
             }),
-            Some(super::Item::Dir(dir)) => FindResult::ItemDir(ItemDir {
-                r#type: IsDir::default(),
-                dir: to_dir(dir),
-            }),
+            Some(super::Item::Dir(dir)) => FindResult::ItemDir(ItemDir { dir: to_dir(dir) }),
             Some(super::Item::File(file)) => FindResult::ItemFile(ItemFile {
-                r#type: IsFile::default(),
                 file: to_file(file),
             }),
         }
