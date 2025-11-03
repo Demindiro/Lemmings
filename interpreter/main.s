@@ -1043,18 +1043,41 @@ dict_begin _
 		call branch_end
 	enddef
 
-	def dup
+	def_as "#dup" num_dup
 		num_peek rax
 		num_push rax
 	enddef
 
-	def dup2
+	def_as "#dup2" num_dup2
 		mov rax, [NUM_STACK_HEAD + 8*1]
 		num_push rax
 	enddef
 
-	def drop
+	def_as "#drop" num_drop
 		num_drop
+	enddef
+
+	def_as "#swap" num_swap
+		mov rax, [NUM_STACK_HEAD + 8*0]
+		mov rcx, [NUM_STACK_HEAD + 8*1]
+		mov [NUM_STACK_HEAD + 8*0], rcx
+		mov [NUM_STACK_HEAD + 8*1], rax
+	enddef
+
+	def_as "@dup" obj_dup
+		obj_peek rax
+		obj_push rax
+	enddef
+
+	def_as "@drop" obj_drop
+		obj_drop
+	enddef
+
+	def_as "@swap" obj_swap
+		mov rax, [OBJ_STACK_HEAD + 8*0]
+		mov rcx, [OBJ_STACK_HEAD + 8*1]
+		mov [OBJ_STACK_HEAD + 8*0], rcx
+		mov [OBJ_STACK_HEAD + 8*1], rax
 	enddef
 
 	def_as "=" int_eq
