@@ -212,7 +212,7 @@ pub fn door_list(api: Option<ApiId>, cookie: Cookie) -> Option<(Door<'static, 's
     let c = door.as_mut_ptr() as u64;
     let d = cookie.0;
     let [x, y] = unsafe { ffi::syscall_4_2::<{ sys::DOOR_LIST }>(a, b, c, d) };
-    let table = NonNull::new(y as *mut u8)?;
+    let table = NonNull::new(x as *mut u8)?;
     let table = Table {
         base: table,
         _marker: core::marker::PhantomData,
@@ -224,7 +224,7 @@ pub fn door_list(api: Option<ApiId>, cookie: Cookie) -> Option<(Door<'static, 's
     } = unsafe { door.assume_init() };
     let name = unsafe { core::slice::from_raw_parts(name_ptr.as_ptr(), name_len) };
     let name = unsafe { core::str::from_utf8_unchecked(name) };
-    Some((Door { api, table, name }, Cookie(x)))
+    Some((Door { api, table, name }, Cookie(y)))
 }
 
 /// # Safety
