@@ -93,6 +93,7 @@ pub fn list(api: Option<ApiId>, cookie: Cookie) -> Option<(Cookie, Interface<'st
 ///
 /// The implementation must conform to the API.
 pub unsafe fn register(api: ApiId, name: &str, table: Table) {
+    log!("registering door {api:032x} @ {:?} {name:?}", table.0);
     let name = alloc_name(name);
     unsafe {
         API_IDS[COUNT] = Some(api);
