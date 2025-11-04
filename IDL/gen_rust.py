@@ -418,6 +418,9 @@ def emit(outf, idl, sysv):
                 out('Self(x.0.expect("pointer is null"))')
             with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
                 out(f'ffi::{name}(Some(self.0))')
+        with ImplFor(f'From<{x}>', name):
+            with Fn('from', f'x: {x}', 'Self'):
+                out(f'Self(x)')
 
     def emit_record(name, ty, sysv_ty):
         if is_void(name):
