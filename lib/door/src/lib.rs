@@ -4,6 +4,7 @@
 use core::ptr::NonNull;
 use core::{
     fmt::{self, Write},
+    marker::PhantomData,
     mem::MaybeUninit,
     num::NonZero,
 };
@@ -133,23 +134,20 @@ mod sys {
 #[derive(Clone, Debug)]
 pub struct HallwayIsFull;
 
-#[derive(Clone, Copy, Debug)]
-pub struct Table<'a> {
-    base: NonNull<u8>,
-    _marker: core::marker::PhantomData<&'a ()>,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ApiId(pub NonZero<u128>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Cookie(pub u64);
 
-#[derive(Clone, Copy, Debug)]
-pub struct Door<'table, 'name> {
-    pub api: ApiId,
-    pub table: Table<'table>,
-    pub name: &'name str,
+pub struct UntypedTable;
+
+#[derive(Clone, Copy)]
+pub struct Door<'table, 'name, T = UntypedTable> {
+    api: ApiId,
+    table: NonNull<T>,
+    name: &'name str,
+    _marker: PhantomData<&'table ()>,
 }
 
 struct Panic(*const u8);
@@ -159,6 +157,46 @@ struct InterfaceInfo {
     api: ApiId,
     name_ptr: NonNull<u8>,
     name_len: usize,
+}
+
+impl<T> Door<'_, '_, T> {
+    pub fn api_id(&self) -> ApiId {
+        self.api
+    }
+}
+
+impl<'table, 'name> Door<'table, 'name, UntypedTable> {
+    fn cast<T>(self) -> Option<Door<'table, 'name, T>>
+    where
+        T: lemmings_idl::Api,
+    {
+        (self.api_id().0 == T::ID).then(|| unsafe { self.cast_unchecked::<T>() })
+    }
+
+    unsafe fn cast_unchecked<T>(self) -> Door<'table, 'name, T>
+    where
+        T: lemmings_idl::Api,
+    {
+        let Self {
+            api,
+            table,
+            name,
+            _marker,
+        } = self;
+        let table = table.cast::<T>();
+        Door {
+            api,
+            table,
+            name,
+            _marker,
+        }
+    }
+}
+
+impl<'table, 'name, T> Door<'table, 'name, T> {
+    pub fn get(&self) -> &'table T {
+        unsafe { self.table.as_ref() }
+    }
 }
 
 impl Panic {
@@ -181,6 +219,16 @@ impl fmt::Write for Panic {
 impl fmt::Debug for ApiId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:032x}", self.0)
+    }
+}
+
+impl<T> fmt::Debug for Door<'_, '_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(stringify!(Door))
+            .field("api", &self.api)
+            .field("table", &self.table)
+            .field("name", &self.name)
+            .finish()
     }
 }
 
@@ -218,11 +266,7 @@ pub fn door_list(api: Option<ApiId>, cookie: Cookie) -> Option<(Door<'static, 's
     let c = cookie.0;
     let d = door.as_mut_ptr() as u64;
     let [x, y] = unsafe { ffi::syscall_4_2::<{ sys::DOOR_LIST }>(a, b, c, d) };
-    let table = NonNull::new(x as *mut u8)?;
-    let table = Table {
-        base: table,
-        _marker: core::marker::PhantomData,
-    };
+    let table = NonNull::new(x as *mut UntypedTable)?;
     let InterfaceInfo {
         api,
         name_ptr,
@@ -230,18 +274,37 @@ pub fn door_list(api: Option<ApiId>, cookie: Cookie) -> Option<(Door<'static, 's
     } = unsafe { door.assume_init() };
     let name = unsafe { core::slice::from_raw_parts(name_ptr.as_ptr(), name_len) };
     let name = unsafe { core::str::from_utf8_unchecked(name) };
-    Some((Door { api, table, name }, Cookie(y)))
+    let _marker = PhantomData;
+    Some((
+        Door {
+            api,
+            table,
+            name,
+            _marker,
+        },
+        Cookie(y),
+    ))
+}
+
+#[inline(always)]
+pub fn door_find<T>(cookie: Cookie) -> Option<(Door<'static, 'static, T>, Cookie)>
+where
+    T: lemmings_idl::Api,
+{
+    door_list(Some(ApiId(T::ID)), cookie).map(|(x, y)| unsafe { (x.cast_unchecked(), y) })
 }
 
 /// # Safety
 ///
 /// `table` must be valid.
 #[inline(always)]
-pub unsafe fn door_register(door: Door<'static, '_>) -> Result<(), HallwayIsFull> {
-    let Door { api, name, table } = door;
+pub unsafe fn door_register<T>(door: Door<'static, '_, T>) -> Result<(), HallwayIsFull> {
+    let Door {
+        api, name, table, ..
+    } = door;
     let [a, b] = ffi::api_to_args(Some(api));
     let [c, d] = [name.as_ptr() as _, name.len() as _];
-    let e = table.base.as_ptr() as u64;
+    let e = table.as_ptr() as u64;
     let x = unsafe { ffi::syscall_5_1::<{ sys::DOOR_REGISTER }>(a, b, c, d, e) };
     (x == 0).then_some(()).ok_or(HallwayIsFull)
 }

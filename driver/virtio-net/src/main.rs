@@ -8,8 +8,7 @@ use lemmings_door::{ApiId, Cookie};
 use lemmings_idl_pci::Pci;
 
 fn main() {
-    let door =
-        lemmings_door::door_list(Some(ApiId(Pci::ID)), Cookie(0)).expect("no PCI door found");
+    let door = lemmings_door::door_find::<Pci>(Cookie(0)).expect("no PCI door found");
     todo!("{door:?}");
 }
 

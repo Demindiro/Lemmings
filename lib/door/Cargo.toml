@@ -4,4 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+lemmings-idl = { path = "../../IDL/rust/_" }
 lemmings-x86_64 = { path = "../x86_64" }

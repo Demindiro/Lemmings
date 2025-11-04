@@ -127,11 +127,11 @@ def emit_ffi(outf, idl, sysv):
             outf_depth -= 1
             out(f'}}{self.suffix}')
     class Impl(Scope):
-        def __init__(self, name):
-            super().__init__(f'impl {name}')
+        def __init__(self, name, *, unsafe = False):
+            super().__init__(f'{"unsafe " if unsafe else ""}impl {name}')
     class ImplFor(Impl):
-        def __init__(self, trait, name):
-            super().__init__(f'{trait} for {name}')
+        def __init__(self, trait, name, *, unsafe = False):
+            super().__init__(f'{trait} for {name}', unsafe = unsafe)
     class Fn(Scope):
         def __init__(self, name, args, ret, *, vis = 'pub(crate) ', macro_public = False, dead_code = False):
             ret = ret and f' -> {ret}'
@@ -283,11 +283,11 @@ def emit(outf, idl, sysv):
             outf_depth -= 1
             out(f'}}{self.suffix}')
     class Impl(Scope):
-        def __init__(self, name):
-            super().__init__(f'impl {name}')
+        def __init__(self, name, *, unsafe = False):
+            super().__init__(f'{"unsafe " if unsafe else ""}impl {name}')
     class ImplFor(Impl):
-        def __init__(self, trait, name):
-            super().__init__(f'{trait} for {name}')
+        def __init__(self, trait, name, *, unsafe = False):
+            super().__init__(f'{trait} for {name}', unsafe = unsafe)
     class Fn(Scope):
         def __init__(self, name, args, ret, *, public = False, macro_public = False, dead_code = False):
             ret = ret and f' -> {ret}'
@@ -507,9 +507,10 @@ def emit(outf, idl, sysv):
         vtbl[type(ty)](name, ty, sysv[name])
         out('')
 
+    with ImplFor('lemmings_idl::Api', idl.name, unsafe = True):
+        out(f'const ID: core::num::NonZero<u128> = core::num::NonZero::new({idl.api_id:#x}).unwrap();')
+
     with Impl(idl.name):
-        out(f'pub const ID: core::num::NonZero<u128> = core::num::NonZero::new({idl.api_id:#x}).unwrap();')
-        out('')
         for name, routine in idl.routines.items():
             emit_documentation(routine)
             x = '' if sysv[routine.input].memory_size == 0 else 'x'
