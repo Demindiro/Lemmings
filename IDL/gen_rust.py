@@ -250,6 +250,8 @@ def emit_ffi(outf, idl, sysv):
         for name, ty in idl.types.items():
             sysv_ty = sysv[name]
             if sysv_ty.memory_size == 0:
+                # do emit for pointers and stuff
+                out(f'pub struct {name};')
                 continue
             vtbl[type(ty)](name, ty, sysv_ty)
             out('')
