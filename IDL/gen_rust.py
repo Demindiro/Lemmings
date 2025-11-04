@@ -523,7 +523,7 @@ def emit(outf, idl, sysv):
                     out(f'unsafe {{ (self.{name})({args}) }};')
                     if not is_void(routine.output):
                         out(f'{routine.output}')
-        del name, routine
+        del name, routine, x
 
     out('')
     out('#[macro_export]')
@@ -542,6 +542,7 @@ def emit(outf, idl, sysv):
                         if not is_void(routine.output):
                             fn = f'{fn}{ret}'
                         with Scope(fn):
+                            x = 'x'
                             if is_void(routine.input):
                                 x = ''
                             elif sysv[routine.input].memory_size > 0:
@@ -549,12 +550,12 @@ def emit(outf, idl, sysv):
                             else:
                                 out(f'let x = {routine.input};')
                             if is_void(routine.output):
-                                out(f'$impl_{name}(x)')
+                                out(f'$impl_{name}({x})')
                             elif sysv[routine.output].memory_size > 0:
                                 out(f'let x: {routine.output} = $impl_{name}({x});')
                                 out(f'x.to_ffi().into()')
                             else:
-                                out(f'let _: {routine.output} = $impl_{name}(x);')
+                                out(f'let _: {routine.output} = $impl_{name}({x});')
                         out(f'ffi')
         del name, routine
 
