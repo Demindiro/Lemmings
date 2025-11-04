@@ -34,10 +34,15 @@ dependencies = [
  "lemmings-idl-archive",
  "lemmings-idl-interrupt",
  "lemmings-idl-loader-elf",
+ "lemmings-idl-pci",
  "lemmings-qemubios",
  "lemmings-tty",
  "lemmings-x86_64",
 ]
+
+[[package]]
+name = "lemmings-endian"
+version = "0.1.0"
 
 [[package]]
 name = "lemmings-idl"
@@ -65,6 +70,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lemmings-idl-pci"
+version = "0.1.0"
+dependencies = [
+ "lemmings-idl",
+]
+
+[[package]]
 name = "lemmings-qemubios"
 version = "0.1.0"
 
@@ -74,6 +86,10 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
 ]
+
+[[package]]
+name = "lemmings-volatile"
+version = "0.1.0"
 
 [[package]]
 name = "lemmings-x86_64"

@@ -17,6 +17,7 @@ mod elf;
 mod ffi;
 mod framebuffer;
 mod page;
+mod pci;
 mod sync;
 mod thread;
 mod time;
@@ -53,6 +54,7 @@ fn main_init() -> elf::Entry {
     archive::door::register();
     //framebuffer::door::register();
     elf::door::register();
+    pci::door::register();
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
     let init = elf::load(init.data()).expect("failed to parse init");

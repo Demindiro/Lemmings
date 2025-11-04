@@ -11,6 +11,7 @@ lemmings-tty = { path = "../lib/tty" }
 lemmings-idl-archive = { path = "../IDL/rust/archive" }
 lemmings-idl-interrupt = { path = "../IDL/rust/interrupt" }
 lemmings-idl-loader-elf = { path = "../IDL/rust/loader-elf" }
+lemmings-idl-pci = { path = "../IDL/rust/pci" }
 
 [profile.release]
 lto = "fat"
