@@ -1,6 +1,8 @@
 #![no_std]
 #![forbid(improper_ctypes_definitions)]
 
+use core::num::NonZero;
+
 macro_rules! tuple {
     ($T:ident $x:ident $X:ident $($Ts:ident $xs:ident $Xs:ident)*) => {
         tuple!(@ $T $x $X $($xs $Xs)*);
@@ -22,6 +24,10 @@ macro_rules! tuple {
         }
     };
     () => {};
+}
+
+pub unsafe trait Api {
+    const ID: NonZero<u128>;
 }
 
 tuple! {
