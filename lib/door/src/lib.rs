@@ -139,7 +139,7 @@ pub struct Table<'a> {
     _marker: core::marker::PhantomData<&'a ()>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ApiId(pub NonZero<u128>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -175,6 +175,12 @@ impl fmt::Write for Panic {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.0 = unsafe { panic_push(self.0, s) };
         Ok(())
+    }
+}
+
+impl fmt::Debug for ApiId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:032x}", self.0)
     }
 }
 
