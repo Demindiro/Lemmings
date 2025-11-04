@@ -209,8 +209,8 @@ unsafe fn panic_end(handle: *const u8) -> ! {
 pub fn door_list(api: Option<ApiId>, cookie: Cookie) -> Option<(Door<'static, 'static>, Cookie)> {
     let mut door = MaybeUninit::<InterfaceInfo>::uninit();
     let [a, b] = ffi::api_to_args(api);
-    let c = door.as_mut_ptr() as u64;
-    let d = cookie.0;
+    let c = cookie.0;
+    let d = door.as_mut_ptr() as u64;
     let [x, y] = unsafe { ffi::syscall_4_2::<{ sys::DOOR_LIST }>(a, b, c, d) };
     let table = NonNull::new(x as *mut u8)?;
     let table = Table {
