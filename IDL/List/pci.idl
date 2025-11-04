@@ -11,6 +11,9 @@
 -- - Help set up interrupts (abstracting out platform-specific details)
 -- - Resize/remap BARs
 door Pci {
+	-- Get the base address of the PCI configuration region,
+	-- as well as segment group and bus start/end.
+	configuration = Void -> Configuration
 
 	-- Acquire exclusive access to a device.
 	acquire_dev = Bdf -> AcquireResult
@@ -30,18 +33,32 @@ door Pci {
 	-- Allocate 32-bit MMIO space.
 	--
 	-- This space can be used for mapping BARs.
-	allocate_mmio32 = AllocateMmio32 -> Addr32
+	allocate_mmio32 = AllocateMmio32 -> MaybeAddr32
 
 	-- Allocate 64-bit MMIO space.
 	--
 	-- This space can be used for mapping BARs.
-	allocate_mmio64 = AllocateMmio64 -> Addr64
+	allocate_mmio64 = AllocateMmio64 -> MaybeAddr64
 
 	-- Free MMIO space.
 	release_mmio = Addr64 -> Void
 }
 
 record Void {
+}
+
+record Configuration {
+	base = ConfigurationBase
+	segment_group = SegmentGroup
+	bus_start = BusNumber
+	bus_end = BusNumber
+}
+
+pointer ConfigurationBase = shared PciFunction
+u16 SegmentGroup = 0 to 0xffff
+u8 BusNumber = 0 to 0xff
+
+record PciFunction {
 }
 
 u16 Bdf = 0 to 0xffff
@@ -71,5 +88,9 @@ u32 Vector = 0 until 0xffff_ffff
 
 u8 AllocateMmio32 = 4 to 31
 u8 AllocateMmio64 = 4 to 63
-u32 Addr32 = 0 until 0xffff_ffff
-u64 Addr64 = 0 until 0xffff_ffff_ffff_ffff
+u32 Addr32 = 1 until 0xffff_ffff
+u64 Addr64 = 1 until 0xffff_ffff_ffff_ffff
+u32 NoAddr32 = 0
+u64 NoAddr64 = 0
+sum MaybeAddr32 = NoAddr32 | Addr32
+sum MaybeAddr64 = NoAddr64 | Addr64
