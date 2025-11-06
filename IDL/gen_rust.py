@@ -353,6 +353,7 @@ def emit(outf, idl, sysv):
         return 'x'
 
     emit_documentation(idl)
+    out(f'#[derive(Debug)]')
     out(f'#[repr(C)]')
     with Scope(f'pub struct {idl.name.replace("_", "")}'):
         for name, routine in idl.routines.items():
