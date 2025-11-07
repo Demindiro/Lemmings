@@ -1,3 +1,8 @@
+use crate::{KernelEntryToken, page};
+use core::{mem::MaybeUninit, ptr::NonNull};
+
+static mut BASE: MaybeUninit<NonNull<[u8; 4096]>> = MaybeUninit::uninit();
+
 pub mod door {
     use lemmings_idl_pci::*;
 
@@ -15,7 +20,14 @@ pub mod door {
     }
 
     fn configuration() -> Configuration {
-        todo!()
+        let base = unsafe { super::BASE.assume_init() };
+        Configuration {
+            base: base.cast::<ffi::PciFunction>().into(),
+            // TODO don't hardcode!
+            segment_group: 0.into(),
+            bus_start: 0.into(),
+            bus_end: 255.into(),
+        }
     }
 
     fn acquire_dev(x: Bdf) -> AcquireResult {
@@ -49,4 +61,15 @@ pub mod door {
     fn release_mmio(x: Addr64) {
         todo!()
     }
+}
+
+pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+    let virt = page::phys_to_virt(entry.pcie.base).cast();
+    log!(
+        "PCIe configuration region at {:?} ({:?})",
+        entry.pcie.base,
+        virt
+    );
+    unsafe { BASE = MaybeUninit::new(virt) };
+    token
 }

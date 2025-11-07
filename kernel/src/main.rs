@@ -80,6 +80,7 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     let token = page::init(entry, token);
     let token = archive::init(entry, token);
     let token = sys::init(entry, token);
+    let token = pci::init(entry, token);
     thread::init(main, token)
 }
 
