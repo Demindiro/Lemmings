@@ -28,7 +28,9 @@ macro_rules! set_volatile {
 pub mod capability;
 pub mod msix;
 
-use core::{cell::Cell, convert::TryInto, fmt, marker::PhantomData, num::NonZeroU32, ptr::NonNull};
+use core::{
+    cell::Cell, convert::TryInto, fmt, marker::PhantomData, num::NonZeroU32, ops, ptr::NonNull,
+};
 use lemmings_endian::{u16le, u32le};
 use lemmings_volatile::VolatileCell;
 
@@ -417,6 +419,22 @@ impl Header1 {
     /// Returns `None` if the BAR is invalid.
     pub fn full_base_address(&self, index: usize) -> Option<ParsedBaseAddress> {
         BaseAddress::full_base_address(&self.base_address, index)
+    }
+}
+
+impl ops::Deref for Header0 {
+    type Target = HeaderCommon;
+
+    fn deref(&self) -> &Self::Target {
+        &self.common
+    }
+}
+
+impl ops::Deref for Header1 {
+    type Target = HeaderCommon;
+
+    fn deref(&self) -> &Self::Target {
+        &self.common
     }
 }
 
