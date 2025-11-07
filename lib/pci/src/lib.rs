@@ -581,7 +581,7 @@ impl fmt::Debug for Bdf {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{:02x}:{:02x}:{:01x}",
+            "{:02x}:{:02x}.{:x}",
             self.bus(),
             self.device(),
             self.function()
