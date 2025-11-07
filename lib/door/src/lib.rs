@@ -140,6 +140,11 @@ pub struct ApiId(pub NonZero<u128>);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Cookie(pub u64);
 
+pub struct Log {
+    n: u8,
+    buf: [u8; 127],
+}
+
 pub struct UntypedTable;
 
 #[derive(Clone, Copy)]
@@ -199,6 +204,53 @@ impl<'table, 'name, T> Door<'table, 'name, T> {
     }
 }
 
+impl Log {
+    pub fn new() -> Self {
+        Self {
+            n: 0,
+            buf: [0; 127],
+        }
+    }
+
+    fn push(&mut self, c: char) {
+        if c == '\n' {
+            return self.flush();
+        }
+        let n = c.len_utf8() as u8;
+        let buf = self.reserve_mut(n);
+        c.encode_utf8(buf);
+        self.advance(n)
+    }
+
+    fn reserve_mut(&mut self, x: u8) -> &mut [u8] {
+        let x = usize::from(x);
+        if self.buf.len() < usize::from(self.n) + x {
+            self.flush();
+        }
+        let n = usize::from(self.n);
+        &mut self.buf[n..n + x]
+    }
+
+    fn advance(&mut self, x: u8) {
+        self.n += x;
+    }
+
+    fn flush(&mut self) {
+        // SAFETY: we only push chars and never tear any characters.
+        let s = unsafe { core::str::from_utf8_unchecked(&self.buf[..usize::from(self.n)]) };
+        log(s);
+        self.n = 0;
+    }
+}
+
+impl Drop for Log {
+    fn drop(&mut self) {
+        if self.n > 0 {
+            self.flush();
+        }
+    }
+}
+
 impl Panic {
     fn new() -> Self {
         unsafe { Self(panic_begin()) }
@@ -206,6 +258,18 @@ impl Panic {
 
     fn end(self) -> ! {
         unsafe { panic_end(self.0) }
+    }
+}
+
+impl fmt::Write for Log {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        s.chars().for_each(|x| self.push(x));
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        self.push(c);
+        Ok(())
     }
 }
 
