@@ -174,7 +174,7 @@ impl<'a> Queue<'a> {
 
         let notify_offset = config.queue_notify_off.get().into();
 
-        msix.map(|msix| config.queue_msix_vector.set(msix.into()));
+        config.queue_msix_vector.set(msix.unwrap_or(0xffff).into());
 
         let mut q = Queue {
             _config: config,
