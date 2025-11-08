@@ -257,7 +257,7 @@ impl<'a> Device<'a> {
         assert_eq!(
             u32::from(features),
             VIRTIO_F_VERSION_1,
-            "New virtio-net is unsupported"
+            "New virtio-net is required"
         );
         dev.common.driver_feature_select.set(1.into());
         dev.common.driver_feature.set(features);
