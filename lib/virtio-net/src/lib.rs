@@ -4,9 +4,11 @@
 #![forbid(unused_must_use, unsafe_op_in_unsafe_fn, improper_ctypes_definitions)]
 #![feature(alloc_layout_extra)] // stabilized literally 2 weeks ago
 
+pub use lemmings_virtio::{PhysAddr, PhysRegion};
+
 use core::{alloc::Layout, convert::TryInto, fmt, mem, ptr::NonNull};
 use lemmings_endian::{u16le, u32le};
-use lemmings_virtio::{PhysAddr, PhysRegion, pci::CommonConfig, queue};
+use lemmings_virtio::{pci::CommonConfig, queue};
 
 /// Device handles packets with partial checksum. This "checksum offload" is a common feature on
 /// modern network cards.
