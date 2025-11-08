@@ -110,7 +110,7 @@ pub struct Packet {
     pub data: [u8; Self::MAX_ETH_SIZE],
 }
 
-pub struct Mac([u8; 6]);
+pub struct Mac(pub [u8; 6]);
 
 /// PCI MSI-X configuration.
 pub struct Msix {
