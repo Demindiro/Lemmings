@@ -204,7 +204,8 @@ impl<'a> Device<'a> {
 
         let mb = |cap: &Capability| {
             let bar = cap.base_address.get();
-            bar_map[usize::from(bar)].expect("capability uses unmapped BAR")
+            let bar = bar_map[usize::from(bar)].expect("capability uses unmapped BAR");
+            unsafe { bar.byte_add(u32::from(cap.offset.get()) as usize) }
         };
 
         unsafe {
