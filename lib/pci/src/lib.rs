@@ -172,6 +172,11 @@ pub struct Capability {
     next: VolatileCell<u8>,
 }
 
+pub struct CapabilityIter<'a> {
+    next: Option<NonNull<Capability>>,
+    marker: PhantomData<&'a Capability>,
+}
+
 #[derive(Clone, Debug)]
 pub enum InvalidBdf {
     DeviceOutOfRange(u8),
@@ -539,9 +544,22 @@ impl Capability {
     }
 }
 
-pub struct CapabilityIter<'a> {
-    next: Option<NonNull<Capability>>,
-    marker: PhantomData<&'a Capability>,
+impl<'a> Iterator for CapabilityIter<'a> {
+    type Item = &'a Capability;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next.map(|next| unsafe {
+            let cap = next.as_ref();
+            let offset = usize::from(cap.next.get());
+            self.next = if offset != 0 {
+                let next = (next.as_ptr() as usize & !0xff) + offset;
+                NonNull::new(next as *mut Capability)
+            } else {
+                None
+            };
+            cap
+        })
+    }
 }
 
 /// Representation of a Pci MMIO area
