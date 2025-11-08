@@ -104,6 +104,7 @@ pub enum ReceiveError {}
 #[derive(Clone, Debug)]
 pub struct Full;
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct Packet {
     header: PacketHeader,
@@ -136,7 +137,7 @@ struct Config {
     mtu: u16le,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 #[repr(C)]
 struct PacketHeader {
     flags: u8,
