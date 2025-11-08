@@ -339,15 +339,18 @@ impl<'a> Device<'a> {
     }
 
     /// Collect tokens for sent packets.
-    pub fn collect_sent(&mut self, mut f: impl FnMut(TxToken, PhysRegion)) -> usize {
+    pub fn collect_sent<F>(&mut self, mut f: F) -> usize
+    where
+        F: FnMut(TxToken, PhysRegion),
+    {
         self.tx_queue.collect_used(|tk, p| f(TxToken(tk), p))
     }
 
     /// Receive a number of Ethernet packets, if any are available
-    pub unsafe fn receive<'s>(
-        &'s mut self,
-        mut f: impl FnMut(RxToken, PhysRegion),
-    ) -> Result<usize, ReceiveError> {
+    pub fn receive<F>(&mut self, mut f: F) -> Result<usize, ReceiveError>
+    where
+        F: FnMut(RxToken, PhysRegion),
+    {
         Ok(self.rx_queue.collect_used(|tk, p| f(RxToken(tk), p)))
     }
 
