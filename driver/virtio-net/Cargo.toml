@@ -7,3 +7,4 @@ edition = "2024"
 lemmings-idl-pci = { path = "../../IDL/rust/pci" }
 lemmings-door = { path = "../../lib/door" }
 lemmings-pci = { path = "../../lib/pci" }
+lemmings-virtio-net = { path = "../../lib/virtio-net" }
