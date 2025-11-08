@@ -1,0 +1,11 @@
+[package]
+name = "lemmings-virtio-net"
+version = "0.3.0"
+authors = ["David Hoppenbrouwers <lemmings@demindiro.com>"]
+edition = "2024"
+
+[dependencies]
+lemmings-endian = { path = "../endian" }
+lemmings-pci = { path = "../pci" }
+lemmings-virtio = { path = "../virtio" }
+lemmings-volatile = { path = "../volatile" }
