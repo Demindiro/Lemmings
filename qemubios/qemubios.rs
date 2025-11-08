@@ -807,7 +807,8 @@ mod pcie {
         fn new() -> Self {
             Self {
                 mmio32_base: Self::BASE.addr().get() as u32 + Self::SIZE as u32,
-                mmio64_base: 1 << 40,
+                // FIXME properly detect maximum physical address bits
+                mmio64_base: 1 << 39,
             }
         }
 
