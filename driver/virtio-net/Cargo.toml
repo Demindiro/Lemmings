@@ -5,6 +5,11 @@ edition = "2024"
 
 [dependencies]
 lemmings-idl-pci = { path = "../../IDL/rust/pci" }
+lemmings-idl-physical-allocator = { path = "../../IDL/rust/physical-allocator" }
 lemmings-door = { path = "../../lib/door" }
 lemmings-pci = { path = "../../lib/pci" }
 lemmings-virtio-net = { path = "../../lib/virtio-net" }
+smoltcp = { version = "0.12.0", default-features = false, features = ["medium-ethernet", "proto-ipv4", "socket-dhcpv4", "socket-tcp", "socket-udp"] }
+
+[profile.release]
+lto = "fat"
