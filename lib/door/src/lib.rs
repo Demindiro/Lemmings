@@ -429,6 +429,7 @@ unsafe extern "C" fn memset(dst: *mut u8, c: i32, n: usize) -> *mut u8 {
             in("al") c as u8,
             inout("rdi") dst => _,
             inout("rcx") n => _,
+            options(nostack, preserves_flags),
         }
     }
     dst
@@ -442,6 +443,7 @@ unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
             inout("rdi") dst => _,
             inout("rsi") src => _,
             inout("rcx") n => _,
+            options(nostack, preserves_flags),
         }
     }
     dst
@@ -458,6 +460,7 @@ unsafe extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 
                 inout("rdi") dst.add(n).sub(1) => _,
                 inout("rsi") src.add(n).sub(1) => _,
                 inout("rcx") n => _,
+                options(nostack, preserves_flags),
             }
         }
     } else {
@@ -467,6 +470,7 @@ unsafe extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 
                 inout("rdi") dst => _,
                 inout("rsi") src => _,
                 inout("rcx") n => _,
+                options(nostack, preserves_flags),
             }
         }
     }
