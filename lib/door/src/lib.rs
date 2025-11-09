@@ -448,6 +448,32 @@ unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
+unsafe extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    if src.addr() < dst.addr() {
+        unsafe {
+            core::arch::asm! {
+                "std",
+                "rep movsb",
+                "cld",
+                inout("rdi") dst.add(n).sub(1) => _,
+                inout("rsi") src.add(n).sub(1) => _,
+                inout("rcx") n => _,
+            }
+        }
+    } else {
+        unsafe {
+            core::arch::asm! {
+                "rep movsb",
+                inout("rdi") dst => _,
+                inout("rsi") src => _,
+                inout("rcx") n => _,
+            }
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
 unsafe extern "C" fn memcmp(mut x: *const u8, mut y: *const u8, n: usize) -> i32 {
     // rep cmpsb is slow, so do a manual loop
     unsafe {
