@@ -13,7 +13,7 @@ const RELASZ: u64 = 8;
 const RELAENT: u64 = 9;
 
 pub mod door {
-    use core::{ptr::NonNull, slice};
+    use core::slice;
     use lemmings_idl_loader_elf::*;
 
     door! {
@@ -37,11 +37,38 @@ pub mod door {
             )
         };
         match super::load(elf) {
-            Ok(entry) => LoadResult::LoadOk(LoadOk {
+            Ok(entry) => LoadOk {
                 entry: unsafe { core::mem::transmute(entry) },
                 reason_len: 0.into(),
-            }),
-            Err(e) => todo!("fail {e:?}"),
+            }
+            .into(),
+            Err(err) => {
+                use super::LoadError as E;
+                // TODO write reason string.
+                let reason_len = 0;
+                let _ = reason;
+                LoadFail {
+                    reason: match err {
+                        E::Not64Bit
+                        | E::NotLittleEndian
+                        | E::NotRelocatable
+                        | E::UnsupportedArchitecture
+                        | E::UnsupportedVersion
+                        | E::UnsupportedSegmentFlags => Reason::Unsupported,
+                        E::BadMagic
+                        | E::EntryOutOfBounds
+                        | E::ProgramHeadersTruncated
+                        | E::SegmentNotAligned
+                        | E::TruncatedHeader
+                        | E::UnexpectedProgramHeaderSize
+                        | E::VirtualSizeZero => Reason::Malformed,
+                        E::OutOfMemory => Reason::OutOfMemory,
+                        E::OutOfVirtSpace => Reason::OutOfVirtualSpace,
+                    },
+                    reason_len: reason_len.into(),
+                }
+                .into()
+            }
         }
     }
 }
@@ -269,6 +296,7 @@ impl<'a> ElfMapper<'a> {
             for _k in 0..i {
                 todo!("free allocated segments");
             }
+            return Err(err);
         }
         Ok(())
     }
@@ -304,13 +332,12 @@ impl<'a> ElfMapper<'a> {
 
     fn copy_one_segment(&self, ph: ProgramHeader) {
         let ProgramHeader {
-            flags,
             offset,
             vaddr,
             filesz,
             ..
         } = ph;
-        let [va, va_end] = [vaddr, vaddr + filesz].map(|x| unsafe { self.virt_base.byte_add(x) });
+        let va = unsafe { self.virt_base.byte_add(vaddr) };
         let src = &self.file[offset..offset + filesz];
         unsafe {
             page::copy_to_region(va, src);

@@ -72,9 +72,9 @@ pub struct Gdt<'a> {
 impl<'a> Gdt<'a> {
     pub const KERNEL_CS: u16 = 8 * 1 | 0;
     pub const KERNEL_SS: u16 = 8 * 2 | 0;
-    pub const USER_CS: u16 = 8 * 4 | 3;
     pub const USER_SS: u16 = 8 * 3 | 3;
-    pub const TSS: u16 = 5 * 8 | 3;
+    pub const USER_CS: u16 = 8 * 4 | 3;
+    pub const TSS: u16 = 8 * 5 | 3;
     pub const SIZE: u16 = (6 + 1) * 8;
 
     /// # Note

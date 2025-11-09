@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::{alloc::Layout, cell::Cell, fmt, ops, ptr::NonNull};
+use core::{fmt, ops, ptr::NonNull};
 
 const CHAR_DATA: (u32, u16, u16, &[u8]) = {
     let &[a, b, c, d, e, f, g, h, ref data @ ..] = include_bytes!("../spleen-6x12.bin");

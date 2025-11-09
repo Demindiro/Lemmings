@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![deny(improper_ctypes_definitions)]
+#![forbid(undefined_naked_function_abi, unsafe_op_in_unsafe_fn, unused_must_use)]
 #![feature(slice_as_chunks)] // stabilized in 1.88, but Guix is on 1.85 as of writing
 #![feature(naked_functions)] // stabilized in 1.88
 
@@ -16,6 +17,7 @@ mod elf;
 mod ffi;
 mod framebuffer;
 mod page;
+mod pci;
 mod sync;
 mod thread;
 mod time;
@@ -52,6 +54,8 @@ fn main_init() -> elf::Entry {
     archive::door::register();
     //framebuffer::door::register();
     elf::door::register();
+    pci::door::register();
+    page::door::register();
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
     let init = elf::load(init.data()).expect("failed to parse init");
@@ -77,6 +81,7 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     let token = page::init(entry, token);
     let token = archive::init(entry, token);
     let token = sys::init(entry, token);
+    let token = pci::init(entry, token);
     thread::init(main, token)
 }
 

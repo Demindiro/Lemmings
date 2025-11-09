@@ -4,6 +4,7 @@ use core::{num::NonZero, ptr::NonNull};
 macro_rules! door {
     ([$idl:ident $table:ident $name:literal] $($fn:ident)*) => {
         pub fn register() {
+            use lemmings_idl::Api;
             type T = $idl::$table;
             static T: T = $idl::imp! {
                 [$table]
@@ -93,6 +94,7 @@ pub fn list(api: Option<ApiId>, cookie: Cookie) -> Option<(Cookie, Interface<'st
 ///
 /// The implementation must conform to the API.
 pub unsafe fn register(api: ApiId, name: &str, table: Table) {
+    log!("registering door {api:032x} @ {:?} {name:?}", table.0);
     let name = alloc_name(name);
     unsafe {
         API_IDS[COUNT] = Some(api);

@@ -127,7 +127,13 @@ mod alloc {
             REGIONS[0] = boot::MemoryRegion {
                 start: boot::Phys(0x4000),
                 end: boot::Phys(0xa0000),
-            }
+            };
+            // FIXME we should detect available memory properly
+            REGIONS[1] = boot::MemoryRegion {
+                start: boot::Phys(0x100_000),
+                end: boot::Phys(0x200_000),
+                //end: boot::Phys(0xf00_000),
+            };
         }
     }
 
@@ -807,7 +813,8 @@ mod pcie {
         fn new() -> Self {
             Self {
                 mmio32_base: Self::BASE.addr().get() as u32 + Self::SIZE as u32,
-                mmio64_base: 1 << 40,
+                // FIXME properly detect maximum physical address bits
+                mmio64_base: 1 << 39,
             }
         }
 
@@ -1122,6 +1129,7 @@ mod boot {
         pub format: ColorFormat,
     }
 
+    #[allow(dead_code)]
     #[derive(Default)]
     #[repr(u16)]
     pub enum ColorFormat {

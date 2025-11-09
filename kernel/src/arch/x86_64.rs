@@ -12,7 +12,7 @@ use lemmings_x86_64::{
         local::LocalApicHelper,
     },
     gdt::{Gdt, GdtPointer},
-    idt::{self, Idt, IdtPointer},
+    idt::{self, Idt, IdtEntry, IdtPointer, Ist},
     mmu, pic,
     tss::Tss,
 };
@@ -86,6 +86,12 @@ pub mod door {
         };
         critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).map(irq, vector, edge));
     }
+}
+
+pub struct Msi {
+    pub data: u32,
+    pub address: mmu::Phys<mmu::A2>,
+    pub vector: u32,
 }
 
 struct IrqHandlers {
@@ -164,6 +170,28 @@ impl IrqHandlers {
     }
 }
 
+pub fn alloc_msi() -> Option<Msi> {
+    let vector = critical_section::with(|cs| IRQ_HANDLERS.lock(cs).reserve()).map(u32::from)?;
+    Some(Msi {
+        data: vector,
+        address: apic::local::DEVICE_LAPIC_ADDRESS.into(),
+        vector,
+    })
+}
+
+pub fn wait_msi(vector: u32) {
+    let vector = vector.try_into().expect("invalid vector");
+    critical_section::with(|cs| {
+        let h = IRQ_HANDLERS.lock(cs);
+        IrqHandlers::wait(h, vector, cs);
+        let mut h = IRQ_HANDLERS.lock(cs);
+        // TODO should we mask? If we do, we'll need done_msi too.
+        // We also need to keep track of IRQ too then... annoyances.
+        //h.mask(irq);
+        h.eoi();
+    });
+}
+
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {
     unsafe { pic::init() };
     let root = unsafe { mmu::current_root::<mmu::L4>() };
@@ -175,6 +203,8 @@ pub fn init(token: KernelEntryToken) -> KernelEntryToken {
 
 #[inline(always)]
 fn init_gdt(root: &mmu::Root<mmu::L4>) {
+    let stack_top = 0x1000 as *const usize;
+    unsafe { (&mut *(&raw mut TSS)).set_ist(1.try_into().unwrap(), stack_top) };
     #[allow(static_mut_refs)]
     unsafe {
         GDT.set_tss(&TSS)
@@ -191,7 +221,8 @@ fn init_gdt(root: &mmu::Root<mmu::L4>) {
 fn init_idt(root: &mmu::Root<mmu::L4>) {
     let idt = unsafe { &mut *(&raw mut IDT) };
 
-    idt.set_handler(idt::nr::DOUBLE_FAULT, double_fault as _);
+    let mut ist1 = |f| IdtEntry::new(Gdt::KERNEL_CS, f, Ist::N1);
+    idt.set(idt::nr::DOUBLE_FAULT, ist1(double_fault as _));
     idt.set_handler(idt::nr::PAGE_FAULT, page_fault as _);
     idt.set_handler(VECTOR_TIMER, timer_handler as _);
     for i in VECTOR_STUB_OFFSET..=u8::MAX {
@@ -225,7 +256,7 @@ extern "sysv64" fn double_fault() {
 }
 
 #[naked]
-unsafe fn page_fault() {
+unsafe extern "C" fn page_fault() {
     unsafe {
         naked_asm! {
             "pop rdi",

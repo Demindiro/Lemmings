@@ -127,11 +127,11 @@ def emit_ffi(outf, idl, sysv):
             outf_depth -= 1
             out(f'}}{self.suffix}')
     class Impl(Scope):
-        def __init__(self, name):
-            super().__init__(f'impl {name}')
+        def __init__(self, name, *, unsafe = False):
+            super().__init__(f'{"unsafe " if unsafe else ""}impl {name}')
     class ImplFor(Impl):
-        def __init__(self, trait, name):
-            super().__init__(f'{trait} for {name}')
+        def __init__(self, trait, name, *, unsafe = False):
+            super().__init__(f'{trait} for {name}', unsafe = unsafe)
     class Fn(Scope):
         def __init__(self, name, args, ret, *, vis = 'pub(crate) ', macro_public = False, dead_code = False):
             ret = ret and f' -> {ret}'
@@ -250,6 +250,8 @@ def emit_ffi(outf, idl, sysv):
         for name, ty in idl.types.items():
             sysv_ty = sysv[name]
             if sysv_ty.memory_size == 0:
+                # do emit for pointers and stuff
+                out(f'pub struct {name};')
                 continue
             vtbl[type(ty)](name, ty, sysv_ty)
             out('')
@@ -281,11 +283,11 @@ def emit(outf, idl, sysv):
             outf_depth -= 1
             out(f'}}{self.suffix}')
     class Impl(Scope):
-        def __init__(self, name):
-            super().__init__(f'impl {name}')
+        def __init__(self, name, *, unsafe = False):
+            super().__init__(f'{"unsafe " if unsafe else ""}impl {name}')
     class ImplFor(Impl):
-        def __init__(self, trait, name):
-            super().__init__(f'{trait} for {name}')
+        def __init__(self, trait, name, *, unsafe = False):
+            super().__init__(f'{trait} for {name}', unsafe = unsafe)
     class Fn(Scope):
         def __init__(self, name, args, ret, *, public = False, macro_public = False, dead_code = False):
             ret = ret and f' -> {ret}'
@@ -351,6 +353,7 @@ def emit(outf, idl, sysv):
         return 'x'
 
     emit_documentation(idl)
+    out(f'#[derive(Debug)]')
     out(f'#[repr(C)]')
     with Scope(f'pub struct {idl.name.replace("_", "")}'):
         for name, routine in idl.routines.items():
@@ -368,6 +371,8 @@ def emit(outf, idl, sysv):
             # Don't bother with unit integers
             # They are only relevant for sum types
             if is_unit(name):
+                # ... but do emit a unit type for convenience with sum types
+                out(f'pub struct {name};')
                 return
             full_range = ty.start == 0 and ty.until == until_limit
             emit_documentation(ty)
@@ -416,6 +421,9 @@ def emit(outf, idl, sysv):
                 out('Self(x.0.expect("pointer is null"))')
             with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
                 out(f'ffi::{name}(Some(self.0))')
+        with ImplFor(f'From<{x}>', name):
+            with Fn('from', f'x: {x}', 'Self'):
+                out(f'Self(x)')
 
     def emit_record(name, ty, sysv_ty):
         if is_void(name):
@@ -482,6 +490,14 @@ def emit(outf, idl, sysv):
                             out(f'Self::{v} => ffi::{name} {{ {v}: ffi::{v}::default() }},')
                         else:
                             out(f'Self::{v}(x) => ffi::{name} {{ {v}: x.to_ffi() }},')
+        for v in ty.variants:
+            with ImplFor(f'From<{v}>', name):
+                if is_unit(v):
+                    with Fn('from', f'_: {v}', 'Self'):
+                        out(f'Self::{v}')
+                else:
+                    with Fn('from', f'x: {v}', 'Self'):
+                        out(f'Self::{v}(x)')
 
     vtbl = {
         gen.IntegerType: emit_integer,
@@ -502,9 +518,10 @@ def emit(outf, idl, sysv):
         vtbl[type(ty)](name, ty, sysv[name])
         out('')
 
+    with ImplFor('lemmings_idl::Api', idl.name, unsafe = True):
+        out(f'const ID: core::num::NonZero<u128> = core::num::NonZero::new({idl.api_id:#x}).unwrap();')
+
     with Impl(idl.name):
-        out(f'pub const ID: core::num::NonZero<u128> = core::num::NonZero::new({idl.api_id:#x}).unwrap();')
-        out('')
         for name, routine in idl.routines.items():
             emit_documentation(routine)
             x = '' if sysv[routine.input].memory_size == 0 else 'x'
@@ -521,7 +538,7 @@ def emit(outf, idl, sysv):
                     out(f'unsafe {{ (self.{name})({args}) }};')
                     if not is_void(routine.output):
                         out(f'{routine.output}')
-        del name, routine
+        del name, routine, x
 
     out('')
     out('#[macro_export]')
@@ -540,6 +557,7 @@ def emit(outf, idl, sysv):
                         if not is_void(routine.output):
                             fn = f'{fn}{ret}'
                         with Scope(fn):
+                            x = 'x'
                             if is_void(routine.input):
                                 x = ''
                             elif sysv[routine.input].memory_size > 0:
@@ -547,12 +565,12 @@ def emit(outf, idl, sysv):
                             else:
                                 out(f'let x = {routine.input};')
                             if is_void(routine.output):
-                                out(f'$impl_{name}(x)')
+                                out(f'$impl_{name}({x})')
                             elif sysv[routine.output].memory_size > 0:
                                 out(f'let x: {routine.output} = $impl_{name}({x});')
                                 out(f'x.to_ffi().into()')
                             else:
-                                out(f'let _: {routine.output} = $impl_{name}(x);')
+                                out(f'let _: {routine.output} = $impl_{name}({x});')
                         out(f'ffi')
         del name, routine
 

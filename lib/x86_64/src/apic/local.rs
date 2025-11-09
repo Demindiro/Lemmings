@@ -1,5 +1,10 @@
 use super::reg::{R, RW, Reg, W};
+use crate::mmu;
 use core::{fmt, num::NonZeroU64, time::Duration};
+
+/// The address of the LAPIC is unaffected by the MSR for external devices,
+/// such as PCI devices with MSI(-X).
+pub const DEVICE_LAPIC_ADDRESS: mmu::Phys<mmu::A12> = mmu::Phys::new(0xfee0_0000).expect("aligned");
 
 const APIC_NMI: u32 = 1 << 4;
 const APIC_DISABLE: u32 = 0x1_0000;

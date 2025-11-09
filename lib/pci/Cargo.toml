@@ -1,0 +1,8 @@
+[package]
+name = "lemmings-pci"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lemmings-endian = { path = "../endian" }
+lemmings-volatile = { path = "../volatile" }

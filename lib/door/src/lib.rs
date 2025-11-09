@@ -4,10 +4,50 @@
 use core::ptr::NonNull;
 use core::{
     fmt::{self, Write},
+    marker::PhantomData,
     mem::MaybeUninit,
     num::NonZero,
 };
-use lemmings_x86_64 as x64;
+
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        let _ = write!(Log::new(), $($arg)*);
+    }};
+}
+
+#[macro_export]
+macro_rules! dbg {
+    // NOTE: We cannot use `concat!` to make a static string as a format argument
+    // of `eprintln!` because `file!` could contain a `{` or
+    // `$val` expression could be a block (`{ .. }`), in which case the `eprintln!`
+    // will be malformed.
+    () => {
+        $crate::log!("[{}:{}:{}]", file!(), line!(), column!())
+    };
+    ($val:expr $(,)?) => {
+        // Use of `match` here is intentional because it affects the lifetimes
+        // of temporaries - https://stackoverflow.com/a/48732525/1063961
+        match $val {
+            tmp => {
+                $crate::log!("[{}:{}:{}] {} = {:#?}",
+                    file!(),
+                    line!(),
+                    column!(),
+                    stringify!($val),
+                    // The `&T: Debug` check happens here (not in the format literal desugaring)
+                    // to avoid format literal related messages and suggestions.
+                    &&tmp as &dyn core::fmt::Debug,
+                );
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($crate::dbg!($val)),+,)
+    };
+}
 
 #[cfg(target_arch = "x86_64")]
 mod ffi {
@@ -134,23 +174,25 @@ mod sys {
 #[derive(Clone, Debug)]
 pub struct HallwayIsFull;
 
-#[derive(Clone, Copy, Debug)]
-pub struct Table<'a> {
-    base: NonNull<u8>,
-    _marker: core::marker::PhantomData<&'a ()>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ApiId(pub NonZero<u128>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Cookie(pub u64);
 
-#[derive(Clone, Copy, Debug)]
-pub struct Door<'table, 'name> {
-    pub api: ApiId,
-    pub table: Table<'table>,
-    pub name: &'name str,
+pub struct Log {
+    n: u8,
+    buf: [u8; 127],
+}
+
+pub struct UntypedTable;
+
+#[derive(Clone, Copy)]
+pub struct Door<'table, 'name, T = UntypedTable> {
+    api: ApiId,
+    table: NonNull<T>,
+    name: &'name str,
+    _marker: PhantomData<&'table ()>,
 }
 
 struct Panic(*const u8);
@@ -160,6 +202,93 @@ struct InterfaceInfo {
     api: ApiId,
     name_ptr: NonNull<u8>,
     name_len: usize,
+}
+
+impl<T> Door<'_, '_, T> {
+    pub fn api_id(&self) -> ApiId {
+        self.api
+    }
+}
+
+impl<'table, 'name> Door<'table, 'name, UntypedTable> {
+    fn cast<T>(self) -> Option<Door<'table, 'name, T>>
+    where
+        T: lemmings_idl::Api,
+    {
+        (self.api_id().0 == T::ID).then(|| unsafe { self.cast_unchecked::<T>() })
+    }
+
+    unsafe fn cast_unchecked<T>(self) -> Door<'table, 'name, T>
+    where
+        T: lemmings_idl::Api,
+    {
+        let Self {
+            api,
+            table,
+            name,
+            _marker,
+        } = self;
+        let table = table.cast::<T>();
+        Door {
+            api,
+            table,
+            name,
+            _marker,
+        }
+    }
+}
+
+impl<'table, 'name, T> Door<'table, 'name, T> {
+    pub fn get(&self) -> &'table T {
+        unsafe { self.table.as_ref() }
+    }
+}
+
+impl Log {
+    pub fn new() -> Self {
+        Self {
+            n: 0,
+            buf: [0; 127],
+        }
+    }
+
+    fn push(&mut self, c: char) {
+        if c == '\n' {
+            return self.flush();
+        }
+        let n = c.len_utf8() as u8;
+        let buf = self.reserve_mut(n);
+        c.encode_utf8(buf);
+        self.advance(n)
+    }
+
+    fn reserve_mut(&mut self, x: u8) -> &mut [u8] {
+        let x = usize::from(x);
+        if self.buf.len() < usize::from(self.n) + x {
+            self.flush();
+        }
+        let n = usize::from(self.n);
+        &mut self.buf[n..n + x]
+    }
+
+    fn advance(&mut self, x: u8) {
+        self.n += x;
+    }
+
+    fn flush(&mut self) {
+        // SAFETY: we only push chars and never tear any characters.
+        let s = unsafe { core::str::from_utf8_unchecked(&self.buf[..usize::from(self.n)]) };
+        log(s);
+        self.n = 0;
+    }
+}
+
+impl Drop for Log {
+    fn drop(&mut self) {
+        if self.n > 0 {
+            self.flush();
+        }
+    }
 }
 
 impl Panic {
@@ -172,10 +301,38 @@ impl Panic {
     }
 }
 
+impl fmt::Write for Log {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        s.chars().for_each(|x| self.push(x));
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        self.push(c);
+        Ok(())
+    }
+}
+
 impl fmt::Write for Panic {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.0 = unsafe { panic_push(self.0, s) };
         Ok(())
+    }
+}
+
+impl fmt::Debug for ApiId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:032x}", self.0)
+    }
+}
+
+impl<T> fmt::Debug for Door<'_, '_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(stringify!(Door))
+            .field("api", &self.api)
+            .field("table", &self.table)
+            .field("name", &self.name)
+            .finish()
     }
 }
 
@@ -210,14 +367,10 @@ unsafe fn panic_end(handle: *const u8) -> ! {
 pub fn door_list(api: Option<ApiId>, cookie: Cookie) -> Option<(Door<'static, 'static>, Cookie)> {
     let mut door = MaybeUninit::<InterfaceInfo>::uninit();
     let [a, b] = ffi::api_to_args(api);
-    let c = door.as_ptr() as u64;
-    let d = cookie.0;
+    let c = cookie.0;
+    let d = door.as_mut_ptr() as u64;
     let [x, y] = unsafe { ffi::syscall_4_2::<{ sys::DOOR_LIST }>(a, b, c, d) };
-    let table = NonNull::new(y as *mut u8)?;
-    let table = Table {
-        base: table,
-        _marker: core::marker::PhantomData,
-    };
+    let table = NonNull::new(x as *mut UntypedTable)?;
     let InterfaceInfo {
         api,
         name_ptr,
@@ -225,18 +378,37 @@ pub fn door_list(api: Option<ApiId>, cookie: Cookie) -> Option<(Door<'static, 's
     } = unsafe { door.assume_init() };
     let name = unsafe { core::slice::from_raw_parts(name_ptr.as_ptr(), name_len) };
     let name = unsafe { core::str::from_utf8_unchecked(name) };
-    Some((Door { api, table, name }, Cookie(x)))
+    let _marker = PhantomData;
+    Some((
+        Door {
+            api,
+            table,
+            name,
+            _marker,
+        },
+        Cookie(y),
+    ))
+}
+
+#[inline(always)]
+pub fn door_find<T>(cookie: Cookie) -> Option<(Door<'static, 'static, T>, Cookie)>
+where
+    T: lemmings_idl::Api,
+{
+    door_list(Some(ApiId(T::ID)), cookie).map(|(x, y)| unsafe { (x.cast_unchecked(), y) })
 }
 
 /// # Safety
 ///
 /// `table` must be valid.
 #[inline(always)]
-pub unsafe fn door_register(door: Door<'static, '_>) -> Result<(), HallwayIsFull> {
-    let Door { api, name, table } = door;
+pub unsafe fn door_register<T>(door: Door<'static, '_, T>) -> Result<(), HallwayIsFull> {
+    let Door {
+        api, name, table, ..
+    } = door;
     let [a, b] = ffi::api_to_args(Some(api));
     let [c, d] = [name.as_ptr() as _, name.len() as _];
-    let e = table.base.as_ptr() as u64;
+    let e = table.as_ptr() as u64;
     let x = unsafe { ffi::syscall_5_1::<{ sys::DOOR_REGISTER }>(a, b, c, d, e) };
     (x == 0).then_some(()).ok_or(HallwayIsFull)
 }
@@ -246,4 +418,76 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
     let mut panic = Panic::new();
     let _ = write!(&mut panic, "{info}");
     panic.end()
+}
+
+// compiler_builtins doesn't build???
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memset(dst: *mut u8, c: i32, n: usize) -> *mut u8 {
+    unsafe {
+        core::arch::asm! {
+            "rep stosb",
+            in("al") c as u8,
+            inout("rdi") dst => _,
+            inout("rcx") n => _,
+            options(nostack, preserves_flags),
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    unsafe {
+        core::arch::asm! {
+            "rep movsb",
+            inout("rdi") dst => _,
+            inout("rsi") src => _,
+            inout("rcx") n => _,
+            options(nostack, preserves_flags),
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    if src.addr() < dst.addr() {
+        unsafe {
+            core::arch::asm! {
+                "std",
+                "rep movsb",
+                "cld",
+                inout("rdi") dst.add(n).sub(1) => _,
+                inout("rsi") src.add(n).sub(1) => _,
+                inout("rcx") n => _,
+                options(nostack, preserves_flags),
+            }
+        }
+    } else {
+        unsafe {
+            core::arch::asm! {
+                "rep movsb",
+                inout("rdi") dst => _,
+                inout("rsi") src => _,
+                inout("rcx") n => _,
+                options(nostack, preserves_flags),
+            }
+        }
+    }
+    dst
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn memcmp(mut x: *const u8, mut y: *const u8, n: usize) -> i32 {
+    // rep cmpsb is slow, so do a manual loop
+    unsafe {
+        for _ in 0..n {
+            if x.read() != y.read() {
+                return i32::from(x.read()) - i32::from(y.read());
+            }
+            x = x.byte_add(1);
+            y = y.byte_add(1);
+        }
+    }
+    0
 }

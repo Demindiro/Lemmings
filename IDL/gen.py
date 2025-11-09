@@ -189,6 +189,7 @@ class DoorBuilder:
             # we will assume the only sensible type of limit is a lower bound,
             # as we can't predetermine the absolute maximum upper bound.
             # we don't expect to run on any 8-bit architectures. The next step up is 16-bit then.
+            # FIXME we fucked up, constants....
             assert ty.until is IntegerType.ADDRESS_MAX_EXCL
             ser.push16(ty.start & 0xffff)
         def ser_int(bits):

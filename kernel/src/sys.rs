@@ -8,7 +8,6 @@ use core::{
     fmt::{self, Write},
     mem::MaybeUninit,
 };
-use critical_section::CriticalSection;
 
 #[macro_export]
 macro_rules! log {
@@ -74,7 +73,7 @@ pub struct Log<'cs> {
     fb: framebuffer::Log<'static, 'cs>,
 }
 
-#[allow(unused)]
+#[allow(dead_code)]
 struct SysFn(*const ());
 
 #[repr(C)]
@@ -86,7 +85,7 @@ struct InterfaceInfo {
 impl Write for Log<'_> {
     #[inline]
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.fb.write_str(s);
+        let _ = self.fb.write_str(s);
         lemmings_qemubios::sys::print(s);
         Ok(())
     }
@@ -100,8 +99,8 @@ unsafe impl Sync for SysFn {}
 unsafe extern "sysv64" fn log(msg: Slice<u8>) {
     let msg = unsafe { msg.as_str() };
     with_log(|mut log| {
-        log.write_str(msg);
-        log.write_str("\n");
+        let _ = log.write_str(msg);
+        let _ = log.write_str("\n");
     })
 }
 
@@ -133,7 +132,7 @@ unsafe extern "sysv64" fn panic_begin() -> *const u8 {
 ///
 /// - `panic_begin` must have been called first.
 /// - `msg` must point to a valid UTF-8 string.
-unsafe extern "sysv64" fn panic_push(handle: *const u8, msg: Slice<u8>) -> *const u8 {
+unsafe extern "sysv64" fn panic_push(_handle: *const u8, msg: Slice<u8>) -> *const u8 {
     let msg = unsafe { msg.as_str() };
     let _ = with_log(|mut log| log.write_str(msg));
     core::ptr::null()
@@ -144,7 +143,7 @@ unsafe extern "sysv64" fn panic_push(handle: *const u8, msg: Slice<u8>) -> *cons
 /// # Safety
 ///
 /// - `panic_begin` must have been called first.
-unsafe extern "sysv64" fn panic_end(handle: *const u8) -> ! {
+unsafe extern "sysv64" fn panic_end(_handle: *const u8) -> ! {
     let _ = with_log(|mut log| log.write_char('\n'));
     todo!("handle panic_end");
 }

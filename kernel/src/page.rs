@@ -1,4 +1,4 @@
-#![allow(unused)]
+#![allow(dead_code)]
 pub use lemmings_x86_64::mmu::PageAttr;
 
 use crate::{KernelEntryToken, sync::SpinLock};
@@ -15,6 +15,62 @@ use lemmings_x86_64::mmu;
 
 static PAGE: SpinLock<PageManager> = SpinLock::new(PageManager::new());
 static VIRT: SpinLock<VirtManager> = SpinLock::new(VirtManager::new());
+
+// TODO should be moved to alloc.rs
+pub mod door {
+    use lemmings_idl_physical_allocator::*;
+
+    door! {
+        [lemmings_idl_physical_allocator Allocator "Physical memory allocator"]
+        identity_base
+        alloc64
+        alloc32
+        free
+    }
+
+    fn identity_base() -> IdentityBase {
+        // fuck
+        todo!("it's fucked Jim");
+    }
+
+    fn alloc64(Alloc64 { len, align }: Alloc64) -> MaybeRegion64 {
+        if u8::from(align) > 12 {
+            return NoRegion64 { len }.into();
+        }
+        usize::try_from((u64::from(len.clone()) + 0xfff) >> 12)
+            .ok()
+            .and_then(core::num::NonZero::new)
+            .and_then(|count| super::alloc_4k_phys(count).ok())
+            .map_or(NoRegion64 { len: len.clone() }.into(), |x| {
+                Region64 {
+                    base: x.0.try_into().unwrap(),
+                    len,
+                }
+                .into()
+            })
+    }
+
+    fn alloc32(Alloc32 { len, align }: Alloc32) -> MaybeRegion32 {
+        if u8::from(align) > 12 {
+            return NoRegion32 { len }.into();
+        }
+        usize::try_from((u32::from(len.clone()) + 0xfff) >> 12)
+            .ok()
+            .and_then(core::num::NonZero::new)
+            .and_then(|count| super::alloc_4k_phys(count).ok())
+            .map_or(NoRegion32 { len: len.clone() }.into(), |x| {
+                Region32 {
+                    base: u32::try_from(x.0).unwrap().try_into().unwrap(),
+                    len,
+                }
+                .into()
+            })
+    }
+
+    fn free(Free { base, len }: Free) {
+        todo!("free");
+    }
+}
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAGE_MASK: usize = PAGE_SIZE - 1;
@@ -47,6 +103,9 @@ pub struct Page;
 struct PageManager {
     /// Just a simple linked list of 4K pages for now.
     head: Option<Virt>,
+    /// Quick hack to make DMA allocation work
+    contiguous_base: Virt,
+    contiguous_num: usize,
 }
 
 struct VirtManager {
@@ -58,13 +117,24 @@ struct PageAllocator;
 
 impl PageManager {
     pub const fn new() -> Self {
-        Self { head: None }
+        Self {
+            head: None,
+            contiguous_base: Virt::dangling(),
+            contiguous_num: 0,
+        }
     }
 
-    pub fn alloc_one(&mut self) -> Result<Virt, OutOfMemory> {
-        let page = self.head.ok_or(OutOfMemory)?;
-        self.head = unsafe { page.cast::<Option<Virt>>().read() };
-        Ok(page)
+    pub fn alloc_4k(&mut self, num_4k: usize) -> Result<Virt, OutOfMemory> {
+        if let Some(page) = self.head.filter(|_| num_4k == 1) {
+            self.head = unsafe { page.cast::<Option<Virt>>().read() };
+            return Ok(page);
+        }
+        if let Some(n) = self.contiguous_num.checked_sub(num_4k) {
+            let page = unsafe { self.contiguous_base.byte_add(n << 12) };
+            self.contiguous_num = n;
+            return Ok(page);
+        }
+        Err(OutOfMemory)
     }
 }
 
@@ -139,7 +209,7 @@ impl VirtManager {
         Ok(())
     }
 
-    unsafe fn unmap_range<F>(&mut self, range: ops::Range<mmu::Virt<mmu::A12>>, mut f: F)
+    unsafe fn unmap_range<F>(&mut self, range: ops::Range<mmu::Virt<mmu::A12>>, f: F)
     where
         F: FnMut(Range<Phys>),
     {
@@ -185,13 +255,17 @@ impl From<ReserveRegionError> for AllocGuardedError {
     }
 }
 
+fn alloc_4k_phys(count: NonZero<usize>) -> Result<Phys, OutOfMemory> {
+    critical_section::with(|cs| PAGE.lock(cs).alloc_4k(count.get()).map(virt_to_phys))
+}
+
 pub fn alloc_one() -> Result<Virt, OutOfMemory> {
-    critical_section::with(|cs| PAGE.lock(cs).alloc_one())
+    critical_section::with(|cs| PAGE.lock(cs).alloc_4k(1))
 }
 
 pub fn alloc_one_guarded(attr: PageAttr) -> Result<Virt, AllocGuardedError> {
     critical_section::with(|cs| {
-        let page = { PAGE.lock(cs).alloc_one()? };
+        let page = { PAGE.lock(cs).alloc_4k(1)? };
         {
             let mut virt = VIRT.lock(cs);
             let addr = virt.reserve_region(PAGE_SIZE.try_into().unwrap())?;
@@ -211,8 +285,8 @@ pub unsafe fn copy_to_region(base: Virt, data: &[u8]) {
     //
     // TODO: break up large copies into smaller chunks so we don't keep
     // interrupts disabled for excessively long periods
-    critical_section::with(|cs| {
-        disable_write_protection(cs, || unsafe {
+    critical_section::with(|cs| unsafe {
+        disable_write_protection(cs, || {
             base.as_ptr()
                 .copy_from_nonoverlapping(data.as_ptr(), data.len())
         })
@@ -225,9 +299,9 @@ where
     F: FnOnce(),
 {
     use lemmings_x86_64::cr0;
-    let og_cr0 = cr0::update(|x| x & !cr0::WRITE_PROTECT);
+    let og_cr0 = unsafe { cr0::update(|x| x & !cr0::WRITE_PROTECT) };
     (f)();
-    cr0::set(og_cr0);
+    unsafe { cr0::set(og_cr0) };
 }
 
 /// Automatically puts guard pages of minimum 4K around the region.
@@ -263,10 +337,19 @@ pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kernel
 fn init_page(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
     let regions = unsafe { region_to_slice::<MemoryRegion>(entry.memory.list) };
     let mut head = None;
+    let mut contiguous_base = Virt::dangling();
+    let mut contiguous_num = 0;
     for r in regions {
         if r.start == r.end {
             continue;
         }
+        if contiguous_num == 0 {
+            log!("contiguous {r:?}");
+            contiguous_base = phys_to_virt(r.start);
+            contiguous_num = (r.end.0 - r.start.0) as usize >> 12;
+            continue;
+        }
+        log!("linked {r:?}");
         let mut a = phys_to_virt(r.start);
         let end = phys_to_virt(r.end);
         assert!(
@@ -285,7 +368,14 @@ fn init_page(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kerne
             a = unsafe { a.byte_add(PAGE_SIZE) };
         }
     }
-    let token = PAGE.set(PageManager { head }, token);
+    let token = PAGE.set(
+        PageManager {
+            head,
+            contiguous_base,
+            contiguous_num,
+        },
+        token,
+    );
     token
 }
 
