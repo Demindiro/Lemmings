@@ -37,16 +37,17 @@ pub mod door {
             )
         };
         match super::load(elf) {
-            Ok(entry) => LoadResult::LoadOk(LoadOk {
+            Ok(entry) => LoadOk {
                 entry: unsafe { core::mem::transmute(entry) },
                 reason_len: 0.into(),
-            }),
+            }
+            .into(),
             Err(err) => {
                 use super::LoadError as E;
                 // TODO write reason string.
                 let reason_len = 0;
                 let _ = reason;
-                LoadResult::LoadFail(LoadFail {
+                LoadFail {
                     reason: match err {
                         E::Not64Bit
                         | E::NotLittleEndian
@@ -65,7 +66,8 @@ pub mod door {
                         E::OutOfVirtSpace => Reason::OutOfVirtualSpace,
                     },
                     reason_len: reason_len.into(),
-                })
+                }
+                .into()
             }
         }
     }

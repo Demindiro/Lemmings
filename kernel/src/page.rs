@@ -35,40 +35,36 @@ pub mod door {
 
     fn alloc64(Alloc64 { len, align }: Alloc64) -> MaybeRegion64 {
         if u8::from(align) > 12 {
-            return MaybeRegion64::NoRegion64(NoRegion64 { len });
+            return NoRegion64 { len }.into();
         }
         usize::try_from((u64::from(len.clone()) + 0xfff) >> 12)
             .ok()
             .and_then(core::num::NonZero::new)
             .and_then(|count| super::alloc_4k_phys(count).ok())
-            .map_or(
-                MaybeRegion64::NoRegion64(NoRegion64 { len: len.clone() }),
-                |x| {
-                    MaybeRegion64::Region64(Region64 {
-                        base: x.0.try_into().unwrap(),
-                        len,
-                    })
-                },
-            )
+            .map_or(NoRegion64 { len: len.clone() }.into(), |x| {
+                Region64 {
+                    base: x.0.try_into().unwrap(),
+                    len,
+                }
+                .into()
+            })
     }
 
     fn alloc32(Alloc32 { len, align }: Alloc32) -> MaybeRegion32 {
         if u8::from(align) > 12 {
-            return MaybeRegion32::NoRegion32(NoRegion32 { len });
+            return NoRegion32 { len }.into();
         }
         usize::try_from((u32::from(len.clone()) + 0xfff) >> 12)
             .ok()
             .and_then(core::num::NonZero::new)
             .and_then(|count| super::alloc_4k_phys(count).ok())
-            .map_or(
-                MaybeRegion32::NoRegion32(NoRegion32 { len: len.clone() }),
-                |x| {
-                    MaybeRegion32::Region32(Region32 {
-                        base: u32::try_from(x.0).unwrap().try_into().unwrap(),
-                        len,
-                    })
-                },
-            )
+            .map_or(NoRegion32 { len: len.clone() }.into(), |x| {
+                Region32 {
+                    base: u32::try_from(x.0).unwrap().try_into().unwrap(),
+                    len,
+                }
+                .into()
+            })
     }
 
     fn free(Free { base, len }: Free) {

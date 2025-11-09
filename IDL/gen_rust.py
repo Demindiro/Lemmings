@@ -371,6 +371,8 @@ def emit(outf, idl, sysv):
             # Don't bother with unit integers
             # They are only relevant for sum types
             if is_unit(name):
+                # ... but do emit a unit type for convenience with sum types
+                out(f'pub struct {name};')
                 return
             full_range = ty.start == 0 and ty.until == until_limit
             emit_documentation(ty)
@@ -488,6 +490,14 @@ def emit(outf, idl, sysv):
                             out(f'Self::{v} => ffi::{name} {{ {v}: ffi::{v}::default() }},')
                         else:
                             out(f'Self::{v}(x) => ffi::{name} {{ {v}: x.to_ffi() }},')
+        for v in ty.variants:
+            with ImplFor(f'From<{v}>', name):
+                if is_unit(v):
+                    with Fn('from', f'_: {v}', 'Self'):
+                        out(f'Self::{v}')
+                else:
+                    with Fn('from', f'x: {v}', 'Self'):
+                        out(f'Self::{v}(x)')
 
     vtbl = {
         gen.IntegerType: emit_integer,

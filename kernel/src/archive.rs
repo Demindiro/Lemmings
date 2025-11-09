@@ -39,18 +39,20 @@ pub mod door {
         } = x;
         let cookie = unsafe { cookie.0.as_mut() };
         let Some((c, (n, item))) = from_dir(dir).iter_next(cookie.clone().into()) else {
-            return FindResult::ItemNone(ItemNone {
+            return ItemNone {
                 stub: Stub::from(0),
-            });
+            }
+            .into();
         };
         cookie.0 = c;
         let n = NonNull::from(n.as_bytes());
         unsafe { name.base.0.copy_from_nonoverlapping(n.cast(), n.len()) }
         match item {
-            super::Item::Dir(dir) => FindResult::ItemDir(ItemDir { dir: to_dir(dir) }),
-            super::Item::File(file) => FindResult::ItemFile(ItemFile {
+            super::Item::Dir(dir) => ItemDir { dir: to_dir(dir) }.into(),
+            super::Item::File(file) => ItemFile {
                 file: to_file(file),
-            }),
+            }
+            .into(),
         }
     }
 
@@ -61,13 +63,15 @@ pub mod door {
         let name = unsafe { core::str::from_utf8_unchecked(name) };
         //let name = unsafe { name.as_str() };
         match from_dir(dir).get(name) {
-            None => FindResult::ItemNone(ItemNone {
+            None => ItemNone {
                 stub: Stub::from(0),
-            }),
-            Some(super::Item::Dir(dir)) => FindResult::ItemDir(ItemDir { dir: to_dir(dir) }),
-            Some(super::Item::File(file)) => FindResult::ItemFile(ItemFile {
+            }
+            .into(),
+            Some(super::Item::Dir(dir)) => ItemDir { dir: to_dir(dir) }.into(),
+            Some(super::Item::File(file)) => ItemFile {
                 file: to_file(file),
-            }),
+            }
+            .into(),
         }
     }
 
