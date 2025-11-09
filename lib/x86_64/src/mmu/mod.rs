@@ -258,6 +258,11 @@ macro_rules! align {
         }
         impl sealed::AlignedTo<$a> for $a {}
         $(impl sealed::AlignedTo<$a> for $as {})*
+        $(impl<S> From<Addr<$as, S>> for Addr<$a, S> {
+            fn from(x: Addr<$as, S>) -> Self {
+                Addr(x.0, PhantomData::<($a, S)>)
+            }
+        })*
         $(const _: () = { use sealed::Align; assert!((<$a>::BITS) < (<$as>::BITS)) };)*
         align!($($ns $as,)*);
     };
