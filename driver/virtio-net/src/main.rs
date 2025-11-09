@@ -243,12 +243,63 @@ fn try_device(door_pci: &Pci, header: Header<'_>) {
 }
 
 fn start_device(door_pci: &Pci, header: &Header0) -> ! {
+    use lemmings_idl_pci::*;
     use lemmings_idl_physical_allocator::*;
+
     // we'll use one MSI-X vector for now
-    //let msix = door_pci.map_msi();
+    let MsiVector {
+        address,
+        value,
+        vector,
+    } = match door_pci.map_msi() {
+        MaybeMsiVector::MsiVector(x) => x,
+        MaybeMsiVector::NoMsiVector(_) => panic!("no MSI vectors remaining :("),
+    };
+    header.set_command(HeaderCommon::COMMAND_MMIO | HeaderCommon::COMMAND_BUS_MASTER);
+    'cap: {
+        for cap in header.capabilities() {
+            use lemmings_pci::{
+                capability::{Capability, MsiXTableInfo},
+                msix,
+            };
+            let Some(Capability::MsiX(cap)) = cap.downcast() else {
+                continue;
+            };
+            let mut ctrl = cap.message_control();
+            let MsiXTableInfo { offset, bir } = cap.table();
+            let size = usize::from(ctrl.table_size()) + 1;
+            let table = header
+                .full_base_address(bir.into())
+                .expect("bar")
+                .try_as_mmio()
+                .expect("mmio");
+            // FIXME add identity base address!
+            let table = unsafe {
+                NonNull::<msix::TableEntry>::new(table as _)
+                    .unwrap()
+                    .byte_add(offset as _)
+            };
+            dbg!(offset, bir, size, table);
+            let table = unsafe { NonNull::slice_from_raw_parts(table, size).as_ref() };
+            dbg!(&value, &address, &vector);
+            let (value, address) = (value.into(), address.into());
+            for tbl in &table[..2] {
+                dbg!();
+                tbl.set_message_data(value);
+                tbl.set_message_address(address);
+                tbl.set_vector_control_mask(false);
+            }
+            dbg!();
+            ctrl.set_enable(true);
+            cap.set_message_control(ctrl);
+            dbg!();
+            break 'cap;
+        }
+        panic!("No MSI-X?");
+    }
     let msix = lemmings_virtio_net::Msix {
-        receive_queue: None,
-        transmit_queue: None,
+        receive_queue: Some(0),
+        transmit_queue: Some(1),
     };
     let bar_map = &map_bars(header);
     let (door, _) = lemmings_door::door_find::<Allocator>(Cookie(0))
@@ -269,7 +320,6 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
             MaybeRegion64::NoRegion64(_) => todo!("oom"),
         }
     };
-    header.set_command(HeaderCommon::COMMAND_MMIO | HeaderCommon::COMMAND_BUS_MASTER);
     let (dev, mac) =
         unsafe { lemmings_virtio_net::Device::new(header, msix, bar_map, dma_alloc).unwrap() };
 
@@ -327,10 +377,14 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
     loop {
         // FIXME proper timekeeping
         time += smoltcp::time::Duration::from_micros(1);
+        //time += smoltcp::time::Duration::from_secs(1000);
         dev.collect_received();
         dev.collect_sent();
         match iface.poll(time, dev, sockets) {
-            iface::PollResult::None => continue,
+            iface::PollResult::None => {
+                door_pci.wait_msi(vector.clone());
+                continue;
+            }
             iface::PollResult::SocketStateChanged => {}
         }
         let dhcpv4 = sockets.get_mut::<socket::dhcpv4::Socket>(dhcpv4);
