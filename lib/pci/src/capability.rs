@@ -50,6 +50,12 @@ pub struct MsiX {
 #[repr(transparent)]
 pub struct MsiXMessageControl(u16le);
 
+#[derive(Clone, Copy)]
+pub struct MsiXTableInfo {
+    pub bir: u8,
+    pub offset: u32,
+}
+
 impl Msi {
     get_volatile!(message_control -> MsiMessageControl);
     set_volatile!(set_message_control: message_control <- MsiMessageControl);
@@ -158,15 +164,21 @@ impl MsiX {
     set_volatile!(set_message_control: message_control <- MsiXMessageControl);
 
     #[inline]
-    pub fn table(&self) -> (u32, u8) {
-        let v = u32::from(self.table_bir_offset.get());
-        (v & !0x7, (v & 0x7) as u8)
+    pub fn table(&self) -> MsiXTableInfo {
+        Self::bir_offset(&self.table_bir_offset)
     }
 
     #[inline]
-    pub fn pending(&self) -> (u32, u8) {
-        let v = u32::from(self.pending_bit_bir_offset.get());
-        (v & !0x7, (v & 0x7) as u8)
+    pub fn pending(&self) -> MsiXTableInfo {
+        Self::bir_offset(&self.pending_bit_bir_offset)
+    }
+
+    fn bir_offset(x: &VolatileCell<u32le>) -> MsiXTableInfo {
+        let v = u32::from(x.get());
+        MsiXTableInfo {
+            bir: (v & 7) as u8,
+            offset: v & !7,
+        }
     }
 }
 
@@ -210,15 +222,11 @@ impl fmt::Debug for Capability<'_> {
 
 impl fmt::Debug for MsiX {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let (table_offset, table_bir) = self.table();
-        let (pending_offset, pending_bir) = self.pending();
         f.debug_struct(stringify!(MsiX))
             .field("common", &self.common)
             .field("message_control", &self.message_control())
-            .field("table_offset", &format_args!("0x{:04x}", table_offset))
-            .field("table_bir", &table_bir)
-            .field("pending_offset", &format_args!("0x{:04x}", pending_offset))
-            .field("pending_bir", &pending_bir)
+            .field("table", &self.table())
+            .field("pending", &self.pending())
             .finish()
     }
 }
@@ -239,5 +247,14 @@ impl fmt::Debug for Vendor {
             .field("common", &self.common)
             .field("length", &self.length())
             .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for MsiXTableInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct(stringify!(MsiXTableInfo))
+            .field("bir", &self.bir)
+            .field("offset", &format_args!("{:#06x}", self.offset))
+            .finish()
     }
 }
