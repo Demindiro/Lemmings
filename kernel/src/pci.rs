@@ -39,7 +39,21 @@ pub mod door {
     }
 
     fn map_msi() -> MaybeMsiVector {
-        todo!()
+        crate::arch::alloc_msi().map_or(
+            NoMsiVector {
+                value: 0.into(),
+                vector: 1.try_into().unwrap(),
+            }
+            .into(),
+            |x| {
+                MsiVector {
+                    address: u64::from(x.address).try_into().unwrap(),
+                    value: x.data.into(),
+                    vector: x.vector.try_into().unwrap(),
+                }
+                .into()
+            },
+        )
     }
 
     fn unmap_msi(x: Vector) {
@@ -47,7 +61,7 @@ pub mod door {
     }
 
     fn wait_msi(x: Vector) {
-        todo!()
+        crate::arch::wait_msi(x.into())
     }
 
     fn allocate_mmio32(x: AllocateMmio32) -> MaybeAddr32 {

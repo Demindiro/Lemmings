@@ -88,6 +88,12 @@ pub mod door {
     }
 }
 
+pub struct Msi {
+    pub data: u32,
+    pub address: mmu::Phys<mmu::A2>,
+    pub vector: u32,
+}
+
 struct IrqHandlers {
     queues: [RoundRobinQueue; VECTOR_NR],
     allocated: [u32; (VECTOR_NR + 32) / 32],
@@ -162,6 +168,28 @@ impl IrqHandlers {
         let io = IoApicHelper::new(io);
         io
     }
+}
+
+pub fn alloc_msi() -> Option<Msi> {
+    let vector = critical_section::with(|cs| IRQ_HANDLERS.lock(cs).reserve()).map(u32::from)?;
+    Some(Msi {
+        data: vector,
+        address: apic::local::DEVICE_LAPIC_ADDRESS.into(),
+        vector,
+    })
+}
+
+pub fn wait_msi(vector: u32) {
+    let vector = vector.try_into().expect("invalid vector");
+    critical_section::with(|cs| {
+        let h = IRQ_HANDLERS.lock(cs);
+        IrqHandlers::wait(h, vector, cs);
+        let mut h = IRQ_HANDLERS.lock(cs);
+        // TODO should we mask? If we do, we'll need done_msi too.
+        // We also need to keep track of IRQ too then... annoyances.
+        //h.mask(irq);
+        h.eoi();
+    });
 }
 
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {
