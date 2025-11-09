@@ -327,9 +327,9 @@ impl ParsedBaseAddress {
 
 impl HeaderCommon {
     /// Flag used to enable MMIO
-    pub const COMMAND_MMIO_MASK: u16 = 0x2;
+    pub const COMMAND_MMIO: u16 = 0x2;
     /// Flag used to toggle bus mastering.
-    pub const COMMAND_BUS_MASTER_MASK: u16 = 0x4;
+    pub const COMMAND_BUS_MASTER: u16 = 0x4;
     /// Flag used to disable interrupts.
     pub const COMMAND_INTERRUPT_DISABLE: u16 = 1 << 10;
 
