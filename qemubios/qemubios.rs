@@ -127,7 +127,13 @@ mod alloc {
             REGIONS[0] = boot::MemoryRegion {
                 start: boot::Phys(0x4000),
                 end: boot::Phys(0xa0000),
-            }
+            };
+            // FIXME we should detect available memory properly
+            REGIONS[1] = boot::MemoryRegion {
+                start: boot::Phys(0x100_000),
+                end: boot::Phys(0x200_000),
+                //end: boot::Phys(0xf00_000),
+            };
         }
     }
 
