@@ -13,7 +13,7 @@ exec qemu-system-x86_64 \
 	-device isa-debug-exit \
 	-debugcon file:/dev/stdout \
 	-global isa-debugcon.iobase=0x402 \
-	-netdev user,id=net0 \
+	-netdev user,id=net0,hostfwd=tcp::8000-:80,hostfwd=udp::8000-:80 \
 	-device virtio-net-pci,netdev=net0 \
 	-object filter-dump,netdev=net0,id=net0,file=/tmp/lemmings-net.log \
 	-no-reboot \
