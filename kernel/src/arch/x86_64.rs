@@ -12,7 +12,7 @@ use lemmings_x86_64::{
         local::LocalApicHelper,
     },
     gdt::{Gdt, GdtPointer},
-    idt::{self, Idt, IdtPointer},
+    idt::{self, Idt, IdtEntry, IdtPointer, Ist},
     mmu, pic,
     tss::Tss,
 };
@@ -175,6 +175,8 @@ pub fn init(token: KernelEntryToken) -> KernelEntryToken {
 
 #[inline(always)]
 fn init_gdt(root: &mmu::Root<mmu::L4>) {
+    let stack_top = 0x1000 as *const usize;
+    unsafe { (&mut *(&raw mut TSS)).set_ist(1.try_into().unwrap(), stack_top) };
     #[allow(static_mut_refs)]
     unsafe {
         GDT.set_tss(&TSS)
@@ -191,7 +193,8 @@ fn init_gdt(root: &mmu::Root<mmu::L4>) {
 fn init_idt(root: &mmu::Root<mmu::L4>) {
     let idt = unsafe { &mut *(&raw mut IDT) };
 
-    idt.set_handler(idt::nr::DOUBLE_FAULT, double_fault as _);
+    let mut ist1 = |f| IdtEntry::new(Gdt::KERNEL_CS, f, Ist::N1);
+    idt.set(idt::nr::DOUBLE_FAULT, ist1(double_fault as _));
     idt.set_handler(idt::nr::PAGE_FAULT, page_fault as _);
     idt.set_handler(VECTOR_TIMER, timer_handler as _);
     for i in VECTOR_STUB_OFFSET..=u8::MAX {
