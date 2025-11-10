@@ -6,6 +6,7 @@
 .globl sys_exit
 .globl sys_print
 .globl file_read
+.globl ram_size
 
 .equ SYS_PRINT, 0
 .equ SYS_EXIT, 1
@@ -229,6 +230,23 @@ file_read:
 	add rsp, 16
 	pop rbp
 2:	ret
+
+# rax: size
+ram_size:
+	push rbp
+	push 0
+	mov rax, rsp
+	bswap rax
+	push rax
+	# size = 8, selector = 3
+	movabs rax, (8 << 56) | (FW_CFG_DMA.READ | FW_CFG_DMA.SELECT) << 24 | (3 << 8)
+	push rax
+	mov rbp, rsp
+	call fw_cfg_dma
+	add rsp, 16
+	pop rax
+	pop rbp
+	ret
 
 
 # rbp: base

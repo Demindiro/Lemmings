@@ -83,6 +83,18 @@ mod sys {
         }
     }
 
+    pub fn ram_size() -> u64 {
+        let x: u64;
+        unsafe {
+            asm! {
+                "call ram_size",
+                out("rax") x,
+                out("rdx") _,
+            }
+        }
+        x
+    }
+
     /// # Safety
     ///
     /// Only one (mutable!) reference to the PML4 may exist at any time.
@@ -109,7 +121,14 @@ mod alloc {
         [boot::MemoryRegion::EMPTY; MAX_REGIONS];
 
     pub const PAGE_SIZE: usize = 4096;
-    const MAX_REGIONS: usize = 8;
+    const MAX_REGIONS: usize = 4;
+
+    /// QEMU's Q35 machine splits on a 2GiB boundary by default.
+    /// The lower half is mapped from `0` to `0x7fff_ffff`.
+    /// The upper half starts from `0x1_0000_0000`.
+    // TODO can we detect this at runtime?
+    const LOWMEM_SIZE: u64 = 1 << 31;
+    const HIGHMEM_BASE: u64 = 1 << 32;
 
     fn round_p2(x: usize, n: usize) -> usize {
         let mask = n - 1;
@@ -117,6 +136,12 @@ mod alloc {
     }
 
     pub fn init() {
+        let ram_size = sys::ram_size();
+        if ram_size < (1 << 20) {
+            fail("ram size is too small");
+        }
+        let ram_end_lo = ram_size.min(LOWMEM_SIZE);
+        let ram_end_hi = HIGHMEM_BASE.saturating_add(ram_size.saturating_sub(LOWMEM_SIZE));
         // intentionally skip 0x0..0x3000 because:
         // - we use 0x0..0x1000 as stack
         // - we use 0x1000..0x2000 as PML4
@@ -130,11 +155,27 @@ mod alloc {
             };
             // FIXME we should detect available memory properly
             REGIONS[1] = boot::MemoryRegion {
-                start: boot::Phys(0x100_000),
-                end: boot::Phys(0x200_000),
-                //end: boot::Phys(0xf00_000),
+                start: boot::Phys(1 << 20),
+                end: boot::Phys(ram_end_lo),
+            };
+            REGIONS[2] = boot::MemoryRegion {
+                start: boot::Phys(HIGHMEM_BASE),
+                end: boot::Phys(ram_end_hi),
+            };
+            REGIONS[3] = boot::MemoryRegion {
+                start: boot::Phys(0),
+                end: boot::Phys(0),
             };
         }
+        // memory-map all RAM (except the first 2M, which is already mapped)
+        // we assume the identity mapper:
+        // - maps from low to high
+        // - uses pages in order of allocation
+        // hence even if a large amount of pages is needed, we will never
+        // access unmapped memory during mapping.
+        let f = |x| NonNull::new(x as *mut u8).unwrap();
+        page::identity_map_rw(f(1 << 21)..f(ram_end_lo));
+        page::identity_map_rw(f(HIGHMEM_BASE)..f(ram_end_hi));
     }
 
     pub fn alloc(byte_count: usize) -> Option<NonNull<u8>> {
