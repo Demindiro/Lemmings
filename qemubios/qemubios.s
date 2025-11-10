@@ -274,11 +274,11 @@ fw_cfg_dma:
 .code32
 main32:
 mov eax, PD_BASE
-mov dword ptr [eax + 8*0], 0 | 0b11100011 # PS, A, R/W, P
+mov dword ptr [eax + 8*0], 0 | 0b11100011 # PS, D, A, R/W, P
 #mov dword ptr [eax + 8*0+4], 1 << 31 # XD
-mov dword ptr [PDPT_BASE + 8*0], PD_BASE | 0b00100011 # A, R/W, P
+mov dword ptr [PDPT_BASE + 8*0], PD_BASE | 0b01100011 # D, A, R/W, P
 mov eax, PML4_BASE
-mov dword ptr [eax + 8*0], PDPT_BASE | 0b00100011 # A, R/W, P
+mov dword ptr [eax + 8*0], PDPT_BASE | 0b01100011 # D, A, R/W, P
 mov cr3, eax
 mov eax, 0b10100000 # PAE, PGE
 mov cr4, eax
