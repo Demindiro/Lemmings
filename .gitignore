@@ -1,2 +1,3 @@
 /config.env
 Cargo.lock
+Doc.build

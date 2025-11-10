@@ -1,0 +1,12 @@
+.admonition {
+	border: 1px solid;
+	margin: 2em;
+	padding: 0;
+}
+.admonition-title {
+	background-color: lightgreen;
+}
+.admonition > * {
+	margin: 0;
+	padding: 0.5em;
+}
