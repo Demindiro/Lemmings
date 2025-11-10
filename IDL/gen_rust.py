@@ -553,7 +553,7 @@ def emit(outf, idl, sysv):
                     args = sysv_splat_params(routine.input, macro = True)
                     ret = sysv_splat_ret(routine.output, macro = True)
                     with Scope(f'{name}:', suffix = ','):
-                        fn = f'unsafe extern "sysv64" fn ffi({args})'
+                        fn = f'unsafe extern "sysv64" fn ffi_{name}({args})'
                         if not is_void(routine.output):
                             fn = f'{fn}{ret}'
                         with Scope(fn):
@@ -571,7 +571,7 @@ def emit(outf, idl, sysv):
                                 out(f'x.to_ffi().into()')
                             else:
                                 out(f'let _: {routine.output} = $impl_{name}({x});')
-                        out(f'ffi')
+                        out(f'ffi_{name}')
         del name, routine
 
 def main(idl_path, out_path):
