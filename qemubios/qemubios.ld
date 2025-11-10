@@ -9,6 +9,8 @@ MEMORY {
 	init   (x)  : org = 0xffff0, l = 16
 }
 
+pages_base = 0xf0000;
+pages_count = 6;
 LDFIX_main32 = 0xff00;
 LDFIX_gdtr = 0xffe8;
 
@@ -17,7 +19,10 @@ SECTIONS {
 	.bss : AT(0x10) {
 		*(.bss .bss*)
 	} > bss =0
-	.text : AT(0xf0000) {
+	.pages : AT(pages_base) {
+		*(.pages)
+	} > rom =0
+	.text : AT(pages_base + 0x1000 * pages_count) {
 		*(.text .text*)
 		*(.rodata .rodata.*)
 	} > rom =0

@@ -7,6 +7,12 @@
 .globl sys_print
 .globl file_read
 .globl ram_size
+.globl zero_4k
+.globl zero_2m
+.globl zero_1g
+.globl ones_4k
+.globl ones_2m
+.globl ones_1g
 
 .equ SYS_PRINT, 0
 .equ SYS_EXIT, 1
@@ -76,6 +82,30 @@ filename.data:
 .asciz "opt/lemmings/data.bin"
 .zero 2
 .equ filename.data.qlen, (21 + 3) / 8
+
+
+.section .pages, "a"
+.equ PAGES_BASE, 0xf0000
+pages:
+.macro f name:req addr:req
+\name:
+ .rept 512
+  # XD bit may not be technically required, but there's no good
+  # reason to have an executable page full of zeros.
+  # Also leave the D bit off since nobody is supposed to write to these pages.
+  .quad (1 << 63) | (PAGES_BASE + (\addr - pages)) | 0b00100011 # XD, A, R/W, P
+ .endr
+.endm
+	zero_4k: .zero 4096
+	f zero_2m zero_4k
+	f zero_1g zero_2m
+	ones_4k: .rept 4096
+	         .byte 0xff
+	         .endr
+	f ones_2m ones_4k
+	f ones_1g ones_2m
+.purgem f
+
 
 .section .text
 .code64
@@ -274,11 +304,11 @@ fw_cfg_dma:
 .code32
 main32:
 mov eax, PD_BASE
-mov dword ptr [eax + 8*0], 0 | 0b11100011 # PS, A, R/W, P
+mov dword ptr [eax + 8*0], 0 | 0b11100011 # PS, D, A, R/W, P
 #mov dword ptr [eax + 8*0+4], 1 << 31 # XD
-mov dword ptr [PDPT_BASE + 8*0], PD_BASE | 0b00100011 # A, R/W, P
+mov dword ptr [PDPT_BASE + 8*0], PD_BASE | 0b01100011 # D, A, R/W, P
 mov eax, PML4_BASE
-mov dword ptr [eax + 8*0], PDPT_BASE | 0b00100011 # A, R/W, P
+mov dword ptr [eax + 8*0], PDPT_BASE | 0b01100011 # D, A, R/W, P
 mov cr3, eax
 mov eax, 0b10100000 # PAE, PGE
 mov cr4, eax

@@ -16,6 +16,8 @@ use lemmings_x86_64::mmu;
 static PAGE: SpinLock<PageManager> = SpinLock::new(PageManager::new());
 static VIRT: SpinLock<VirtManager> = SpinLock::new(VirtManager::new());
 
+static mut CONSTANT_PAGES: mem::MaybeUninit<ConstantPages> = mem::MaybeUninit::uninit();
+
 // TODO should be moved to alloc.rs
 pub mod door {
     use lemmings_idl_physical_allocator::*;
@@ -115,6 +117,11 @@ struct VirtManager {
 pub struct IdentityMapper;
 struct PageAllocator;
 
+struct ConstantPages {
+    zero: [mmu::Phys<mmu::A12>; 3],
+    ones: [mmu::Phys<mmu::A12>; 3],
+}
+
 impl PageManager {
     pub const fn new() -> Self {
         Self {
@@ -188,18 +195,29 @@ impl VirtManager {
         Ok(())
     }
 
+    /// # Safety
+    ///
+    /// `will_write` must be set accurately.
+    /// If it is set to `false`, constant pages will be mapped.
     pub unsafe fn map_range_zero(
         &mut self,
         range: Range<Virt>,
         attr: PageAttr,
+        will_write: bool,
     ) -> Result<(), OutOfMemory> {
+        let constant_pages = unsafe { (&*(&raw const CONSTANT_PAGES)).assume_init_ref() };
         let mut va = mmu::Virt::<mmu::A12>::new(range.start.as_ptr() as u64).unwrap();
         let va_end = mmu::Virt::<mmu::A12>::new(range.end.as_ptr() as u64).unwrap();
         let mut root = unsafe { mmu::current_root::<mmu::L4>() };
         let va_start = va;
         while va != va_end {
             // FIXME deadlock...
-            let pa = mmu::Phys::<mmu::A12>::new(virt_to_phys(alloc_one()?).0).unwrap();
+            let pa = if will_write || attr.w() {
+                mmu::Phys::<mmu::A12>::new(virt_to_phys(alloc_one()?).0).unwrap()
+            } else {
+                //mmu::Phys::<mmu::A12>::new(virt_to_phys(alloc_one()?).0).unwrap()
+                constant_pages.zero[0]
+            };
             unsafe {
                 root.set_4k(&IdentityMapper, &mut PageAllocator, va, pa, attr)
                     .inspect_err(|_| self.unmap_range(va_start..va, |_| ()))?;
@@ -323,8 +341,16 @@ pub unsafe fn map_region(
 /// # Safety
 ///
 /// The address range must not be actively used.
-pub unsafe fn map_region_zero(region: Range<Virt>, attr: PageAttr) -> Result<(), OutOfMemory> {
-    critical_section::with(|cs| unsafe { VIRT.lock(cs).map_range_zero(region, attr) })
+///
+/// `will_write` must be set accurately.
+/// If it is set to `false`, constant pages will be mapped.
+/// This is relevant when using [`copy_to_region`].
+pub unsafe fn map_region_zero(
+    region: Range<Virt>,
+    attr: PageAttr,
+    will_write: bool,
+) -> Result<(), OutOfMemory> {
+    critical_section::with(|cs| unsafe { VIRT.lock(cs).map_range_zero(region, attr, will_write) })
 }
 
 #[inline]
@@ -380,6 +406,14 @@ fn init_page(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kerne
 }
 
 fn init_virt(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+    let constant_pages = unsafe { &mut *(&raw mut CONSTANT_PAGES) };
+    let f = |x: lemmings_qemubios::Phys| {
+        mmu::Phys::<mmu::A12>::new(x.0).expect("constant page is not aligned!")
+    };
+    constant_pages.write(ConstantPages {
+        zero: entry.paging.zero.map(f),
+        ones: entry.paging.ones.map(f),
+    });
     let head = entry.paging.kernel.end.0;
     let token = VIRT.set(VirtManager { head }, token);
     token

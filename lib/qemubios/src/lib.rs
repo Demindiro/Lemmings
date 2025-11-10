@@ -72,7 +72,8 @@ pub struct VirtRegion {
 #[derive(Debug)]
 #[repr(C)]
 pub struct Paging {
-    pub zero: [Phys; 6],
+    pub zero: [Phys; 3],
+    pub ones: [Phys; 3],
     pub kernel: VirtRegion,
     pub stack: Virt,
 }
