@@ -209,12 +209,14 @@ impl Thread {
             asm! {
                 "push rbx",
                 "push rbp",
+                "pushf",
                 "lea {scratch}, [rip + 2f]",
                 "mov [{cur} + {TCB_SP}], rsp",
                 "mov [{cur} + {TCB_PC}], {scratch}",
                 "mov rsp, {sp}",
                 "jmp {pc}",
                 "2:",
+                "popf",
                 "pop rbp",
                 "pop rbx",
                 scratch = out(reg) _,
@@ -239,6 +241,7 @@ impl Thread {
                 lateout("r13") _,
                 lateout("r14") _,
                 lateout("r15") _,
+                options(preserves_flags),
             }
         }
     }
@@ -337,6 +340,7 @@ fn wait(_cs: CriticalSection<'_>) {
             // of a parked thread...
             "push rbx",
             "push rbp",
+            "pushf",
             "lea {scratch}, [rip + 2f]",
             "mov [{cur} + {TCB_SP}], rsp",
             "mov [{cur} + {TCB_PC}], {scratch}",
@@ -344,6 +348,7 @@ fn wait(_cs: CriticalSection<'_>) {
             "hlt",
             "jmp 3b",
             "2:",
+            "popf",
             "pop rbp",
             "pop rbx",
             scratch = out(reg) _,
@@ -366,7 +371,7 @@ fn wait(_cs: CriticalSection<'_>) {
             lateout("r13") _,
             lateout("r14") _,
             lateout("r15") _,
-            options(nomem, nostack),
+            options(preserves_flags),
         }
     }
 }
