@@ -326,7 +326,7 @@ impl<'a> ElfMapper<'a> {
         let [va, va_end] = [va, va_end].map(|x| unsafe { self.virt_base.byte_add(x) });
 
         let attr = flags_to_attr(flags).ok_or(LoadError::UnsupportedSegmentFlags)?;
-        unsafe { page::map_region_zero(va..va_end, attr)? };
+        unsafe { page::map_region_zero(va..va_end, attr, true)? };
         Ok(())
     }
 
