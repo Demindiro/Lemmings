@@ -227,7 +227,7 @@ fn init_idt(root: &mmu::Root<mmu::L4>) {
     idt.set_handler(VECTOR_TIMER, timer_handler as _);
     for i in VECTOR_STUB_OFFSET..=u8::MAX {
         unsafe {
-            let p = &irq_stub_table as *const [u8; 5];
+            let p = &irq_stub_table as *const [u8; 8];
             let p = p.add(usize::from(i - VECTOR_STUB_OFFSET));
             idt.set_handler(i, p.cast());
         }
@@ -284,7 +284,7 @@ extern "sysv64" fn timer_handler() {
 }
 
 unsafe extern "sysv64" {
-    static irq_stub_table: [[u8; 5]; 256 - VECTOR_STUB_OFFSET as usize];
+    static irq_stub_table: [[u8; 8]; 256 - VECTOR_STUB_OFFSET as usize];
 }
 
 // Generate 223 IRQ stubs which each push the IRQ number.
@@ -295,14 +295,17 @@ unsafe extern "sysv64" {
 // We only generate 256 - 33 = 223 stubs because the first 33 IRQs have a well-defined purpose.
 // It's only the dynamically assigned interrupts that are muddy.
 core::arch::global_asm! {
+    ".align 8",
     "irq_stub_table:",
     ".rept 256 - {VECTOR_STUB_OFFSET}",
-    "call irq_entry",
+    // Interrupt handling ideally should be fast, so avoid messing up the RAS.
+    // This means no trickery with call/pop, we need to match call/ret
+    ".align 8",
+    "push rax", // 0
+    "mov al, \\+ + {VECTOR_STUB_OFFSET}",
+    "jmp irq_entry",
     ".endr",
     "irq_entry:",
-    // Save scratch registers
-    // except rax, see below
-    /* rip from irq_stub_table, will become rax */ // 0
     "push rdi", // 1
     "push rsi", // 2
     "push rdx", // 3
@@ -311,24 +314,9 @@ core::arch::global_asm! {
     "push r9",  // 6
     "push r10", // 7
     "push r11", // 8
-    // xchg has an implicit lock, so it's horrendously slow.
-    // Still, we can emulate it efficiently with a scratch register, which we'll need as
-    // argument register anyways :)
-    "mov rdi, [rsp + 8 * 8]", // load caller *next* rip
-    "mov [rsp + 8 * 8], rax", // store rax
-    // offset in handler table is (rip - (irq_stub_table + 5)) / 5
-    // account for VECTOR_STUB_OFFSET while at it
-    "lea rcx, [rip + irq_stub_table + 5 - ({VECTOR_STUB_OFFSET} * 5)]",
-    "sub edi, ecx",
-    // The trick here is to find some large enough power-of-two divisor, then find the corresponding
-    // dividend to approach 1/5, i.e. divisor / 5 = dividend.
-    // In this case: 1/5 * 1024 = 204.8
-    "imul edi, edi, 205",
-    "shr edi, 10",
-    // Call handler
+    "movzx edi, al",
     "cld",
     "call {irq_handler}",
-    // Restore thread state
     "pop r11", // 8
     "pop r10", // 7
     "pop r9",  // 6
