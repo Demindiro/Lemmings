@@ -1152,7 +1152,8 @@ mod boot {
 
     #[repr(C)]
     pub struct Paging {
-        pub zero: [Phys; 6],
+        pub zero: [Phys; 3],
+        pub ones: [Phys; 3],
         pub kernel: VirtRegion,
         pub stack: Virt,
     }
@@ -1191,6 +1192,7 @@ mod boot {
 
     #[inline(always)]
     pub fn collect_info(kernel: VirtRegion, data: &'static [u8], framebuffer: FrameBuffer) {
+        let f = |x, y, z| [x, y, z].map(|x| Phys((x as *const u8).addr() as u64));
         #[allow(static_mut_refs)]
         unsafe {
             ENTRY.write(Entry {
@@ -1198,7 +1200,8 @@ mod boot {
                 paging: Paging {
                     kernel,
                     stack: Virt(NonNull::new(0x1000 as _).unwrap()),
-                    zero: [Phys(0); 6],
+                    zero: f(&zero_4k, &zero_2m, &zero_1g),
+                    ones: f(&ones_4k, &ones_2m, &ones_1g),
                 },
                 pcie: Pcie {
                     base: Phys(pcie::MMCFG_BASE.addr().get() as _),
@@ -1210,6 +1213,15 @@ mod boot {
                 framebuffer,
             });
         }
+    }
+
+    unsafe extern "C" {
+        static zero_4k: [u8; 4096];
+        static zero_2m: [u8; 4096];
+        static zero_1g: [u8; 4096];
+        static ones_4k: [u8; 4096];
+        static ones_2m: [u8; 4096];
+        static ones_1g: [u8; 4096];
     }
 }
 
