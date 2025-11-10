@@ -259,14 +259,15 @@ extern "sysv64" fn double_fault() {
 unsafe extern "C" fn page_fault() {
     unsafe {
         naked_asm! {
-            "pop rdi",
+            "pop rsi",
+            "mov rdi, [rsp]",
             "call {handler}",
             handler = sym handler,
         }
     }
-    extern "sysv64" fn handler(error_code: u32) {
+    extern "sysv64" fn handler(rip: unsafe extern "C" fn(), error_code: u32) {
         let addr = lemmings_x86_64::cr2::get();
-        panic!("Page fault! (code: {error_code:#08x}, address: {addr:#016x})");
+        panic!("Page fault! (rip: {rip:?}, code: {error_code:#08x}, address: {addr:#016x})");
     }
 }
 
