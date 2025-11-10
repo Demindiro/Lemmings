@@ -16,6 +16,8 @@ use lemmings_x86_64::mmu;
 static PAGE: SpinLock<PageManager> = SpinLock::new(PageManager::new());
 static VIRT: SpinLock<VirtManager> = SpinLock::new(VirtManager::new());
 
+static mut CONSTANT_PAGES: mem::MaybeUninit<ConstantPages> = mem::MaybeUninit::uninit();
+
 // TODO should be moved to alloc.rs
 pub mod door {
     use lemmings_idl_physical_allocator::*;
@@ -114,6 +116,11 @@ struct VirtManager {
 
 pub struct IdentityMapper;
 struct PageAllocator;
+
+struct ConstantPages {
+    zero: [mmu::Phys<mmu::A12>; 3],
+    ones: [mmu::Phys<mmu::A12>; 3],
+}
 
 impl PageManager {
     pub const fn new() -> Self {
@@ -380,6 +387,14 @@ fn init_page(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kerne
 }
 
 fn init_virt(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+    let constant_pages = unsafe { &mut *(&raw mut CONSTANT_PAGES) };
+    let f = |x: lemmings_qemubios::Phys| {
+        mmu::Phys::<mmu::A12>::new(x.0).expect("constant page is not aligned!")
+    };
+    constant_pages.write(ConstantPages {
+        zero: entry.paging.zero.map(f),
+        ones: entry.paging.ones.map(f),
+    });
     let head = entry.paging.kernel.end.0;
     let token = VIRT.set(VirtManager { head }, token);
     token
