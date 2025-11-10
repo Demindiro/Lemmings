@@ -116,6 +116,18 @@ pub type Page4K = Entry<L0>;
 pub type Page2M = Entry<L1>;
 pub type Page1G = Entry<L2>;
 
+impl PageAttr {
+    pub fn r(self) -> bool {
+        self.contains(PageAttr::R)
+    }
+    pub fn w(self) -> bool {
+        self.contains(PageAttr::W)
+    }
+    pub fn x(self) -> bool {
+        self.contains(PageAttr::X)
+    }
+}
+
 impl<A: sealed::Align, S> Addr<A, S> {
     pub const fn new(addr: u64) -> Option<Self> {
         if addr & A::MASK == 0 {
