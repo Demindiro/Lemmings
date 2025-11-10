@@ -3,8 +3,11 @@
 	margin: 2em;
 	padding: 0;
 }
-.admonition-title {
+.admonition.note > .admonition-title {
 	background-color: lightgreen;
+}
+.admonition.warning > .admonition-title {
+	background-color: orange;
 }
 .admonition > * {
 	margin: 0;
