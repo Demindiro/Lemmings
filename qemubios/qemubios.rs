@@ -127,7 +127,7 @@ mod alloc {
     /// The lower half is mapped from `0` to `0x7fff_ffff`.
     /// The upper half starts from `0x1_0000_0000`.
     // TODO can we detect this at runtime?
-    const LOWMEM_SIZE: u64 = 1 << 31;
+    pub const LOWMEM_SIZE: u64 = 1 << 31;
     const HIGHMEM_BASE: u64 = 1 << 32;
 
     fn round_p2(x: usize, n: usize) -> usize {
@@ -736,6 +736,8 @@ mod pcie {
     use crate::*;
     use core::ptr::NonNull;
 
+    pub const MMCFG_BASE: NonNull<u8> = unsafe { NonNull::new_unchecked(alloc::LOWMEM_SIZE as _) };
+
     struct Q35 {
         mmio32_base: u32,
         mmio64_base: u64,
@@ -846,7 +848,7 @@ mod pcie {
     }
 
     impl Q35 {
-        const BASE: NonNull<u8> = unsafe { NonNull::new_unchecked(0xb000_0000u32 as _) };
+        const BASE: NonNull<u8> = MMCFG_BASE;
         const SIZE: usize = 4096 * 8 * 32 * 256;
         const BDF: pci::BDF = pci::BDF::new(0, 0, 0);
         const CFG_PCIE_BASE: u8 = 0x60;
@@ -1199,7 +1201,7 @@ mod boot {
                     zero: [Phys(0); 6],
                 },
                 pcie: Pcie {
-                    base: Phys(0xb000_0000),
+                    base: Phys(pcie::MMCFG_BASE.addr().get() as _),
                 },
                 data: MemoryRegion {
                     start: Phys(data.as_ptr() as _),
