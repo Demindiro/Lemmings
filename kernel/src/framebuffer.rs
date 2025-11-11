@@ -18,10 +18,15 @@ pub struct Log<'a, 'cs> {
 
 impl fmt::Write for Log<'_, '_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        fmt::Write::write_str(&mut *self.tty, s)
+        // exclude \r
+        s.split('\r')
+            .try_for_each(|s| fmt::Write::write_str(&mut *self.tty, s))
     }
 
     fn write_char(&mut self, c: char) -> fmt::Result {
+        if c == '\r' {
+            return Ok(());
+        }
         fmt::Write::write_char(&mut *self.tty, c)
     }
 }
