@@ -26,5 +26,5 @@ The scheduler supports 4 priorities:
 
 Threads with a higher priority *always* run first.
 
-If no tasks are queued, the idle task will run by default.
-This task's priority is always lower than the provided priorities.
+If no threads are queued, the idle thread will run by default.
+This thread's priority is always lower than the provided priorities.

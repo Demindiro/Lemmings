@@ -71,7 +71,7 @@ extern "sysv64" fn main<'a>() {
     let cs = unsafe { ::critical_section::CriticalSection::<'a>::new() };
     let init = main_init();
     // yield once to give the other thread a chance to run before halting
-    // keep in mind we're the idle task
+    // keep in mind we're the idle thread
     thread::park(cs);
     loop {
         // SAFETY: enabling interrupts and halting is safe at this point.

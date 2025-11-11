@@ -37,7 +37,7 @@ pub struct ThreadHandle(ThreadRef);
 
 struct ThreadManager {
     pending: [RoundRobinQueue; PRIORITY_COUNT],
-    idle_task: ThreadHandle,
+    idle_thread: ThreadHandle,
 }
 
 struct ThreadControlBlock {
@@ -67,10 +67,10 @@ struct ThreadRef(NonNull<Thread>);
 const _: () = assert!(mem::size_of::<Thread>() == PAGE_SIZE);
 
 impl ThreadManager {
-    pub const fn new(idle_task: ThreadHandle) -> Self {
+    pub const fn new(idle_thread: ThreadHandle) -> Self {
         Self {
             pending: [const { RoundRobinQueue::new() }; PRIORITY_COUNT],
-            idle_task,
+            idle_thread,
         }
     }
 
@@ -106,7 +106,7 @@ impl ThreadManager {
         self.pending
             .iter_mut()
             .find_map(|x| x.dequeue_first())
-            .unwrap_or_else(|| self.idle_task.clone())
+            .unwrap_or_else(|| self.idle_thread.clone())
     }
 }
 
@@ -339,12 +339,12 @@ pub fn spawn(priority: Priority, entry: extern "sysv64" fn()) -> Result<(), Thre
 }
 
 pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
-    let idle_task =
-        Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_task thread");
+    let idle_thread =
+        Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
     // SAFETY: we have exclusive access to MANAGER
     // TODO better enforcement
     let mngr = unsafe { &mut *(&raw mut MANAGER) };
-    mngr.write(SpinLock::new(ThreadManager::new(idle_task)))
+    mngr.write(SpinLock::new(ThreadManager::new(idle_thread)))
         .get_mut()
         .start(token);
 }
