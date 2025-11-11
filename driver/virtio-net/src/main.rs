@@ -10,8 +10,7 @@ use core::{
     mem::{self, ManuallyDrop},
     ptr::NonNull,
 };
-use lemmings_door::{ApiId, Cookie, Log};
-use lemmings_door::{dbg, log};
+use lemmings_door::{ApiId, Cookie, Log, log};
 use lemmings_idl_pci::Pci;
 use lemmings_idl_physical_allocator::Allocator;
 use lemmings_pci::{Header, Header0, HeaderCommon, ParsedBaseAddress};
@@ -279,20 +278,15 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
                     .unwrap()
                     .byte_add(offset as _)
             };
-            dbg!(offset, bir, size, table);
             let table = unsafe { NonNull::slice_from_raw_parts(table, size).as_ref() };
-            dbg!(&value, &address, &vector);
             let (value, address) = (value.into(), address.into());
             for tbl in &table[..2] {
-                dbg!();
                 tbl.set_message_data(value);
                 tbl.set_message_address(address);
                 tbl.set_vector_control_mask(false);
             }
-            dbg!();
             ctrl.set_enable(true);
             cap.set_message_control(ctrl);
-            dbg!();
             break 'cap;
         }
         panic!("No MSI-X?");
