@@ -45,7 +45,7 @@ struct ThreadControlBlock {
     ///
     /// Only valid while enqueued. Value is indeterminate while running.
     next: Cell<ThreadRef>,
-    priority: Cell<Priority>,
+    priority: Priority,
     program_counter: Cell<*const u8>,
     stack_pointer: Cell<*const u8>,
 }
@@ -99,7 +99,7 @@ impl ThreadManager {
     ///
     /// The thread may not already be enqueued.
     unsafe fn enqueue(&mut self, thread: ThreadHandle) {
-        self.pending[thread.0.priority.get() as usize].enqueue(thread)
+        self.pending[thread.0.priority as usize].enqueue(thread)
     }
 
     /// Dequeue the next thread with the higher priority.
@@ -178,7 +178,7 @@ impl Thread {
             let base = page.add(1).cast::<ThreadControlBlock>().sub(1);
             base.write(ThreadControlBlock {
                 next: Cell::new(thread),
-                priority: Cell::new(priority),
+                priority,
                 program_counter: Cell::new(entry as *const u8),
                 stack_pointer: Cell::new(base.cast::<usize>().as_ptr().sub(1).cast()),
             });
