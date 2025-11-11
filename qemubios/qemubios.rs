@@ -3,6 +3,8 @@
 use core::{cell::UnsafeCell, ptr::NonNull};
 
 mod x86 {
+    pub use core::arch::x86_64::__cpuid as cpuid;
+
     pub unsafe fn out32(port: u16, value: u32) {
         unsafe {
             core::arch::asm! {
@@ -854,10 +856,15 @@ mod pcie {
         const CFG_PCIE_BASE: u8 = 0x60;
 
         fn new() -> Self {
+            // TODO QEMU doesn't give us the correct amount of bits when using
+            // --enable-kvm without -host cpu
+            // We should use the memory map from fw_cfg instead apparently (E820?).
+            // That should be useful too for determining low/high half RAM split.
+            let x = unsafe { x86::cpuid(0x8000_0008) };
+            let guest_phys_bits = x.eax % 64;
             Self {
                 mmio32_base: Self::BASE.addr().get() as u32 + Self::SIZE as u32,
-                // FIXME properly detect maximum physical address bits
-                mmio64_base: 1 << 39,
+                mmio64_base: 1 << (guest_phys_bits - 1),
             }
         }
 
