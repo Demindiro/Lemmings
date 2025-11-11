@@ -12,3 +12,19 @@ is likely less efficient than keeping it nearby.
 
 Keeping harts outside the scheduler allows fully isolating untrusted
 processes from sensitive data that may leak through CPU state.
+
+
+Priorities
+----------
+
+The scheduler supports 4 priorities:
+
+1. Critical
+2. Realtime
+3. User
+4. Regular
+
+Threads with a higher priority *always* run first.
+
+If no tasks are queued, the idle task will run by default.
+This task's priority is always lower than the provided priorities.
