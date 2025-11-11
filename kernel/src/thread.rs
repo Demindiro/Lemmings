@@ -90,6 +90,17 @@ impl ThreadManager {
         self.dequeue_next().0.enter(token)
     }
 
+    /// Enqueue a thread.
+    ///
+    /// The thread will be added to the end of its respective queue.
+    ///
+    /// # Safety
+    ///
+    /// The thread may not already be enqueued.
+    unsafe fn enqueue(&mut self, thread: ThreadHandle) {
+        self.pending[thread.0.priority.get() as usize].enqueue_last(thread)
+    }
+
     /// Dequeue the next thread with the higher priority.
     fn dequeue_next(&mut self) -> ThreadHandle {
         self.pending
@@ -315,6 +326,16 @@ pub fn current() -> ThreadHandle {
 pub fn park(cs: CriticalSection<'_>) {
     let next = manager().lock(cs).dequeue_next();
     next.0.resume(cs)
+}
+
+/// Spawn a new thread and add it to the scheduler.
+pub fn spawn(priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
+    let thr = Thread::new(priority, entry)?;
+    critical_section::with(|cs| unsafe {
+        // SAFETY: we just created the thread
+        manager().lock(cs).enqueue(thr)
+    });
+    Ok(())
 }
 
 pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
