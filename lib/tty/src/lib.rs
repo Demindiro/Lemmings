@@ -189,7 +189,7 @@ impl<'a, const BBP: usize> Tty<'a, BBP> {
 
     fn scroll(&mut self) {
         self.scroll = self.scroll.wrapping_add(1);
-        if self.scroll > self.char_dim().y {
+        if self.scroll >= self.char_dim().y {
             self.scroll = 0
         }
     }
