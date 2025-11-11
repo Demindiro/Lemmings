@@ -357,10 +357,10 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
     let mut udp = socket::udp::Socket::new(rx, tx);
     let udp = sockets.add(udp);
 
-    let rx = unsafe { NonNull::slice_from_raw_parts(buf, 128).as_mut() };
-    buf = unsafe { buf.add(128) };
-    let tx = unsafe { NonNull::slice_from_raw_parts(buf, 128).as_mut() };
-    buf = unsafe { buf.add(128) };
+    let rx = unsafe { NonNull::slice_from_raw_parts(buf, 512).as_mut() };
+    buf = unsafe { buf.add(512) };
+    let tx = unsafe { NonNull::slice_from_raw_parts(buf, 512).as_mut() };
+    buf = unsafe { buf.add(512) };
     let [rx, tx] = [rx, tx].map(socket::tcp::SocketBuffer::new);
     let mut tcp = socket::tcp::Socket::new(rx, tx);
     let tcp = sockets.add(tcp);
