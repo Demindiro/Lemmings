@@ -18,3 +18,5 @@ Doc.build/%.css: Doc/%.css
 	mkdir -p $@
 
 .PHONY: build doc clean
+
+.SECONDARY: Doc.build/
