@@ -73,8 +73,8 @@ impl<T> SpinLock<T> {
         token
     }
 
-    pub unsafe fn get_mut_unchecked(&self) -> &mut T {
-        unsafe { &mut *self.value.get() }
+    pub const fn get_mut(&mut self) -> &mut T {
+        self.value.get_mut()
     }
 }
 

@@ -12,7 +12,7 @@ use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
 
-static MANAGER: SpinLock<ThreadManager> = SpinLock::new(ThreadManager::new());
+static mut MANAGER: mem::MaybeUninit<SpinLock<ThreadManager>> = mem::MaybeUninit::uninit();
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
@@ -32,10 +32,12 @@ pub struct RoundRobinQueue {
     cur: Option<ThreadRef>,
 }
 
+#[derive(Clone)]
 pub struct ThreadHandle(ThreadRef);
 
 struct ThreadManager {
     pending: [RoundRobinQueue; PRIORITY_COUNT],
+    idle_thread: ThreadHandle,
 }
 
 struct ThreadControlBlock {
@@ -65,9 +67,10 @@ struct ThreadRef(NonNull<Thread>);
 const _: () = assert!(mem::size_of::<Thread>() == PAGE_SIZE);
 
 impl ThreadManager {
-    pub const fn new() -> Self {
+    pub const fn new(idle_thread: ThreadHandle) -> Self {
         Self {
             pending: [const { RoundRobinQueue::new() }; PRIORITY_COUNT],
+            idle_thread,
         }
     }
 
@@ -77,59 +80,33 @@ impl ThreadManager {
         priority: Priority,
         entry: extern "sysv64" fn(),
     ) -> Result<(), ThreadSpawnError> {
-        let thread = self.create(priority, entry)?;
-        self.pending[priority as usize].enqueue_last(ThreadHandle(thread));
+        let thread = Thread::new(priority, entry)?;
+        self.pending[priority as usize].enqueue_last(thread);
         Ok(())
     }
 
-    /// Enter the next scheduled thread.
-    ///
-    /// # Warning
-    ///
-    /// Should only be called from [`_start`]!
-    pub fn enter(
-        &mut self,
-        priority: Priority,
-        entry: extern "sysv64" fn(),
-        token: KernelEntryToken,
-    ) -> ! {
-        self.create(priority, entry)
-            .expect("failed to create initial thread")
-            .enter(token);
+    /// Start the scheduler.
+    pub fn start(&mut self, token: KernelEntryToken) -> ! {
+        self.dequeue_next().0.enter(token)
     }
 
-    fn create(
-        &mut self,
-        priority: Priority,
-        entry: extern "sysv64" fn(),
-    ) -> Result<ThreadRef, ThreadSpawnError> {
-        let page = page::alloc_one_guarded(PageAttr::RW)?.cast::<Thread>();
-        // SAFETY:
-        // - the page we allocated is valid and writeable.
-        // - we will initialize it right now.
-        let thread = unsafe {
-            let thread = ThreadRef::wrap(page);
-            let base = page.add(1).cast::<ThreadControlBlock>().sub(1);
-            base.write(ThreadControlBlock {
-                left: Cell::new(thread),
-                right: Cell::new(thread),
-                priority: Cell::new(priority),
-                program_counter: Cell::new(entry as *const u8),
-                stack_pointer: Cell::new(base.cast::<usize>().as_ptr().sub(1).cast()),
-            });
-            thread
-        };
-        // FIXME alignment?
-        thread
-            .stack
-            .last()
-            .expect("not empty")
-            .set(mem::MaybeUninit::new(Thread::exit as usize));
-        Ok(thread)
+    /// Enqueue a thread.
+    ///
+    /// The thread will be added to the end of its respective queue.
+    ///
+    /// # Safety
+    ///
+    /// The thread may not already be enqueued.
+    unsafe fn enqueue(&mut self, thread: ThreadHandle) {
+        self.pending[thread.0.priority.get() as usize].enqueue_last(thread)
     }
 
-    fn dequeue_next(&mut self) -> Option<ThreadHandle> {
-        self.pending.iter_mut().find_map(|x| x.dequeue_first())
+    /// Dequeue the next thread with the higher priority.
+    fn dequeue_next(&mut self) -> ThreadHandle {
+        self.pending
+            .iter_mut()
+            .find_map(|x| x.dequeue_first())
+            .unwrap_or_else(|| self.idle_thread.clone())
     }
 }
 
@@ -188,6 +165,35 @@ impl ThreadRef {
 }
 
 impl Thread {
+    fn new(
+        priority: Priority,
+        entry: extern "sysv64" fn(),
+    ) -> Result<ThreadHandle, ThreadSpawnError> {
+        let page = page::alloc_one_guarded(PageAttr::RW)?.cast::<Thread>();
+        // SAFETY:
+        // - the page we allocated is valid and writeable.
+        // - we will initialize it right now.
+        let thread = unsafe {
+            let thread = ThreadRef::wrap(page);
+            let base = page.add(1).cast::<ThreadControlBlock>().sub(1);
+            base.write(ThreadControlBlock {
+                left: Cell::new(thread),
+                right: Cell::new(thread),
+                priority: Cell::new(priority),
+                program_counter: Cell::new(entry as *const u8),
+                stack_pointer: Cell::new(base.cast::<usize>().as_ptr().sub(1).cast()),
+            });
+            thread
+        };
+        // FIXME alignment?
+        thread
+            .stack
+            .last()
+            .expect("not empty")
+            .set(mem::MaybeUninit::new(Thread::exit as usize));
+        Ok(ThreadHandle(thread))
+    }
+
     fn enter(&self, _token: KernelEntryToken) -> ! {
         unsafe {
             set_current(self);
@@ -318,60 +324,33 @@ pub fn current() -> ThreadHandle {
 ///
 /// If the thread is re-entered execution will resume from this function.
 pub fn park(cs: CriticalSection<'_>) {
-    let next = MANAGER.lock(cs).dequeue_next();
-    match next {
-        Some(next) => next.0.resume(cs),
-        None => wait(cs),
-    }
+    let next = manager().lock(cs).dequeue_next();
+    next.0.resume(cs)
+}
+
+/// Spawn a new thread and add it to the scheduler.
+pub fn spawn(priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
+    let thr = Thread::new(priority, entry)?;
+    critical_section::with(|cs| unsafe {
+        // SAFETY: we just created the thread
+        manager().lock(cs).enqueue(thr)
+    });
+    Ok(())
 }
 
 pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
-    let threads = unsafe { MANAGER.get_mut_unchecked() };
-    threads.enter(Priority::Regular, entry, token)
+    let idle_thread =
+        Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
+    // SAFETY: we have exclusive access to MANAGER
+    // TODO better enforcement
+    let mngr = unsafe { &mut *(&raw mut MANAGER) };
+    mngr.write(SpinLock::new(ThreadManager::new(idle_thread)))
+        .get_mut()
+        .start(token);
 }
 
-/// Save thread state, enable interrupts and halt until the thread is resumed.
-fn wait(_cs: CriticalSection<'_>) {
-    let current = current();
-    unsafe {
-        asm! {
-            // TODO should we switch to a new stack/"sleep thread"?
-            // This works, but it is kinda weird that we are using the stack
-            // of a parked thread...
-            "push rbx",
-            "push rbp",
-            "pushf",
-            "lea {scratch}, [rip + 2f]",
-            "mov [{cur} + {TCB_SP}], rsp",
-            "mov [{cur} + {TCB_PC}], {scratch}",
-            "3: sti",
-            "hlt",
-            "jmp 3b",
-            "2:",
-            "popf",
-            "pop rbp",
-            "pop rbx",
-            scratch = out(reg) _,
-            cur = in(reg) &current.0.tcb,
-            TCB_SP = const mem::offset_of!(ThreadControlBlock, stack_pointer),
-            TCB_PC = const mem::offset_of!(ThreadControlBlock, program_counter),
-            lateout("rax") _,
-            lateout("rcx") _,
-            lateout("rdx") _,
-            //lateout("rbx") _, // "cannot be used for inline asm"
-            //lateout("rsp") _,
-            //lateout("rbp") _, // "cannot be used for inline asm"
-            lateout("rsi") _,
-            lateout("rdi") _,
-            lateout("r8") _,
-            lateout("r9") _,
-            lateout("r10") _,
-            lateout("r11") _,
-            lateout("r12") _,
-            lateout("r13") _,
-            lateout("r14") _,
-            lateout("r15") _,
-            options(preserves_flags),
-        }
-    }
+fn manager() -> &'static SpinLock<ThreadManager> {
+    // SAFETY: no code outside init() accesses MANAGER with exclusive access
+    // and init() should have initialized the manager.
+    unsafe { (&*(&raw const MANAGER)).assume_init_ref() }
 }

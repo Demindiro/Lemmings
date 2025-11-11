@@ -47,24 +47,42 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
     lemmings_qemubios::sys::halt();
 }
 
-// do not inline so the stupid compiler frees up stack space before entering init.
+// do not inline so the stupid compiler frees up stack space.
 #[inline(never)]
-fn main_init() -> elf::Entry {
+fn main_init() {
     arch::door::register();
     archive::door::register();
     //framebuffer::door::register();
     elf::door::register();
     pci::door::register();
     page::door::register();
+    log!("init: loading process");
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");
     let init = elf::load(init.data()).expect("failed to parse init");
-    init
+    log!("init: spawning thread");
+    // SAFETY: pray to God
+    let init: extern "sysv64" fn() = unsafe { core::mem::transmute(init) };
+    thread::spawn(thread::Priority::Regular, init).expect("failed to spawn init thread");
 }
 
-extern "sysv64" fn main() {
+extern "sysv64" fn main<'a>() {
+    // SAFETY: we start with interrupts disabled
+    let cs = unsafe { ::critical_section::CriticalSection::<'a>::new() };
     let init = main_init();
-    unsafe { core::mem::transmute::<_, extern "sysv64" fn()>(init)() }
+    // yield once to give the other thread a chance to run before halting
+    // keep in mind we're the idle thread
+    thread::park(cs);
+    loop {
+        // SAFETY: enabling interrupts and halting is safe at this point.
+        unsafe {
+            core::arch::asm! {
+                "sti",
+                "hlt",
+                options(nomem, nostack),
+            }
+        }
+    }
 }
 
 #[inline]
