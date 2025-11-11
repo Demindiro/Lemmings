@@ -109,14 +109,14 @@ impl IrqHandlers {
 
     fn wait(mut slf: SpinLockGuard<Self>, vector: u8, cs: CriticalSection<'_>) {
         let vector = usize::from(vector - VECTOR_STUB_OFFSET);
-        slf.queues[vector].enqueue_last(thread::current());
+        slf.queues[vector].enqueue(thread::current());
         drop(slf);
         thread::park(cs);
     }
 
     fn dequeue(&mut self, vector: u8) -> Option<ThreadHandle> {
         let vector = usize::from(vector - VECTOR_STUB_OFFSET);
-        self.queues[vector].dequeue_first()
+        self.queues[vector].dequeue()
     }
 
     fn reserve(&mut self) -> Option<u8> {
