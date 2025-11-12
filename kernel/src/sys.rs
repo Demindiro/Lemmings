@@ -18,6 +18,20 @@ macro_rules! log {
 }
 
 #[macro_export]
+macro_rules! debug {
+	($($arg:tt)*) => {{
+		if option_env!("KERNEL_DEBUG").is_some() {
+			// TODO auto include function name
+			// ... why the hell does Rust *still* not provide a __func__ equivalent?
+			use core::fmt::Write;
+			$crate::sys::with_log(|mut log| {
+				let _ = writeln!(&mut log, $($arg)*);
+			});
+		}
+	}};
+}
+
+#[macro_export]
 macro_rules! dbg {
     // NOTE: We cannot use `concat!` to make a static string as a format argument
     // of `eprintln!` because `file!` could contain a `{` or
