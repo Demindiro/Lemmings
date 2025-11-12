@@ -1218,6 +1218,16 @@ dict_begin Sys.Door
 		call [rbx + rax * 8]
 	enddef
 
+	def_as "call:2->1" call_2_1
+		call call_2_0
+		num_push rax
+	enddef
+
+	def_as "call:2->2" call_2_2
+		call call_2_1
+		num_push rdx
+	enddef
+
 	def_as "call:3->0" call_3_0
 		num_pop rbx
 		num_pop rax
