@@ -6,7 +6,7 @@ use crate::KernelEntryToken;
 
 pub mod door {
     pub fn register() {
-        super::x86_64::door::register();
+        super::x86_64::door::register_door();
     }
 }
 

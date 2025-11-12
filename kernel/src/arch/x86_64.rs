@@ -3,7 +3,7 @@ use crate::{
     sync::{SpinLock, SpinLockGuard},
     thread::{self, ThreadHandle},
 };
-use core::{arch::naked_asm, mem::MaybeUninit};
+use core::{arch::naked_asm, mem::MaybeUninit, num::NonZero};
 use critical_section::CriticalSection;
 use lemmings_x86_64::{
     apic::{
@@ -31,76 +31,46 @@ const VECTOR_STUB_OFFSET: u8 = 33;
 const VECTOR_TIMER: u8 = 32;
 const VECTOR_NR: usize = IDT_NR - VECTOR_STUB_OFFSET as usize;
 
-// FIXME unusable since thread event changes
 pub mod door {
-    use lemmings_idl_interrupt::*;
+    use super::*;
+    use lemmings_idl_irq::{IrqNr, TriggerMode, *};
 
     door! {
-        [lemmings_idl_interrupt Interrupt "x86-64 interrupt"]
-        wait
+        register_door [lemmings_idl_irq Irq "x86-64 IRQ"]
+        register
+        unregister
         done
-        reserve
-        release
-        map
     }
 
-    fn wait(x: IrqVector) {
-        todo!();
-        /*
-                let IrqVector { irq, vector } = x;
-                let irq = u32::from(irq).try_into().expect("invalid IRQ");
-                let vector = u32::from(vector).try_into().expect("invalid vector");
-                critical_section::with(|cs| {
-                    let h = super::IRQ_HANDLERS.lock(cs);
-                    super::InterruptHandlers::wait(h, vector, cs);
-                    let mut h = super::IRQ_HANDLERS.lock(cs);
-                    h.mask(irq);
-                    h.eoi();
-                });
-        */
+    fn register(Register { irq, mode }: Register) -> RegisterResult {
+        debug!("irq register {irq:?} {mode:?}");
+        let irq = irqnr(irq);
+        let edge = matches!(mode, TriggerMode::Edge);
+        let res = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).register_irq(irq, edge));
+        debug!("irq register -> {res:?}");
+        match res {
+            Result::Ok(()) => Ok.into(),
+            Result::Err(RegisterIrqError::AlreadyRegistered) => AlreadyRegistered.into(),
+            Result::Err(_) => Fail.into(),
+        }
     }
 
-    fn done(x: IrqVector) {
-        todo!();
-        /*
-                let IrqVector { irq, .. } = x;
-                let x = u32::from(irq).try_into().expect("invalid IRQ");
-                critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).unmask(x));
-        */
+    fn unregister(irq: IrqNr) {
+        debug!("irq unregister {irq:?}");
+        let irq = irqnr(irq);
+        critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).unregister_irq(irq));
     }
 
-    fn reserve() -> MaybeVector {
-        todo!()
-        /*
-                critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).reserve())
-                    .map(u32::from)
-                    .map_or_else(
-                        || MaybeVector::NoVector,
-                        |x| MaybeVector::Vector(Vector::try_from(u32::from(x)).unwrap()),
-                    )
-        */
+    fn done(irq: IrqNr) {
+        debug!("irq done {irq:?}");
+        let irq = irqnr(irq);
+        critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).unmask_irq(irq));
     }
 
-    fn release(x: Vector) {
-        todo!()
-        /*
-                let x = u32::from(x).try_into().expect("invalid vector");
-                critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).release(x));
-        */
-    }
-
-    fn map(x: Map) {
-        todo!()
-        /*
-                let Map { irq, vector, mode } = x;
-                let irq = u32::from(irq).try_into().expect("invalid IRQ");
-                let vector = u32::from(vector).try_into().expect("invalid vector");
-                let edge = match mode {
-                    TriggerMode::Level => false,
-                    TriggerMode::Edge => true,
-                };
-                critical_section::with(|cs| super::IRQ_HANDLERS.lock(cs).map(irq, vector, edge));
-        */
+    #[track_caller]
+    #[inline(always)]
+    fn irqnr(irq: impl Into<u32>) -> super::IrqNr {
+        super::IrqNr::try_from(irq.into()).expect("invalid IRQ")
     }
 }
 
@@ -109,11 +79,62 @@ pub struct Msi {
     pub address: mmu::Phys<mmu::A2>,
 }
 
+#[derive(Debug)]
 pub struct OutOfVectors;
+
+#[derive(Clone, Copy)]
+struct IrqNr(u8);
+#[derive(Clone, Copy)]
+struct VectorNr(NonZero<u8>);
+
+#[derive(Debug)]
+struct InvalidIrqNr;
+#[derive(Debug)]
+struct InvalidVectorNr;
+
+#[derive(Debug)]
+enum RegisterIrqError {
+    OutOfVectors,
+    AlreadyRegistered,
+}
 
 struct InterruptHandlers {
     registered: [Option<ThreadHandle>; VECTOR_NR],
     allocated: [u32; (VECTOR_NR + 32) / 32],
+    vector_to_irq: [u8; VECTOR_NR],
+}
+
+impl TryFrom<u32> for IrqNr {
+    type Error = InvalidIrqNr;
+
+    fn try_from(x: u32) -> Result<Self, Self::Error> {
+        // TODO figure out actual limits
+        u8::try_from(x)
+            .ok()
+            .filter(|x| (0..255).contains(x))
+            .map(Self)
+            .ok_or(InvalidIrqNr)
+    }
+}
+
+impl TryFrom<u32> for VectorNr {
+    type Error = InvalidVectorNr;
+
+    fn try_from(x: u32) -> Result<Self, Self::Error> {
+        // Note that 0xff is reserved for spurious interrupt
+        u8::try_from(x)
+            .ok()
+            .and_then(NonZero::new)
+            .filter(|x| (32..255).contains(&x.get()))
+            .map(Self)
+            .ok_or(InvalidVectorNr)
+    }
+}
+
+impl From<OutOfVectors> for RegisterIrqError {
+    fn from(_: OutOfVectors) -> Self {
+        RegisterIrqError::OutOfVectors
+    }
 }
 
 impl InterruptHandlers {
@@ -121,6 +142,7 @@ impl InterruptHandlers {
         Self {
             registered: [const { None }; VECTOR_NR],
             allocated: [0; (VECTOR_NR + 32) / 32],
+            vector_to_irq: [0; VECTOR_NR],
         }
     }
 
@@ -135,6 +157,27 @@ impl InterruptHandlers {
         let i = usize::from(vector - VECTOR_STUB_OFFSET);
         self.registered[i] = None;
         self.release(vector);
+    }
+
+    fn register_irq(&mut self, irq: IrqNr, edge: bool) -> Result<(), RegisterIrqError> {
+        if self.vector_to_irq.contains(&irq.0) {
+            return Err(RegisterIrqError::AlreadyRegistered);
+        }
+        let vector = self.register()?;
+        let i = usize::from(vector - VECTOR_STUB_OFFSET);
+        self.map(irq, vector, edge);
+        self.vector_to_irq[i] = irq.0;
+        Ok(())
+    }
+
+    fn unregister_irq(&mut self, irq: IrqNr) {
+        let i = self
+            .vector_to_irq
+            .iter()
+            .position(|x| *x == irq.0)
+            .expect("unmapped irq");
+        self.vector_to_irq[i] = 0xff;
+        self.unregister(VECTOR_STUB_OFFSET + i as u8);
     }
 
     fn notify(&self, vector: u8) {
@@ -158,24 +201,33 @@ impl InterruptHandlers {
         let vector = usize::from(vector - VECTOR_STUB_OFFSET);
         let [i, b] = [vector / 32, vector % 32];
         self.allocated[i] &= !(1 << b);
+        self.vector_to_irq[i] = 0xff;
     }
 
-    fn map(&mut self, irq: u8, vector: u8, edge: bool) {
+    fn map(&mut self, irq: IrqNr, vector: u8, edge: bool) {
         // FIXME detect Local APIC ID
         let mode = if edge {
             TriggerMode::Edge
         } else {
             TriggerMode::Level
         };
-        unsafe { self.ioapic().set_irq(irq, 0, vector, mode, false) }
+        unsafe { self.ioapic().set_irq(irq.0, 0, vector, mode, false) }
     }
 
-    fn mask(&mut self, irq: u8) {
-        unsafe { self.ioapic().mask_irq(irq, true) }
+    fn mask_irq(&mut self, irq: IrqNr) {
+        unsafe { self.ioapic().mask_irq(irq.0, true) }
     }
 
-    fn unmask(&mut self, irq: u8) {
-        unsafe { self.ioapic().mask_irq(irq, false) }
+    fn unmask_irq(&mut self, irq: IrqNr) {
+        unsafe { self.ioapic().mask_irq(irq.0, false) }
+    }
+
+    fn mask_vector(&mut self, vector: u8) {
+        let i = usize::from(vector - VECTOR_STUB_OFFSET);
+        let irq = self.vector_to_irq[i];
+        if irq != 0xff {
+            self.mask_irq(IrqNr(irq));
+        }
     }
 
     fn eoi(&mut self) {
@@ -290,8 +342,7 @@ extern "sysv64" fn interrupt_handler<'a>(vector: u8) {
     let cs = unsafe { CriticalSection::<'a>::new() };
     let mut h = INTERRUPT_HANDLERS.lock(cs);
     h.notify(vector);
-    // FIXME we can't mask vectors, only interrupts
-    //h.mask(vector);
+    h.mask_vector(vector);
     h.eoi();
 }
 
