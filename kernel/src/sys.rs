@@ -81,6 +81,7 @@ systable! {
     4 panic_begin
     5 panic_push
     6 panic_end
+    7 wait
 }
 
 pub struct Log<'cs> {
@@ -185,6 +186,10 @@ unsafe extern "sysv64" fn door_list(
 unsafe extern "sysv64" fn door_register(api: ApiId, name: Slice<u8>, table: Table) {
     let name = unsafe { name.as_str() };
     unsafe { door::register(api, name, table) };
+}
+
+unsafe extern "sysv64" fn wait() {
+    crate::thread::wait();
 }
 
 pub fn with_log<F, R>(f: F) -> R

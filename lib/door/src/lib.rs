@@ -53,6 +53,16 @@ macro_rules! dbg {
 mod ffi {
     use core::arch::asm;
 
+    pub unsafe fn syscall_0_0<const ID: usize>() {
+        unsafe {
+            asm! {
+                "call gs:[8 * {ID}]",
+                ID = const ID,
+                clobber_abi("sysv64"),
+            }
+        }
+    }
+
     pub unsafe fn syscall_0_1<const ID: usize>() -> u64 {
         let x: u64;
         unsafe {
@@ -169,6 +179,7 @@ mod sys {
     pub const PANIC_BEGIN: usize = 4;
     pub const PANIC_PUSH: usize = 5;
     pub const PANIC_END: usize = 6;
+    pub const WAIT: usize = 7;
 }
 
 #[derive(Clone, Debug)]
@@ -411,6 +422,10 @@ pub unsafe fn door_register<T>(door: Door<'static, '_, T>) -> Result<(), Hallway
     let e = table.as_ptr() as u64;
     let x = unsafe { ffi::syscall_5_1::<{ sys::DOOR_REGISTER }>(a, b, c, d, e) };
     (x == 0).then_some(()).ok_or(HallwayIsFull)
+}
+
+pub fn wait() {
+    unsafe { ffi::syscall_0_0::<{ sys::WAIT }>() }
 }
 
 #[panic_handler]

@@ -1,6 +1,6 @@
 mod x86_64;
 
-pub use x86_64::{Msi, alloc_msi, wait_msi};
+pub use x86_64::{Msi, register_msi, unregister_msi};
 
 use crate::KernelEntryToken;
 

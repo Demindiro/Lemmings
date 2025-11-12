@@ -7,7 +7,13 @@ use crate::{
     page::{self, PAGE_SIZE, PageAttr},
     sync::SpinLock,
 };
-use core::{arch::asm, cell::Cell, fmt, mem, ops, ptr::NonNull};
+use core::{
+    arch::asm,
+    cell::Cell,
+    fmt, mem, ops,
+    ptr::NonNull,
+    sync::atomic::{AtomicU8, Ordering},
+};
 use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
@@ -46,6 +52,7 @@ struct ThreadControlBlock {
     /// Only valid while enqueued. Value is indeterminate while running.
     next: Cell<ThreadRef>,
     priority: Priority,
+    state: Cell<ThreadState>,
     program_counter: Cell<*const u8>,
     stack_pointer: Cell<*const u8>,
 }
@@ -55,6 +62,35 @@ struct Thread {
     stack: [Cell<mem::MaybeUninit<usize>>;
         (4096 - mem::size_of::<ThreadControlBlock>()) / mem::size_of::<usize>()],
     tcb: ThreadControlBlock,
+}
+
+/// ```
+///                    wait
+///          .---------------------.    .----.
+///          |                     |    |    |
+///          v                     |    v    | resume
+///      +--------+              +--------+  |
+///      | parked |          .---| active |--'
+///      +--------+   notify |   +--------+
+///          |               v       ^
+///   notify |      +----------+     | resume/wait
+///          '----->| notified |-----'
+///                 +----------+
+/// ```
+// You may think "this should be an atomic to avoid locking".
+// However, spinlocks are *very* fast.
+// The reason locks are considered slow is primarily because of poor control
+// over scheduling in mainstream OSes.
+// Here, a spinlock will always be very fast.
+// Unless there is a ridiculous amount of contention, it should not be an issue.
+//
+// But more importantly, lock-free algorithms are *very* hard to get right.
+// Unless you can prove it is *significantly* faster, do not change this!
+#[derive(Clone, Copy)]
+enum ThreadState {
+    Parked = 0b00,
+    Active = 0b01,
+    Notified = 0b11,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -141,6 +177,36 @@ impl RoundRobinQueue {
     }
 }
 
+impl ThreadState {
+    /// Follow a wait edge.
+    ///
+    /// Returns `true` if the thread should resume immediately.
+    #[must_use]
+    fn wait(&mut self) -> bool {
+        let resume = matches!(self, Self::Notified);
+        *self = if resume { Self::Active } else { Self::Parked };
+        resume
+    }
+
+    /// Follow a notify edge.
+    ///
+    /// Returns `true` if the thread needs to be scheduled.
+    /// (if `false`, the thread is already scheduled.)
+    #[must_use]
+    fn notify(&mut self) -> bool {
+        let reschedule = matches!(self, Self::Parked);
+        *self = Self::Notified;
+        reschedule
+    }
+
+    /// Follow a resume edge
+    fn resume(&mut self) {
+        if !matches!(self, Self::Notified) {
+            *self = Self::Active;
+        }
+    }
+}
+
 impl ThreadRef {
     // Offset such that we point right at the TCB
     // This allows more efficient encoding of memory instructions with immediates.
@@ -179,6 +245,7 @@ impl Thread {
             base.write(ThreadControlBlock {
                 next: Cell::new(thread),
                 priority,
+                state: Cell::new(ThreadState::Active),
                 program_counter: Cell::new(entry as *const u8),
                 stack_pointer: Cell::new(base.cast::<usize>().as_ptr().sub(1).cast()),
             });
@@ -194,6 +261,7 @@ impl Thread {
     }
 
     fn enter(&self, _token: KernelEntryToken) -> ! {
+        debug!("enter {:?}", unsafe { ThreadRef::wrap(self.into()).0 });
         unsafe {
             set_current(self);
             asm! {
@@ -209,6 +277,9 @@ impl Thread {
     /// Enter this thread, saving the state of the current thread before entering.
     fn resume(&self, _cs: CriticalSection<'_>) {
         let current = current();
+        debug!("resume {:?} -> {:?}", current.0.0, unsafe {
+            ThreadRef::wrap(self.into()).0
+        });
         unsafe {
             set_current(self);
             asm! {
@@ -304,6 +375,32 @@ impl ThreadHandle {
     pub fn resume(&self, cs: CriticalSection<'_>) {
         self.0.resume(cs)
     }
+
+    pub fn notify(&self) {
+        critical_section::with(|cs| {
+            let mut m = manager().lock(cs);
+            if self.with_state(|x| x.notify()) {
+                debug!("notify {:?} -> resume", self.0.0);
+                // FIXME priority check!
+                // SAFETY: according to flags, this thread is not currently queued.
+                unsafe {
+                    m.enqueue(self.clone());
+                }
+            } else {
+                debug!("notify {:?} -> nop", self.0.0);
+            }
+        });
+    }
+
+    pub fn with_state<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut ThreadState) -> R,
+    {
+        let mut s = self.0.state.get();
+        let ret = (f)(&mut s);
+        self.0.state.set(s);
+        ret
+    }
 }
 
 unsafe fn set_current(thread: &Thread) {
@@ -316,17 +413,6 @@ pub fn current() -> ThreadHandle {
     unsafe { ThreadHandle(ThreadRef::wrap_tcb(tcb)) }
 }
 
-/// Park the current thread.
-///
-/// This removes it from the main scheduler's queues.
-/// If the thread isn't referenced anywhere else, it will be lost!
-///
-/// If the thread is re-entered execution will resume from this function.
-pub fn park(cs: CriticalSection<'_>) {
-    let next = manager().lock(cs).dequeue_next();
-    next.0.resume(cs)
-}
-
 /// Spawn a new thread and add it to the scheduler.
 pub fn spawn(priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
     let thr = Thread::new(priority, entry)?;
@@ -335,6 +421,25 @@ pub fn spawn(priority: Priority, entry: extern "sysv64" fn()) -> Result<(), Thre
         manager().lock(cs).enqueue(thr)
     });
     Ok(())
+}
+
+/// Wait for a notification.
+///
+/// If a notification has already been signaled,
+/// this function returns immediately.
+pub fn wait() {
+    critical_section::with(|cs| {
+        let mut m = manager().lock(cs);
+        if current().with_state(|x| x.wait()) {
+            debug!("thread::wait {:?} -> return", current().0.0);
+            return;
+        }
+        debug!("thread::wait {:?} -> yield", current().0.0);
+        let next = m.dequeue_next();
+        drop(m);
+        next.0.resume(cs);
+        debug!("thread::wait {:?} -> continue", current().0.0);
+    })
 }
 
 pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
