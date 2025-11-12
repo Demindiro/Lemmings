@@ -211,6 +211,7 @@ f 0 log
 f 1 panic
 f 2 door_list
 f 3 door_register
+f 7 wait
 .purgem f
 
 .macro find_door name:req, api_h:req, api_l:req
@@ -1158,6 +1159,10 @@ dict_begin Sys
 		obj_pop rdi
 		mov esi, [rdi - 8]
 		syscall_panic
+	enddef
+
+	def wait
+		syscall_wait
 	enddef
 
 	def_as "become:0" Sys.become_0
