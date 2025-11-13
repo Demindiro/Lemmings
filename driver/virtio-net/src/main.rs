@@ -10,9 +10,8 @@ use core::{
     mem::{self, ManuallyDrop},
     ptr::NonNull,
 };
-use lemmings_door::{ApiId, Cookie, Log, log};
+use lemmings_door::{Cookie, Log, log};
 use lemmings_idl_pci::Pci;
-use lemmings_idl_physical_allocator::Allocator;
 use lemmings_pci::{Header, Header0, HeaderCommon, ParsedBaseAddress};
 use lemmings_virtio_net::{Packet, PhysAddr, PhysRegion};
 
@@ -219,7 +218,7 @@ fn main() {
     let door = door.get();
     let lemmings_idl_pci::Configuration {
         base,
-        segment_group,
+        segment_group: _,
         bus_start,
         bus_end,
     } = door.configuration();
@@ -350,7 +349,7 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
     buf = unsafe { buf.add(2 * mem::size_of_val(&tx_meta[0])) };
     let [rx, tx] =
         [(rx, rx_meta), (tx, tx_meta)].map(|(x, y)| socket::udp::PacketBuffer::new(y, x));
-    let mut udp = socket::udp::Socket::new(rx, tx);
+    let udp = socket::udp::Socket::new(rx, tx);
     let udp = sockets.add(udp);
 
     let rx = unsafe { NonNull::slice_from_raw_parts(buf, 512).as_mut() };
@@ -358,7 +357,7 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
     let tx = unsafe { NonNull::slice_from_raw_parts(buf, 512).as_mut() };
     buf = unsafe { buf.add(512) };
     let [rx, tx] = [rx, tx].map(socket::tcp::SocketBuffer::new);
-    let mut tcp = socket::tcp::Socket::new(rx, tx);
+    let tcp = socket::tcp::Socket::new(rx, tx);
     let tcp = sockets.add(tcp);
 
     assert!(unsafe { buf.offset_from(og_buf) as usize } <= LEN);
