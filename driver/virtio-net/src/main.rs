@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-#![forbid(improper_ctypes_definitions)]
+#![forbid(improper_ctypes_definitions, unused_must_use)]
 #![feature(cell_update)] // stabilized in 1.88
 
 extern crate lemmings_door;
@@ -66,7 +66,7 @@ impl<'d> Dev<'d> {
             let (mut virt, phys) = s.get(i);
             // SAFETY: we have exclusive access
             let virt = unsafe { virt.as_mut() };
-            s.with_virtio(|x| unsafe { x.insert_buffer(virt, phys) });
+            s.with_virtio(|x| unsafe { x.insert_buffer(virt, phys).unwrap() });
         }
 
         Ok(s)
@@ -368,8 +368,8 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
         // FIXME proper timekeeping
         time += smoltcp::time::Duration::from_micros(1);
         //time += smoltcp::time::Duration::from_secs(1000);
-        dev.collect_received();
-        dev.collect_sent();
+        dev.collect_received().unwrap();
+        dev.collect_sent().unwrap();
         match iface.poll(time, dev, sockets) {
             iface::PollResult::None => {
                 lemmings_door::wait();
@@ -387,7 +387,7 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
                         .map(|x| iface.routes_mut().add_default_ipv4_route(x));
                     iface.update_ip_addrs(|x| {
                         x.clear();
-                        x.push(c.address.into());
+                        x.push(c.address.into()).unwrap();
                     });
                 }
             }
