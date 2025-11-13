@@ -5,7 +5,7 @@
 use crate::{
     KernelEntryToken,
     page::{self, PAGE_SIZE, PageAttr},
-    sync::SpinLock,
+    sync::{self, SpinLock, SpinLockGuard},
 };
 use core::{
     arch::asm,
@@ -275,11 +275,13 @@ impl Thread {
     }
 
     /// Enter this thread, saving the state of the current thread before entering.
-    fn resume(&self, _cs: CriticalSection<'_>) {
+    fn resume(&self, lock: SpinLockGuard<'_, '_, ThreadManager>) {
         let current = current();
         debug!("resume {:?} -> {:?}", current.0.0, unsafe {
             ThreadRef::wrap(self.into()).0
         });
+        // SAFETY: we will disengage the lock exactly once in the assembly code
+        let lock = unsafe { lock.into_inner_lock() };
         unsafe {
             set_current(self);
             asm! {
@@ -289,6 +291,12 @@ impl Thread {
                 "lea {scratch}, [rip + 2f]",
                 "mov [{cur} + {TCB_SP}], rsp",
                 "mov [{cur} + {TCB_PC}], {scratch}",
+                // we have saved the thread's state, so it is now safe to disengage the lock
+                // x86 supports TSO, so a simple mov does the trick.
+                // ... well, not quite because of the store buffer,
+                // but stores are ordered wrt other stores *on the same core*,
+                // so any changes made to the ThreadManager will be visible before this store.
+                "mov byte ptr [{lock}], {UNLOCK}",
                 "mov rsp, {sp}",
                 "jmp {pc}",
                 "2:",
@@ -299,8 +307,10 @@ impl Thread {
                 cur = in(reg) &current.0.tcb,
                 sp = in(reg) self.stack_pointer.get(),
                 pc = in(reg) self.program_counter.get(),
+                lock = in(reg) lock,
                 TCB_SP = const mem::offset_of!(ThreadControlBlock, stack_pointer),
                 TCB_PC = const mem::offset_of!(ThreadControlBlock, program_counter),
+                UNLOCK = const sync::imp::UNLOCKED,
                 lateout("rax") _,
                 lateout("rcx") _,
                 lateout("rdx") _,
@@ -372,10 +382,6 @@ impl fmt::Debug for ThreadSpawnError {
 }
 
 impl ThreadHandle {
-    pub fn resume(&self, cs: CriticalSection<'_>) {
-        self.0.resume(cs)
-    }
-
     pub fn notify(&self) {
         critical_section::with(|cs| {
             let mut m = manager().lock(cs);
@@ -436,8 +442,7 @@ pub fn wait() {
         }
         debug!("thread::wait {:?} -> yield", current().0.0);
         let next = m.dequeue_next();
-        drop(m);
-        next.0.resume(cs);
+        next.0.resume(m);
         debug!("thread::wait {:?} -> continue", current().0.0);
     })
 }

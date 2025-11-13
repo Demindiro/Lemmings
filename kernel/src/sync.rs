@@ -2,14 +2,16 @@ use crate::KernelEntryToken;
 use core::{cell::UnsafeCell, ops};
 use critical_section::CriticalSection;
 
-mod imp {
+pub mod imp {
     use core::sync::atomic::{AtomicU8, Ordering};
 
+    #[repr(transparent)]
     pub struct SpinLock {
         lock: AtomicU8,
     }
 
-    const LOCKED: u8 = 1 << 0;
+    pub const UNLOCKED: u8 = 0 << 0;
+    pub const LOCKED: u8 = 1 << 0;
 
     impl SpinLock {
         pub const fn new() -> Self {
@@ -75,6 +77,19 @@ impl<T> SpinLock<T> {
 
     pub const fn get_mut(&mut self) -> &mut T {
         self.value.get_mut()
+    }
+}
+
+impl<'lock, 'cs, T> SpinLockGuard<'lock, 'cs, T> {
+    /// # Safety
+    ///
+    /// The lock may only get disengaged once.
+    ///
+    /// # Warning
+    ///
+    /// The lock must get disengaged manually.
+    pub unsafe fn into_inner_lock(self) -> &'lock imp::SpinLock {
+        &core::mem::ManuallyDrop::new(self).lock.lock
     }
 }
 
