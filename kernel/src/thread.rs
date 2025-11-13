@@ -7,14 +7,7 @@ use crate::{
     page::{self, PAGE_SIZE, PageAttr},
     sync::{self, SpinLock, SpinLockGuard},
 };
-use core::{
-    arch::asm,
-    cell::Cell,
-    fmt, mem, ops,
-    ptr::NonNull,
-    sync::atomic::{AtomicU8, Ordering},
-};
-use critical_section::CriticalSection;
+use core::{arch::asm, cell::Cell, fmt, mem, ops, ptr::NonNull};
 
 const PRIORITY_COUNT: usize = 4;
 

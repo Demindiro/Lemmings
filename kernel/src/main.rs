@@ -72,7 +72,7 @@ fn main_init() {
 }
 
 extern "sysv64" fn main<'a>() {
-    let init = main_init();
+    main_init();
     // SAFETY: enabling interrupts and halting is safe at this point.
     loop {
         debug!("idle wait");

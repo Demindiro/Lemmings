@@ -1,6 +1,6 @@
 use crate::{
     KernelEntryToken, page,
-    sync::{SpinLock, SpinLockGuard},
+    sync::SpinLock,
     thread::{self, ThreadHandle},
 };
 use core::{arch::naked_asm, mem::MaybeUninit, num::NonZero};
