@@ -246,7 +246,7 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
     use lemmings_idl_physical_allocator::*;
 
     // we'll use one MSI-X vector for now
-    let Msi { address, data } = match door_pci.register_msi() {
+    let Msi { address, data } = match door_pci.subscribe_msi() {
         MaybeMsi::Msi(x) => x,
         MaybeMsi::NoMsi(_) => panic!("no MSI vectors remaining :("),
     };

@@ -21,13 +21,13 @@ door Pci {
 	-- Release exclusive access to a device.
 	release_dev = Bdf -> Void
 
-	-- Register the current thread for an MSI.
+	-- Subscribe the current thread for an MSI.
 	--
 	-- The returned address and value should be programmed in the device.
-	register_msi = Void -> MaybeMsi
+	subscribe_msi = Void -> MaybeMsi
 
-	-- Unregister the thread for an MSI.
-	unregister_msi = Msi -> Void
+	-- Unsubscribe the thread for an MSI.
+	unsubscribe_msi = Msi -> Void
 
 	-- Allocate 32-bit MMIO space.
 	--

@@ -5,16 +5,16 @@
 -- 2. Interrupt is claimed, disabling the interrupt.
 -- 3. Interrupt is marked as completed ("End Of Interrupt" / "EOI")
 door Irq {
-	-- Register the current thread interrupt events of an IRQ.
+	-- Subscribe the current thread interrupt events of an IRQ.
 	--
 	-- The interrupt is automatically claimed as soon as it occurs,
 	-- disabling the interrupt until done is called.
 	--
-	-- Only one thread can be registered to an IRQ at any time.
-	register = Register -> RegisterResult
+	-- Only one thread can be subscribed to an IRQ at any time.
+	subscribe = Subscribe -> SubscribeResult
 
-	-- Unregister the current thread from interrupt events of an IRQ.
-	unregister = IrqNr -> Void
+	-- Unsubscribe the current thread from interrupt events of an IRQ.
+	unsubscribe = IrqNr -> Void
 
 	-- Mark an IRQ as completed.
 	--
@@ -36,12 +36,12 @@ u8 Level = 0
 u8 Edge = 1
 sum TriggerMode = Level | Edge
 
-record Register {
+record Subscribe {
 	irq = IrqNr
 	mode = TriggerMode
 }
 
 u8 Ok = 0
 u8 Fail = 1
-u8 AlreadyRegistered = 2
-sum RegisterResult = Ok | Fail | AlreadyRegistered
+u8 AlreadySubscribed = 2
+sum SubscribeResult = Ok | Fail | AlreadySubscribed

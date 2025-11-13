@@ -36,29 +36,29 @@ pub mod door {
     use lemmings_idl_irq::{IrqNr, TriggerMode, *};
 
     door! {
-        register_door [lemmings_idl_irq Irq "x86-64 IRQ"]
-        register
-        unregister
+        [lemmings_idl_irq Irq "x86-64 IRQ"]
+        subscribe
+        unsubscribe
         done
     }
 
-    fn register(Register { irq, mode }: Register) -> RegisterResult {
-        debug!("irq register {irq:?} {mode:?}");
+    fn subscribe(Subscribe { irq, mode }: Subscribe) -> SubscribeResult {
+        debug!("irq subscribe {irq:?} {mode:?}");
         let irq = irqnr(irq);
         let edge = matches!(mode, TriggerMode::Edge);
-        let res = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).register_irq(irq, edge));
-        debug!("irq register -> {res:?}");
+        let res = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).subscribe_irq(irq, edge));
+        debug!("irq subscribe -> {res:?}");
         match res {
             Result::Ok(()) => Ok.into(),
-            Result::Err(RegisterIrqError::AlreadyRegistered) => AlreadyRegistered.into(),
+            Result::Err(SubscribeIrqError::AlreadySubscribed) => AlreadySubscribed.into(),
             Result::Err(_) => Fail.into(),
         }
     }
 
-    fn unregister(irq: IrqNr) {
-        debug!("irq unregister {irq:?}");
+    fn unsubscribe(irq: IrqNr) {
+        debug!("irq unsubscribe {irq:?}");
         let irq = irqnr(irq);
-        critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).unregister_irq(irq));
+        critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).unsubscribe_irq(irq));
     }
 
     fn done(irq: IrqNr) {
@@ -93,13 +93,13 @@ struct InvalidIrqNr;
 struct InvalidVectorNr;
 
 #[derive(Debug)]
-enum RegisterIrqError {
+enum SubscribeIrqError {
     OutOfVectors,
-    AlreadyRegistered,
+    AlreadySubscribed,
 }
 
 struct InterruptHandlers {
-    registered: [Option<ThreadHandle>; VECTOR_NR],
+    subscribed: [Option<ThreadHandle>; VECTOR_NR],
     allocated: [u32; (VECTOR_NR + 32) / 32],
     vector_to_irq: [u8; VECTOR_NR],
 }
@@ -131,58 +131,58 @@ impl TryFrom<u32> for VectorNr {
     }
 }
 
-impl From<OutOfVectors> for RegisterIrqError {
+impl From<OutOfVectors> for SubscribeIrqError {
     fn from(_: OutOfVectors) -> Self {
-        RegisterIrqError::OutOfVectors
+        SubscribeIrqError::OutOfVectors
     }
 }
 
 impl InterruptHandlers {
     const fn new() -> Self {
         Self {
-            registered: [const { None }; VECTOR_NR],
+            subscribed: [const { None }; VECTOR_NR],
             allocated: [0; (VECTOR_NR + 32) / 32],
             vector_to_irq: [0; VECTOR_NR],
         }
     }
 
-    fn register(&mut self) -> Result<u8, OutOfVectors> {
+    fn subscribe(&mut self) -> Result<u8, OutOfVectors> {
         let vector = self.reserve().ok_or(OutOfVectors)?;
         let i = usize::from(vector - VECTOR_STUB_OFFSET);
-        self.registered[i] = Some(thread::current());
+        self.subscribed[i] = Some(thread::current());
         Ok(vector)
     }
 
-    fn unregister(&mut self, vector: u8) {
+    fn unsubscribe(&mut self, vector: u8) {
         let i = usize::from(vector - VECTOR_STUB_OFFSET);
-        self.registered[i] = None;
+        self.subscribed[i] = None;
         self.release(vector);
     }
 
-    fn register_irq(&mut self, irq: IrqNr, edge: bool) -> Result<(), RegisterIrqError> {
+    fn subscribe_irq(&mut self, irq: IrqNr, edge: bool) -> Result<(), SubscribeIrqError> {
         if self.vector_to_irq.contains(&irq.0) {
-            return Err(RegisterIrqError::AlreadyRegistered);
+            return Err(SubscribeIrqError::AlreadySubscribed);
         }
-        let vector = self.register()?;
+        let vector = self.subscribe()?;
         let i = usize::from(vector - VECTOR_STUB_OFFSET);
         self.map(irq, vector, edge);
         self.vector_to_irq[i] = irq.0;
         Ok(())
     }
 
-    fn unregister_irq(&mut self, irq: IrqNr) {
+    fn unsubscribe_irq(&mut self, irq: IrqNr) {
         let i = self
             .vector_to_irq
             .iter()
             .position(|x| *x == irq.0)
             .expect("unmapped irq");
         self.vector_to_irq[i] = 0xff;
-        self.unregister(VECTOR_STUB_OFFSET + i as u8);
+        self.unsubscribe(VECTOR_STUB_OFFSET + i as u8);
     }
 
     fn notify(&self, vector: u8) {
         let i = usize::from(vector - VECTOR_STUB_OFFSET);
-        self.registered[i].as_ref().map(|x| x.notify());
+        self.subscribed[i].as_ref().map(|x| x.notify());
     }
 
     fn reserve(&mut self) -> Option<u8> {
@@ -244,17 +244,17 @@ impl InterruptHandlers {
     }
 }
 
-pub fn register_msi() -> Result<Msi, OutOfVectors> {
-    let vector = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).register())?;
+pub fn subscribe_msi() -> Result<Msi, OutOfVectors> {
+    let vector = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).subscribe())?;
     Ok(Msi {
         data: vector.into(),
         address: apic::local::DEVICE_LAPIC_ADDRESS.into(),
     })
 }
 
-pub fn unregister_msi(msi: Msi) {
+pub fn unsubscribe_msi(msi: Msi) {
     let vector = (msi.data & 0xff).try_into().expect("invalid vector");
-    critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).unregister(vector));
+    critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).unsubscribe(vector));
 }
 
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {

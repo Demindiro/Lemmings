@@ -11,8 +11,8 @@ pub mod door {
         configuration
         acquire_dev
         release_dev
-        register_msi
-        unregister_msi
+        subscribe_msi
+        unsubscribe_msi
         allocate_mmio32
         allocate_mmio64
         release_mmio
@@ -37,8 +37,8 @@ pub mod door {
         todo!()
     }
 
-    fn register_msi() -> MaybeMsi {
-        crate::arch::register_msi().map_or(NoMsi { data: 0.into() }.into(), |x| {
+    fn subscribe_msi() -> MaybeMsi {
+        crate::arch::subscribe_msi().map_or(NoMsi { data: 0.into() }.into(), |x| {
             Msi {
                 address: u64::from(x.address).try_into().unwrap(),
                 data: x.data.into(),
@@ -47,8 +47,8 @@ pub mod door {
         })
     }
 
-    fn unregister_msi(Msi { address, data }: Msi) {
-        crate::arch::unregister_msi(crate::arch::Msi {
+    fn unsubscribe_msi(Msi { address, data }: Msi) {
+        crate::arch::unsubscribe_msi(crate::arch::Msi {
             address: lemmings_x86_64::mmu::Phys::new(u64::from(address)).unwrap(),
             data: data.into(),
         });

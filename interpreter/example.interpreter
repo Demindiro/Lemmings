@@ -10,10 +10,10 @@
 		@drop
 	end ;
 
-0x9b7ce400f1f72106 0x8b598efc3fdf1046 "interrupt" find-door
+0x527a31dcf1053f1b 0x89616ff91383a800 "interrupt" find-door
 : interrupt-door ! const ;
-: interrupt->register   0 interrupt-door Sys Door call:2->1 ;
-: interrupt->unregister 1 interrupt-door Sys Door call:1->0 ;
+: interrupt->subscribe   0 interrupt-door Sys Door call:2->1 ;
+: interrupt->unsubscribe 1 interrupt-door Sys Door call:1->0 ;
 : interrupt->done       2 interrupt-door Sys Door call:1->0 ;
 : interrupt->LEVEL 0 ;
 : interrupt->EDGE  1 ;
@@ -129,7 +129,7 @@ Sys become:0
 
 ps2_init
 
-0x01 interrupt->LEVEL interrupt->register
+0x01 interrupt->LEVEL interrupt->subscribe
 if 0 <> then "failed to map IRQ 1" Sys panic end
 : ps2_done 0x01 interrupt->done ;
 

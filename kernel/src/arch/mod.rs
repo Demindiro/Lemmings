@@ -1,12 +1,12 @@
 mod x86_64;
 
-pub use x86_64::{Msi, register_msi, unregister_msi};
+pub use x86_64::{Msi, subscribe_msi, unsubscribe_msi};
 
 use crate::KernelEntryToken;
 
 pub mod door {
     pub fn register() {
-        super::x86_64::door::register_door();
+        super::x86_64::door::register();
     }
 }
 
