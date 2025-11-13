@@ -1,8 +1,5 @@
 use {
-    crate::{
-        mmu::{self, Phys},
-        tss::Tss,
-    },
+    crate::{mmu, tss::Tss},
     core::{arch::asm, marker::PhantomData, mem},
 };
 
@@ -53,7 +50,7 @@ pub struct GdtEntryHigh {
 pub struct GdtPointer {
     _padding: [u16; 3],
     limit: u16,
-    address: u64,
+    address: mmu::Virt<mmu::A6>,
 }
 
 // align to ensure it is contained entirely within one page
@@ -165,11 +162,11 @@ impl<'a> Gdt<'a> {
 }
 
 impl GdtPointer {
-    pub fn new(gdt: Phys<mmu::A6>) -> Self {
+    pub fn new(gdt: mmu::Virt<mmu::A6>) -> Self {
         Self {
             _padding: [0; 3],
             limit: Gdt::SIZE - 1,
-            address: gdt.into(),
+            address: gdt,
         }
     }
 

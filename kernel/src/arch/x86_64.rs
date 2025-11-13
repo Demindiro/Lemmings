@@ -259,15 +259,14 @@ pub fn unsubscribe_msi(msi: Msi) {
 
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {
     unsafe { pic::init() };
-    let root = unsafe { mmu::current_root::<mmu::L4>() };
-    init_gdt(&root);
-    init_idt(&root);
+    init_gdt();
+    init_idt();
     init_apic();
     token
 }
 
 #[inline(always)]
-fn init_gdt(root: &mmu::Root<mmu::L4>) {
+fn init_gdt() {
     let stack_top = 0x1000 as *const usize;
     unsafe { (&mut *(&raw mut TSS)).set_ist(1.try_into().unwrap(), stack_top) };
     #[allow(static_mut_refs)]
@@ -276,14 +275,11 @@ fn init_gdt(root: &mmu::Root<mmu::L4>) {
     };
     let gdtp = (&raw const GDT).addr() as u64;
     let gdtp = mmu::Virt::new(gdtp).expect("GDT should be in valid virtual space");
-    let gdtp = root
-        .translate(&page::IdentityMapper, gdtp)
-        .expect("GDT should be mapped");
     unsafe { GdtPointer::new(gdtp).activate() };
 }
 
 #[inline(always)]
-fn init_idt(root: &mmu::Root<mmu::L4>) {
+fn init_idt() {
     let idt = unsafe { &mut *(&raw mut IDT) };
 
     let mut ist1 = |f| IdtEntry::new(Gdt::KERNEL_CS, f, Ist::N1);
@@ -300,9 +296,6 @@ fn init_idt(root: &mmu::Root<mmu::L4>) {
 
     let idtp = (&raw const IDT).addr() as u64;
     let idtp = mmu::Virt::new(idtp).expect("IDT should be in valid virtual space");
-    let idtp = root
-        .translate(&page::IdentityMapper, idtp)
-        .expect("IDT should be mapped");
     unsafe { IdtPointer::new::<IDT_NR>(idtp).activate() };
 }
 

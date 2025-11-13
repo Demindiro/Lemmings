@@ -1,4 +1,4 @@
-use crate::mmu::{A4, Phys};
+use crate::mmu;
 use core::{arch::asm, mem};
 
 pub mod nr {
@@ -141,20 +141,17 @@ impl<const MAX: usize> Idt<MAX> {
 #[repr(packed)]
 pub struct IdtPointer {
     limit: u16,
-    offset: u64,
+    offset: mmu::Virt<mmu::A4>,
 }
 
 impl IdtPointer {
-    pub fn new<const MAX: usize>(phys: Phys<A4>) -> Self {
+    pub fn new<const MAX: usize>(idt: mmu::Virt<mmu::A4>) -> Self {
         let limit = const {
             let x = mem::size_of::<Idt<MAX>>() - 1;
             assert!(x <= u16::MAX as usize);
             x as u16
         };
-        Self {
-            limit,
-            offset: phys.into(),
-        }
+        Self { limit, offset: idt }
     }
 
     pub unsafe fn activate(&self) {
