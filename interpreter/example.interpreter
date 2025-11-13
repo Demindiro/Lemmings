@@ -10,13 +10,11 @@
 		@drop
 	end ;
 
-0xff2ad0f92941f6c6 0x02e8903cae084b61 "interrupt" find-door
+0x527a31dcf1053f1b 0x89616ff91383a800 "interrupt" find-door
 : interrupt-door ! const ;
-: interrupt->wait    0 interrupt-door Sys Door call:2->0 ;
-: interrupt->done    1 interrupt-door Sys Door call:2->0 ;
-: interrupt->acquire 2 interrupt-door Sys Door call:0->1 ;
-: interrupt->release 3 interrupt-door Sys Door call:1->0 ;
-: interrupt->map     4 interrupt-door Sys Door call:3->0 ;
+: interrupt->subscribe   0 interrupt-door Sys Door call:2->1 ;
+: interrupt->unsubscribe 1 interrupt-door Sys Door call:1->0 ;
+: interrupt->done       2 interrupt-door Sys Door call:1->0 ;
 : interrupt->LEVEL 0 ;
 : interrupt->EDGE  1 ;
 
@@ -67,8 +65,6 @@ string-as-range 1 0 loader-elf->load
 if #dup 0 = then "Failed to load virtio-net" Sys panic end
 "Starting virtio-net" Sys log
 Sys become:0
-
-shutdown
 
 : IO_DATA    0x60 ;
 : IO_STATUS  0x64 ;
@@ -133,13 +129,12 @@ shutdown
 
 ps2_init
 
-0x01 interrupt->acquire
-0x01 dup2 interrupt->LEVEL interrupt->map
-dup : ps2_wait 0x01 ! const interrupt->wait ;
-    : ps2_done 0x01 ! const interrupt->done ;
+0x01 interrupt->LEVEL interrupt->subscribe
+if 0 <> then "failed to map IRQ 1" Sys panic end
+: ps2_done 0x01 interrupt->done ;
 
 if 1 then
-	ps2_wait
+	Sys wait
 	"Got an interrupt!!!" Sys log
 	ps2_read  String natural  Sys log
 	ps2_done

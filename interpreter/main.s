@@ -211,6 +211,7 @@ f 0 log
 f 1 panic
 f 2 door_list
 f 3 door_register
+f 7 wait
 .purgem f
 
 .macro find_door name:req, api_h:req, api_l:req
@@ -1160,6 +1161,10 @@ dict_begin Sys
 		syscall_panic
 	enddef
 
+	def wait
+		syscall_wait
+	enddef
+
 	def_as "become:0" Sys.become_0
 		_start_exit
 		jmp [NUM_STACK_HEAD]
@@ -1211,6 +1216,16 @@ dict_begin Sys.Door
 		num_pop rsi
 		num_pop rdi
 		call [rbx + rax * 8]
+	enddef
+
+	def_as "call:2->1" call_2_1
+		call call_2_0
+		num_push rax
+	enddef
+
+	def_as "call:2->2" call_2_2
+		call call_2_1
+		num_push rdx
 	enddef
 
 	def_as "call:3->0" call_3_0

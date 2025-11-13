@@ -21,14 +21,13 @@ door Pci {
 	-- Release exclusive access to a device.
 	release_dev = Bdf -> Void
 
-	-- Allocate a vector for an MSI
-	map_msi = Void -> MaybeMsiVector
+	-- Subscribe the current thread for an MSI.
+	--
+	-- The returned address and value should be programmed in the device.
+	subscribe_msi = Void -> MaybeMsi
 
-	-- Release a vector for an MSI
-	unmap_msi = Vector -> Void
-
-	-- Wait for a MSI interrupt
-	wait_msi = Vector -> Void
+	-- Unsubscribe the thread for an MSI.
+	unsubscribe_msi = Msi -> Void
 
 	-- Allocate 32-bit MMIO space.
 	--
@@ -67,24 +66,20 @@ u8 GotLock = 0
 u8 AlreadyLocked = 1
 sum AcquireResult = GotLock | AlreadyLocked
 
-record MsiVector {
+record Msi {
 	address = MsiAddress
-	value = MsiValue
-	vector = Vector
+	data = MsiData
 }
-record NoMsiVector {
+record NoMsi {
 	address = NoMsiAddress
-	value = MsiValue
-	vector = Vector
+	data = MsiData
 }
-sum MaybeMsiVector = MsiVector | NoMsiVector
+sum MaybeMsi = Msi | NoMsi
 
 u64 NoMsiAddress = 0
 u64 MsiAddress = 1 to 0xffff_ffff_ffff_ffff
 
-u32 MsiValue = 0 to 0xffff_ffff
-
-u32 Vector = 0 until 0xffff_ffff
+u32 MsiData = 0 to 0xffff_ffff
 
 u8 AllocateMmio32 = 4 to 31
 u8 AllocateMmio64 = 4 to 63

@@ -11,9 +11,8 @@ pub mod door {
         configuration
         acquire_dev
         release_dev
-        map_msi
-        unmap_msi
-        wait_msi
+        subscribe_msi
+        unsubscribe_msi
         allocate_mmio32
         allocate_mmio64
         release_mmio
@@ -38,30 +37,21 @@ pub mod door {
         todo!()
     }
 
-    fn map_msi() -> MaybeMsiVector {
-        crate::arch::alloc_msi().map_or(
-            NoMsiVector {
-                value: 0.into(),
-                vector: 1.try_into().unwrap(),
+    fn subscribe_msi() -> MaybeMsi {
+        crate::arch::subscribe_msi().map_or(NoMsi { data: 0.into() }.into(), |x| {
+            Msi {
+                address: u64::from(x.address).try_into().unwrap(),
+                data: x.data.into(),
             }
-            .into(),
-            |x| {
-                MsiVector {
-                    address: u64::from(x.address).try_into().unwrap(),
-                    value: x.data.into(),
-                    vector: x.vector.try_into().unwrap(),
-                }
-                .into()
-            },
-        )
+            .into()
+        })
     }
 
-    fn unmap_msi(x: Vector) {
-        todo!()
-    }
-
-    fn wait_msi(x: Vector) {
-        crate::arch::wait_msi(x.into())
+    fn unsubscribe_msi(Msi { address, data }: Msi) {
+        crate::arch::unsubscribe_msi(crate::arch::Msi {
+            address: lemmings_x86_64::mmu::Phys::new(u64::from(address)).unwrap(),
+            data: data.into(),
+        });
     }
 
     fn allocate_mmio32(x: AllocateMmio32) -> MaybeAddr32 {

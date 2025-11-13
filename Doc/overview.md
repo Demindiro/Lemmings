@@ -27,11 +27,15 @@ Thread switching is very fast too, requiring only registers to be saved
 and restored. No privilege switch is required as all threads run with
 full privileges.
 
-To wait for an event, simply call the appropriate routine.
-It will register and park the thread.
+To wait for an event, a thread must:
 
-!!! note
-    The current mechanism is under revision. It will likely be replaced with events bits and a wait() call
+1. Subscribe itself to the event.
+2. Periodically check if the event has occurred.
+
+There are no event objects.
+Anything that can trigger an event must hold the handle of subscribed threads.
+
+A thread can `wait()` until any event occurs to avoid wasting CPU cycles.
 
 
 Fast, low-latency IPC

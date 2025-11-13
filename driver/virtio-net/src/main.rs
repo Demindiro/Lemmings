@@ -246,13 +246,9 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
     use lemmings_idl_physical_allocator::*;
 
     // we'll use one MSI-X vector for now
-    let MsiVector {
-        address,
-        value,
-        vector,
-    } = match door_pci.map_msi() {
-        MaybeMsiVector::MsiVector(x) => x,
-        MaybeMsiVector::NoMsiVector(_) => panic!("no MSI vectors remaining :("),
+    let Msi { address, data } = match door_pci.subscribe_msi() {
+        MaybeMsi::Msi(x) => x,
+        MaybeMsi::NoMsi(_) => panic!("no MSI vectors remaining :("),
     };
     header.set_command(HeaderCommon::COMMAND_MMIO | HeaderCommon::COMMAND_BUS_MASTER);
     'cap: {
@@ -279,9 +275,9 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
                     .byte_add(offset as _)
             };
             let table = unsafe { NonNull::slice_from_raw_parts(table, size).as_ref() };
-            let (value, address) = (value.into(), address.into());
+            let (data, address) = (data.into(), address.into());
             for tbl in &table[..2] {
-                tbl.set_message_data(value);
+                tbl.set_message_data(data);
                 tbl.set_message_address(address);
                 tbl.set_vector_control_mask(false);
             }
@@ -376,7 +372,7 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
         dev.collect_sent();
         match iface.poll(time, dev, sockets) {
             iface::PollResult::None => {
-                door_pci.wait_msi(vector.clone());
+                lemmings_door::wait();
                 continue;
             }
             iface::PollResult::SocketStateChanged => {}

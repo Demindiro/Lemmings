@@ -3,7 +3,10 @@ use core::{num::NonZero, ptr::NonNull};
 #[macro_export]
 macro_rules! door {
     ([$idl:ident $table:ident $name:literal] $($fn:ident)*) => {
-        pub fn register() {
+        door!(register [$idl $table $name] $($fn)*);
+    };
+    ($register:ident [$idl:ident $table:ident $name:literal] $($fn:ident)*) => {
+        pub fn $register() {
             use lemmings_idl::Api;
             type T = $idl::$table;
             static T: T = $idl::imp! {

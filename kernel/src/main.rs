@@ -67,18 +67,17 @@ fn main_init() {
 }
 
 extern "sysv64" fn main<'a>() {
-    // SAFETY: we start with interrupts disabled
-    let cs = unsafe { ::critical_section::CriticalSection::<'a>::new() };
     let init = main_init();
-    // yield once to give the other thread a chance to run before halting
-    // keep in mind we're the idle thread
-    thread::park(cs);
+    // SAFETY: enabling interrupts and halting is safe at this point.
     loop {
-        // SAFETY: enabling interrupts and halting is safe at this point.
+        debug!("idle wait");
+        thread::wait();
+        debug!("idle halt");
         unsafe {
             core::arch::asm! {
                 "sti",
                 "hlt",
+                "cli",
                 options(nomem, nostack),
             }
         }
