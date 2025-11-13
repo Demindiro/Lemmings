@@ -30,11 +30,11 @@ pub mod door {
     }
 
     fn acquire_dev(x: Bdf) -> AcquireResult {
-        todo!()
+        todo!("{x:?}")
     }
 
     fn release_dev(x: Bdf) {
-        todo!()
+        todo!("{x:?}")
     }
 
     fn subscribe_msi() -> MaybeMsi {
@@ -55,15 +55,15 @@ pub mod door {
     }
 
     fn allocate_mmio32(x: AllocateMmio32) -> MaybeAddr32 {
-        todo!()
+        todo!("{x:?}")
     }
 
     fn allocate_mmio64(x: AllocateMmio64) -> MaybeAddr64 {
-        todo!()
+        todo!("{x:?}")
     }
 
     fn release_mmio(x: Addr64) {
-        todo!()
+        todo!("{x:?}")
     }
 }
 
