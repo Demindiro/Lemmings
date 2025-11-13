@@ -64,9 +64,7 @@ string-as-range 1 0 loader-elf->load
 #drop
 if #dup 0 = then "Failed to load virtio-net" Sys panic end
 "Starting virtio-net" Sys log
-// Sys become:0
-
-// shutdown
+Sys become:0
 
 : IO_DATA    0x60 ;
 : IO_STATUS  0x64 ;
