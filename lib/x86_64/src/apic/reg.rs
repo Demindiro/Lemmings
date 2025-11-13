@@ -1,5 +1,5 @@
 use core::marker::PhantomData;
-use vcell::VolatileCell;
+use lemmings_volatile::VolatileCell;
 
 mod sealed {
     pub trait Read {}

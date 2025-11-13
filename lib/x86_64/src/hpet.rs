@@ -1,6 +1,5 @@
 use core::fmt;
-
-use vcell::VolatileCell;
+use lemmings_volatile::VolatileCell;
 
 pub trait LossyConvert<To> {
     fn convert(self) -> To;
