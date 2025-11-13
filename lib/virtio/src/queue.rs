@@ -3,7 +3,7 @@
 use crate::{PhysAddr, PhysRegion};
 use core::{
     cell::Cell,
-    convert::{TryFrom, TryInto},
+    convert::TryFrom,
     fmt, mem,
     ptr::NonNull,
     slice,

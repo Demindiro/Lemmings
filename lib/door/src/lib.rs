@@ -222,13 +222,6 @@ impl<T> Door<'_, '_, T> {
 }
 
 impl<'table, 'name> Door<'table, 'name, UntypedTable> {
-    fn cast<T>(self) -> Option<Door<'table, 'name, T>>
-    where
-        T: lemmings_idl::Api,
-    {
-        (self.api_id().0 == T::ID).then(|| unsafe { self.cast_unchecked::<T>() })
-    }
-
     unsafe fn cast_unchecked<T>(self) -> Door<'table, 'name, T>
     where
         T: lemmings_idl::Api,

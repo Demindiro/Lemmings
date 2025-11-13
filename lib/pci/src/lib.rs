@@ -28,9 +28,7 @@ macro_rules! set_volatile {
 pub mod capability;
 pub mod msix;
 
-use core::{
-    cell::Cell, convert::TryInto, fmt, marker::PhantomData, num::NonZeroU32, ops, ptr::NonNull,
-};
+use core::{fmt, marker::PhantomData, num::NonZeroU32, ops, ptr::NonNull};
 use lemmings_endian::{u16le, u32le};
 use lemmings_volatile::VolatileCell;
 
