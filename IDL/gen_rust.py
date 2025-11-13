@@ -169,7 +169,7 @@ def emit_ffi(outf, idl, sysv):
                         else:
                             out(f'self.0 <= {ty.until - 1:#x}')
                     else:
-                        if ty.until is gen.IntegerType.ADDRESS_MAX_EXCL or ty.until == (1 << 64):
+                        if ty.until == until_limit:
                             out(f'{ty.start:#x} <= self.0')
                         elif ty.start == ty.until - 1:
                             out(f'{ty.start:#x} == self.0')
