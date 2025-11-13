@@ -398,7 +398,7 @@ impl ThreadHandle {
         });
     }
 
-    pub fn with_state<R, F>(&self, f: F) -> R
+    fn with_state<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&mut ThreadState) -> R,
     {

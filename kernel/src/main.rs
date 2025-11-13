@@ -1,7 +1,12 @@
 #![no_std]
 #![no_main]
 #![deny(improper_ctypes_definitions)]
-#![forbid(undefined_naked_function_abi, unsafe_op_in_unsafe_fn, unused_must_use)]
+#![forbid(
+    private_bounds,
+    undefined_naked_function_abi,
+    unsafe_op_in_unsafe_fn,
+    unused_must_use
+)]
 #![feature(slice_as_chunks)] // stabilized in 1.88, but Guix is on 1.85 as of writing
 #![feature(naked_functions)] // stabilized in 1.88
 
