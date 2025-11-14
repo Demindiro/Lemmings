@@ -343,11 +343,18 @@ def parse_idl(text) -> Door:
         name, scope = strip_split(line, ' ')
         assert scope == '{'
         ty = RecordType()
+        doc = []
         for l in lines:
+            if l.startswith('--'):
+                doc.append(l[2:].strip())
+                continue
             if l == '}':
                 break
             member_name, member_ty = strip_split(l, '=')
             ty.add_member(member_name, member_ty)
+			# TODO add documentation to members
+            #door.documentation[r] = tuple(doc)
+            doc.clear()
         return name, ty
 
     def parse_routine(line):
