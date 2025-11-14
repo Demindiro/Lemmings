@@ -182,8 +182,8 @@ mod alloc {
 
     pub fn alloc(byte_count: usize) -> Option<NonNull<u8>> {
         let n = round_p2(byte_count, PAGE_SIZE) as u64;
-        #[allow(static_mut_refs)]
-        for r in unsafe { &mut REGIONS } {
+        let regions = unsafe { &mut *(&raw mut REGIONS) };
+        for r in regions {
             if r.end.0 - r.start.0 >= n {
                 let s = r.start;
                 r.start.0 += n;
@@ -195,8 +195,8 @@ mod alloc {
 
     pub unsafe fn free(base: NonNull<u8>, byte_count: usize) {
         let base = base.as_ptr() as u64;
-        #[allow(static_mut_refs)]
-        for r in unsafe { &mut REGIONS } {
+        let regions = unsafe { &mut *(&raw mut REGIONS) };
+        for r in regions {
             if r.start.0 == r.end.0 {
                 let mask = PAGE_SIZE - 1;
                 r.start = boot::Phys(base);
@@ -1200,9 +1200,8 @@ mod boot {
     #[inline(always)]
     pub fn collect_info(kernel: VirtRegion, data: &'static [u8], framebuffer: FrameBuffer) {
         let f = |x, y, z| [x, y, z].map(|x| Phys((x as *const u8).addr() as u64));
-        #[allow(static_mut_refs)]
         unsafe {
-            ENTRY.write(Entry {
+            (&mut *(&raw mut ENTRY)).write(Entry {
                 memory: alloc::memory_map(),
                 paging: Paging {
                     kernel,

@@ -56,9 +56,9 @@ unsafe impl Sync for Table {}
 
 impl Name {
     fn as_str(&self) -> &str {
-        #[allow(static_mut_refs)]
         unsafe {
-            let s = STRINGS.get_unchecked(self.offset()..);
+            let s = &mut *(&raw mut STRINGS);
+            let s = s.get_unchecked(self.offset()..);
             let s = s.get_unchecked(..self.len());
             core::str::from_utf8_unchecked(s)
         }
@@ -112,9 +112,9 @@ fn alloc_name(name: &str) -> Name {
         (1..=64).contains(&name.len()),
         "name must be between 1 and 64 bytes"
     );
-    #[allow(static_mut_refs)]
     unsafe {
-        STRINGS[STRINGS_HEAD..][..name.len()].copy_from_slice(name.as_bytes());
+        let strings = &mut *(&raw mut STRINGS);
+        strings[STRINGS_HEAD..][..name.len()].copy_from_slice(name.as_bytes());
         let name = Name((STRINGS_HEAD << 6 | (name.len() - 1)) as u32);
         STRINGS_HEAD += name.len();
         name

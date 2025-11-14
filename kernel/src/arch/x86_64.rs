@@ -300,11 +300,10 @@ pub fn init(token: KernelEntryToken) -> KernelEntryToken {
 #[inline(always)]
 fn init_gdt() {
     let stack_top = 0x1000 as *const usize;
-    unsafe { (&mut *(&raw mut TSS)).set_ist(1.try_into().unwrap(), stack_top) };
-    #[allow(static_mut_refs)]
-    unsafe {
-        GDT.set_tss(&TSS)
-    };
+    let tss = unsafe { &mut *(&raw mut TSS) };
+    let gdt = unsafe { &mut *(&raw mut GDT) };
+    unsafe { tss.set_ist(1.try_into().unwrap(), stack_top) };
+    gdt.set_tss(tss);
     let gdtp = (&raw const GDT).addr() as u64;
     let gdtp = mmu::Virt::new(gdtp).expect("GDT should be in valid virtual space");
     unsafe { GdtPointer::new(gdtp).activate() };
