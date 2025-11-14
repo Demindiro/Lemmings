@@ -70,7 +70,7 @@ pub mod door {
     }
 
     fn free(Free { base, len }: Free) {
-        todo!("free");
+        todo!("free base={base:?} len={len:?}");
     }
 }
 

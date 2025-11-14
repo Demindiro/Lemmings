@@ -314,7 +314,7 @@ fn init_gdt() {
 fn init_idt() {
     let idt = unsafe { &mut *(&raw mut IDT) };
 
-    let mut ist1 = |f| IdtEntry::new(Gdt::KERNEL_CS, f, Ist::N1);
+    let ist1 = |f| IdtEntry::new(Gdt::KERNEL_CS, f, Ist::N1);
     idt.set(idt::nr::DOUBLE_FAULT, ist1(double_fault as _));
     idt.set_handler(idt::nr::PAGE_FAULT, page_fault as _);
     idt.set_handler(VECTOR_TIMER, timer_handler as _);

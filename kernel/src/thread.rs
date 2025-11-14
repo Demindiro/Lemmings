@@ -14,10 +14,7 @@ const PRIORITY_COUNT: usize = 4;
 static mut MANAGER: mem::MaybeUninit<SpinLock<ThreadManager>> = mem::MaybeUninit::uninit();
 
 pub mod door {
-    use core::{
-        mem,
-        ptr::{self, NonNull},
-    };
+    use core::{mem, ptr};
     use lemmings_idl_thread::*;
 
     door! {
