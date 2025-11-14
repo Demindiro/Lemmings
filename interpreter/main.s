@@ -1289,8 +1289,7 @@ dict_begin String
 	enddef
 
 	def concat
-		obj_pop rbx
-		obj_pop rsi
+		obj_pop2 rbx rsi
 		mov ecx, [rbx - 8]
 		add ecx, [rsi - 8]
 		call str_reserve
