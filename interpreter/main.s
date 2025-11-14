@@ -1338,10 +1338,12 @@ dict_end String
 dict_begin X86.Io
 .macro f x:req a:req
 	def in\x
-		num_pop rdx
+		num_peek rdx
+ .if \x != 32  # TODO verify if upper 32 bits are actually cleared
 		xor eax, eax
+ .endif
 		in \a, dx
-		num_push rax
+		num_replace rax
 	enddef
 	def out\x
 		num_pop2 rdx rax
