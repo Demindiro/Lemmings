@@ -128,6 +128,12 @@ impl ThreadManager {
     ///
     /// The thread may not already be enqueued.
     unsafe fn enqueue(&mut self, thread: ThreadHandle) {
+        // FIXME we should have a better mechanism for handling the idle thread
+        if thread.0 == self.idle_thread.0 {
+            debug!("enqueue {:?} (ignore)", thread.0.0);
+            return;
+        }
+        debug!("enqueue {:?}", thread.0.0);
         self.pending[thread.0.priority as usize].enqueue(thread)
     }
 
