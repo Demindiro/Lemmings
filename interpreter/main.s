@@ -1187,85 +1187,36 @@ dict_begin Sys.Door
 		num_replace rax
 	enddef
 
-	def_as "call:0->0" call_0_0
+.macro g arg args:vararg
+ .ifnb \arg
+	g \args
+	num_pop \arg
+ .endif
+.endm
+.macro f argc:req args:vararg
+	def_as "call:\argc->0" call_\argc\()_0
 		num_pop rbx
 		num_pop rax
+		g \args
 		call [rbx + rax * 8]
 	enddef
-
-	def_as "call:0->1" call_0_1
-		call call_0_0
+	def_as "call:\argc->1" call_\argc\()_1
+		call call_\argc\()_0
 		num_push rax
 	enddef
-
-	def_as "call:0->2" call_0_2
-		call call_0_1
+	def_as "call:\argc->2" call_\argc\()_2
+		call call_\argc\()_1
 		num_push rdx
 	enddef
+.endm
+	f 0
+	f 1 rdi
+	f 2 rdi rsi
+	f 3 rdi rsi rdx
+	f 4 rdi rsi rdx rcx
+.purgem f
+.purgem g
 
-	def_as "call:1->0" call_1_0
-		num_pop rbx
-		num_pop rax
-		num_pop rdi
-		call [rbx + rax * 8]
-	enddef
-
-	def_as "call:2->0" call_2_0
-		num_pop rbx
-		num_pop rax
-		num_pop rsi
-		num_pop rdi
-		call [rbx + rax * 8]
-	enddef
-
-	def_as "call:2->1" call_2_1
-		call call_2_0
-		num_push rax
-	enddef
-
-	def_as "call:2->2" call_2_2
-		call call_2_1
-		num_push rdx
-	enddef
-
-	def_as "call:3->0" call_3_0
-		num_pop rbx
-		num_pop rax
-		num_pop rdx
-		num_pop rsi
-		num_pop rdi
-		call [rbx + rax * 8]
-	enddef
-
-	def_as "call:3->1" call_3_1
-		call call_3_0
-		num_push rax
-	enddef
-
-	def_as "call:3->2" call_3_2
-		call call_3_1
-		num_push rdx
-	enddef
-
-	def_as "call:4->0" call_4_0
-		num_pop rbx
-		num_pop rax
-		num_pop rcx
-		num_pop rdx
-		num_pop rsi
-		num_pop rdi
-		call [rbx + rax * 8]
-	enddef
-
-	def_as "call:4->1" call_4_1
-		call call_4_0
-		num_push rax
-	enddef
-
-	def_as "call:4->2" call_4_2
-		call call_4_1
-		num_push rdx
-	enddef
 dict_end Sys.Door
 
 
