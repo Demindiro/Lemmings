@@ -84,7 +84,8 @@ pub struct OutOfVectors;
 
 #[derive(Clone, Copy)]
 struct IrqNr(u8);
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
 struct VectorNr(NonZero<u8>);
 
 #[derive(Debug)]
@@ -131,6 +132,26 @@ impl TryFrom<u32> for VectorNr {
     }
 }
 
+impl TryFrom<u8> for VectorNr {
+    type Error = InvalidVectorNr;
+
+    fn try_from(x: u8) -> Result<Self, Self::Error> {
+        u32::from(x).try_into()
+    }
+}
+
+impl From<VectorNr> for u8 {
+    fn from(x: VectorNr) -> Self {
+        x.0.get()
+    }
+}
+
+impl From<VectorNr> for u32 {
+    fn from(x: VectorNr) -> Self {
+        u8::from(x).into()
+    }
+}
+
 impl From<OutOfVectors> for SubscribeIrqError {
     fn from(_: OutOfVectors) -> Self {
         SubscribeIrqError::OutOfVectors
@@ -146,15 +167,15 @@ impl InterruptHandlers {
         }
     }
 
-    fn subscribe(&mut self) -> Result<u8, OutOfVectors> {
+    fn subscribe(&mut self) -> Result<VectorNr, OutOfVectors> {
         let vector = self.reserve().ok_or(OutOfVectors)?;
-        let i = usize::from(vector - VECTOR_STUB_OFFSET);
+        let i = Self::vector_to_i(vector);
         self.subscribed[i] = Some(thread::current());
         Ok(vector)
     }
 
-    fn unsubscribe(&mut self, vector: u8) {
-        let i = usize::from(vector - VECTOR_STUB_OFFSET);
+    fn unsubscribe(&mut self, vector: VectorNr) {
+        let i = Self::vector_to_i(vector);
         self.subscribed[i] = None;
         self.release(vector);
     }
@@ -164,7 +185,7 @@ impl InterruptHandlers {
             return Err(SubscribeIrqError::AlreadySubscribed);
         }
         let vector = self.subscribe()?;
-        let i = usize::from(vector - VECTOR_STUB_OFFSET);
+        let i = Self::vector_to_i(vector);
         self.map(irq, vector, edge);
         self.vector_to_irq[i] = irq.0;
         Ok(())
@@ -177,41 +198,41 @@ impl InterruptHandlers {
             .position(|x| *x == irq.0)
             .expect("unmapped irq");
         self.vector_to_irq[i] = 0xff;
-        self.unsubscribe(VECTOR_STUB_OFFSET + i as u8);
+        self.unsubscribe(Self::i_to_vector(i));
     }
 
-    fn notify(&self, vector: u8) {
-        let i = usize::from(vector - VECTOR_STUB_OFFSET);
+    fn notify(&self, vector: VectorNr) {
+        let i = usize::from(vector.0.get() - VECTOR_STUB_OFFSET);
         self.subscribed[i].as_ref().map(|x| x.notify());
     }
 
-    fn reserve(&mut self) -> Option<u8> {
+    fn reserve(&mut self) -> Option<VectorNr> {
         for (i, n) in self.allocated.iter_mut().enumerate() {
             if *n == u32::MAX {
                 continue;
             }
             let b = n.trailing_ones() as usize;
             *n |= 1 << b;
-            return Some(VECTOR_STUB_OFFSET + (i * 32 + b) as u8);
+            return Some(Self::i_to_vector(i * 32 + b));
         }
         None
     }
 
-    fn release(&mut self, vector: u8) {
-        let vector = usize::from(vector - VECTOR_STUB_OFFSET);
-        let [i, b] = [vector / 32, vector % 32];
-        self.allocated[i] &= !(1 << b);
+    fn release(&mut self, vector: VectorNr) {
+        let i = Self::vector_to_i(vector);
+        let [k, b] = [i / 32, i % 32];
+        self.allocated[k] &= !(1 << b);
         self.vector_to_irq[i] = 0xff;
     }
 
-    fn map(&mut self, irq: IrqNr, vector: u8, edge: bool) {
+    fn map(&mut self, irq: IrqNr, vector: VectorNr, edge: bool) {
         // FIXME detect Local APIC ID
         let mode = if edge {
             TriggerMode::Edge
         } else {
             TriggerMode::Level
         };
-        unsafe { self.ioapic().set_irq(irq.0, 0, vector, mode, false) }
+        unsafe { self.ioapic().set_irq(irq.0, 0, vector.into(), mode, false) }
     }
 
     fn mask_irq(&mut self, irq: IrqNr) {
@@ -222,8 +243,8 @@ impl InterruptHandlers {
         unsafe { self.ioapic().mask_irq(irq.0, false) }
     }
 
-    fn mask_vector(&mut self, vector: u8) {
-        let i = usize::from(vector - VECTOR_STUB_OFFSET);
+    fn mask_vector(&mut self, vector: VectorNr) {
+        let i = Self::vector_to_i(vector);
         let irq = self.vector_to_irq[i];
         if irq != 0xff {
             self.mask_irq(IrqNr(irq));
@@ -241,6 +262,17 @@ impl InterruptHandlers {
         let io = unsafe { io.cast::<apic::io::IoApic>().as_ref() };
         let io = IoApicHelper::new(io);
         io
+    }
+
+    fn vector_to_i(x: VectorNr) -> usize {
+        usize::from(x.0.get() - VECTOR_STUB_OFFSET)
+    }
+
+    fn i_to_vector(i: usize) -> VectorNr {
+        debug_assert!(i < VECTOR_NR);
+        (VECTOR_STUB_OFFSET + i as u8)
+            .try_into()
+            .expect("invalid vector index")
     }
 }
 
@@ -329,8 +361,8 @@ unsafe extern "C" fn page_fault() {
     }
 }
 
-extern "sysv64" fn interrupt_handler<'a>(vector: u8) {
-    debug!("interrupt {vector}");
+extern "sysv64" fn interrupt_handler<'a>(vector: VectorNr) {
+    debug!("interrupt {vector:?}");
     // SAFETY: interrupts are disabled right now
     let cs = unsafe { CriticalSection::<'a>::new() };
     let mut h = INTERRUPT_HANDLERS.lock(cs);
