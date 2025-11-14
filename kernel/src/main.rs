@@ -61,6 +61,7 @@ fn main_init() {
     elf::door::register();
     pci::door::register();
     page::door::register();
+    thread::door::register();
     log!("init: loading process");
     let init = archive::root().get("init").expect("no init");
     let init = init.as_file().expect("init is not a file");

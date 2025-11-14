@@ -13,6 +13,55 @@ const PRIORITY_COUNT: usize = 4;
 
 static mut MANAGER: mem::MaybeUninit<SpinLock<ThreadManager>> = mem::MaybeUninit::uninit();
 
+pub mod door {
+    use core::{
+        mem,
+        ptr::{self, NonNull},
+    };
+    use lemmings_idl_thread::*;
+
+    door! {
+        [lemmings_idl_thread Threads "Threads"]
+        spawn
+        notify
+        acquire
+        release
+        current
+    }
+
+    fn spawn(Spawn { entry, data }: Spawn) -> SpawnResult {
+        let arg = match data {
+            MaybeSpawnDataRef::SpawnDataRef(x) => x.0.as_ptr().cast::<()>(),
+            MaybeSpawnDataRef::NoSpawnDataRef => ptr::null(),
+        };
+        // SAFETY: pray to God
+        let init: extern "sysv64" fn(*const ()) = unsafe { mem::transmute(entry.0) };
+        super::spawn(super::Priority::Regular, init, arg).expect("failed to spawn init thread");
+        Ok.into()
+    }
+
+    fn notify(thread: ThreadRef) {
+        handle(thread).notify();
+    }
+
+    // TODO reference counting
+    fn acquire(_thread: ThreadRef) {}
+
+    fn release(_thread: ThreadRef) {}
+
+    fn current() -> ThreadRef {
+        unhandle(super::current())
+    }
+
+    fn handle(thread: ThreadRef) -> super::ThreadHandle {
+        super::ThreadHandle(super::ThreadRef(thread.0.cast()))
+    }
+
+    fn unhandle(thread: super::ThreadHandle) -> ThreadRef {
+        ThreadRef(thread.0.0.cast())
+    }
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Critical = 0,
