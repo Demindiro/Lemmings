@@ -67,11 +67,12 @@ fn main_init() {
     let init = elf::load(init.data()).expect("failed to parse init");
     log!("init: spawning thread");
     // SAFETY: pray to God
-    let init: extern "sysv64" fn() = unsafe { core::mem::transmute(init) };
-    thread::spawn(thread::Priority::Regular, init).expect("failed to spawn init thread");
+    let init: extern "sysv64" fn(*const ()) = unsafe { core::mem::transmute(init) };
+    thread::spawn(thread::Priority::Regular, init, core::ptr::null())
+        .expect("failed to spawn init thread");
 }
 
-extern "sysv64" fn main<'a>() {
+extern "sysv64" fn main<'a>(_: *const ()) {
     main_init();
     // SAFETY: enabling interrupts and halting is safe at this point.
     loop {

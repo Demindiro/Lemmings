@@ -108,7 +108,7 @@ impl ThreadManager {
     pub fn spawn(
         &mut self,
         priority: Priority,
-        entry: extern "sysv64" fn(),
+        entry: extern "sysv64" fn(*const ()),
     ) -> Result<(), ThreadSpawnError> {
         let thread = Thread::new(priority, entry)?;
         self.pending[priority as usize].enqueue(thread);
@@ -232,7 +232,7 @@ impl ThreadRef {
 impl Thread {
     fn new(
         priority: Priority,
-        entry: extern "sysv64" fn(),
+        entry: extern "sysv64" fn(*const ()),
     ) -> Result<ThreadHandle, ThreadSpawnError> {
         let page = page::alloc_one_guarded(PageAttr::RW)?.cast::<Thread>();
         // SAFETY:
@@ -274,7 +274,11 @@ impl Thread {
     }
 
     /// Enter this thread, saving the state of the current thread before entering.
-    fn resume(&self, lock: SpinLockGuard<'_, '_, ThreadManager>) {
+    ///
+    /// The argument will be copied to RDI.
+    /// Even if the thread doesn't expect an argument, it should have stored its state
+    /// on the stack, automatically overwriting it if it is not at thread start.
+    fn resume(&self, arg: *const (), lock: SpinLockGuard<'_, '_, ThreadManager>) {
         let current = current();
         let self_ref = unsafe { ThreadRef::wrap(self.into()) };
         // FIXME this seems very wrong?
@@ -307,6 +311,7 @@ impl Thread {
                 "popf",
                 "pop rbp",
                 "pop rbx",
+                in("rdi") arg,
                 scratch = out(reg) _,
                 cur = in(reg) &current.0.tcb,
                 sp = in(reg) self.stack_pointer.get(),
@@ -424,12 +429,16 @@ pub fn current() -> ThreadHandle {
 }
 
 /// Spawn a new thread and run it immediately.
-pub fn spawn(priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
+pub fn spawn(
+    priority: Priority,
+    entry: extern "sysv64" fn(*const ()),
+    arg: *const (),
+) -> Result<(), ThreadSpawnError> {
     let thr = Thread::new(priority, entry)?;
     critical_section::with(|cs| unsafe {
         let mut m = manager().lock(cs);
         m.enqueue(current());
-        thr.0.resume(m);
+        thr.0.resume(arg, m);
     });
     Ok(())
 }
@@ -447,12 +456,17 @@ pub fn wait() {
         }
         debug!("thread::wait {:?} -> yield", current().0.0);
         let next = m.dequeue_next();
-        next.0.resume(m);
+        // The argument is redundant but:
+        // - xor r32,r32 uses renaming, so it is basically free (0 latency)
+        // - the thread will overwrite it anyway
+        // so no ill effects.
+        let arg = core::ptr::null();
+        next.0.resume(arg, m);
         debug!("thread::wait {:?} -> continue", current().0.0);
     })
 }
 
-pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
+pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! {
     let idle_thread =
         Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
     // SAFETY: we have exclusive access to MANAGER
