@@ -13,6 +13,55 @@ const PRIORITY_COUNT: usize = 4;
 
 static mut MANAGER: mem::MaybeUninit<SpinLock<ThreadManager>> = mem::MaybeUninit::uninit();
 
+pub mod door {
+    use core::{
+        mem,
+        ptr::{self, NonNull},
+    };
+    use lemmings_idl_thread::*;
+
+    door! {
+        [lemmings_idl_thread Threads "Threads"]
+        spawn
+        notify
+        acquire
+        release
+        current
+    }
+
+    fn spawn(Spawn { entry, data }: Spawn) -> SpawnResult {
+        let arg = match data {
+            MaybeSpawnDataRef::SpawnDataRef(x) => x.0.as_ptr().cast::<()>(),
+            MaybeSpawnDataRef::NoSpawnDataRef => ptr::null(),
+        };
+        // SAFETY: pray to God
+        let init: extern "sysv64" fn(*const ()) = unsafe { mem::transmute(entry.0) };
+        super::spawn(super::Priority::Regular, init, arg).expect("failed to spawn init thread");
+        Ok.into()
+    }
+
+    fn notify(thread: ThreadRef) {
+        handle(thread).notify();
+    }
+
+    // TODO reference counting
+    fn acquire(_thread: ThreadRef) {}
+
+    fn release(_thread: ThreadRef) {}
+
+    fn current() -> ThreadRef {
+        unhandle(super::current())
+    }
+
+    fn handle(thread: ThreadRef) -> super::ThreadHandle {
+        super::ThreadHandle(super::ThreadRef(thread.0.cast()))
+    }
+
+    fn unhandle(thread: super::ThreadHandle) -> ThreadRef {
+        ThreadRef(thread.0.0.cast())
+    }
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Critical = 0,
@@ -108,7 +157,7 @@ impl ThreadManager {
     pub fn spawn(
         &mut self,
         priority: Priority,
-        entry: extern "sysv64" fn(),
+        entry: extern "sysv64" fn(*const ()),
     ) -> Result<(), ThreadSpawnError> {
         let thread = Thread::new(priority, entry)?;
         self.pending[priority as usize].enqueue(thread);
@@ -128,6 +177,12 @@ impl ThreadManager {
     ///
     /// The thread may not already be enqueued.
     unsafe fn enqueue(&mut self, thread: ThreadHandle) {
+        // FIXME we should have a better mechanism for handling the idle thread
+        if thread.0 == self.idle_thread.0 {
+            debug!("enqueue {:?} (ignore)", thread.0.0);
+            return;
+        }
+        debug!("enqueue {:?}", thread.0.0);
         self.pending[thread.0.priority as usize].enqueue(thread)
     }
 
@@ -226,7 +281,7 @@ impl ThreadRef {
 impl Thread {
     fn new(
         priority: Priority,
-        entry: extern "sysv64" fn(),
+        entry: extern "sysv64" fn(*const ()),
     ) -> Result<ThreadHandle, ThreadSpawnError> {
         let page = page::alloc_one_guarded(PageAttr::RW)?.cast::<Thread>();
         // SAFETY:
@@ -268,11 +323,20 @@ impl Thread {
     }
 
     /// Enter this thread, saving the state of the current thread before entering.
-    fn resume(&self, lock: SpinLockGuard<'_, '_, ThreadManager>) {
+    ///
+    /// The argument will be copied to RDI.
+    /// Even if the thread doesn't expect an argument, it should have stored its state
+    /// on the stack, automatically overwriting it if it is not at thread start.
+    fn resume(&self, arg: *const (), lock: SpinLockGuard<'_, '_, ThreadManager>) {
         let current = current();
-        debug!("resume {:?} -> {:?}", current.0.0, unsafe {
-            ThreadRef::wrap(self.into()).0
-        });
+        let self_ref = unsafe { ThreadRef::wrap(self.into()) };
+        // FIXME this seems very wrong?
+        // we shouldn't get in this situation in the first place...
+        if current.0.0 == self_ref.0 {
+            debug!("resume {:?} -> {:?} (ignore)", current.0.0, self_ref.0);
+            return;
+        }
+        debug!("resume {:?} -> {:?}", current.0.0, self_ref.0);
         // SAFETY: we will disengage the lock exactly once in the assembly code
         let lock = unsafe { lock.into_inner_lock() };
         unsafe {
@@ -296,6 +360,7 @@ impl Thread {
                 "popf",
                 "pop rbp",
                 "pop rbx",
+                in("rdi") arg,
                 scratch = out(reg) _,
                 cur = in(reg) &current.0.tcb,
                 sp = in(reg) self.stack_pointer.get(),
@@ -412,12 +477,17 @@ pub fn current() -> ThreadHandle {
     unsafe { ThreadHandle(ThreadRef::wrap_tcb(tcb)) }
 }
 
-/// Spawn a new thread and add it to the scheduler.
-pub fn spawn(priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
+/// Spawn a new thread and run it immediately.
+pub fn spawn(
+    priority: Priority,
+    entry: extern "sysv64" fn(*const ()),
+    arg: *const (),
+) -> Result<(), ThreadSpawnError> {
     let thr = Thread::new(priority, entry)?;
     critical_section::with(|cs| unsafe {
-        // SAFETY: we just created the thread
-        manager().lock(cs).enqueue(thr)
+        let mut m = manager().lock(cs);
+        m.enqueue(current());
+        thr.0.resume(arg, m);
     });
     Ok(())
 }
@@ -435,12 +505,17 @@ pub fn wait() {
         }
         debug!("thread::wait {:?} -> yield", current().0.0);
         let next = m.dequeue_next();
-        next.0.resume(m);
+        // The argument is redundant but:
+        // - xor r32,r32 uses renaming, so it is basically free (0 latency)
+        // - the thread will overwrite it anyway
+        // so no ill effects.
+        let arg = core::ptr::null();
+        next.0.resume(arg, m);
         debug!("thread::wait {:?} -> continue", current().0.0);
     })
 }
 
-pub fn init(entry: extern "sysv64" fn(), token: KernelEntryToken) -> ! {
+pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! {
     let idle_thread =
         Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
     // SAFETY: we have exclusive access to MANAGER

@@ -408,7 +408,8 @@ def emit(outf, idl, sysv):
         return f
 
     def emit_null(name, ty, sysv):
-        pass
+        out(f'#[derive(Clone, Debug)]')
+        out(f'pub struct {name};')
 
     def emit_pointer(name, ty, sysv):
         x = f'NonNull<ffi::{ty.deref_type}>'

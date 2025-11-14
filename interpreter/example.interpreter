@@ -30,6 +30,15 @@
 // actually returns 2 values, but we don't care about the latter
 : archive->file_read 3 archive-door Sys Door call:4->1 ;
 
+0xc78f91af838c941c 0xcc4ffe41d29450f0 "threads" find-door
+: threads-door ! const ;
+: threads->spawn   0 threads-door Sys Door call:2->1 ;
+: threads->notify  1 threads-door Sys Door call:1->0 ;
+: threads->acquire 2 threads-door Sys Door call:1->0 ;
+: threads->release 3 threads-door Sys Door call:1->0 ;
+: threads->current 4 threads-door Sys Door call:0->1 ;
+
+
 : trace-num  #dup String natural  Sys log ;
 
 : string-as-range @dup String !address String len ;
@@ -64,7 +73,8 @@ string-as-range 1 0 loader-elf->load
 #drop
 if #dup 0 = then "Failed to load virtio-net" Sys panic end
 "Starting virtio-net" Sys log
-Sys become:0
+0 threads->spawn
+if 0 <> then "[warn] failed to spawn thread for virtio-net" Sys log end
 
 : IO_DATA    0x60 ;
 : IO_STATUS  0x64 ;

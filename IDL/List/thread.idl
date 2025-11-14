@@ -1,0 +1,69 @@
+-- Threads support
+--
+-- Not all systems may be able to support threads in a reasonable manner,
+-- hence a separate door is provided.
+--
+-- The door provides support for creating new threads, acquiring references
+-- to existing threads and signaling threads.
+--
+-- No method is provided to abruptly stop or kill threads as this cannot be
+-- done in a sane manner.
+--
+-- It does not support diagnoses of thread issues. This is to be provided
+-- by a separate door.
+door Threads {
+	-- Spawn a new thread.
+	--
+	-- The thread will start at the given routine.
+	-- A single argument can be passed.
+	-- The argument should be a pointer to a data structure.
+	--
+	-- It was considered to allow multiple arguments to be passed,
+	-- but this may rely too much on architecture details,
+	-- hence it is omitted.
+	spawn = Spawn -> SpawnResult
+
+	-- Notify a thread.
+	--
+	-- This will wake the thread if it is parked.
+	notify = ThreadRef -> Void
+
+	-- Acquire a reference to a thread.
+	--
+	-- This will prevent a thread's data from being freed even when
+	-- the thread exits.
+	-- While a thread exiting before all references are released is
+	-- a logic error, it will at least avoid use-after-frees.
+	acquire = ThreadRef -> Void
+
+	-- Release a reference to a thread.
+	release = ThreadRef -> Void
+
+	-- Get a handle to the current thread.
+	--
+	-- This does *not* perform an acquire.
+	current = Void -> ThreadRef
+}
+
+record Void {
+}
+
+record Spawn {
+	entry = SpawnEntry
+	data = MaybeSpawnDataRef
+}
+
+routine SpawnEntry = MaybeSpawnDataRef -> Void
+sum MaybeSpawnDataRef = SpawnDataRef | NoSpawnDataRef
+pointer SpawnDataRef = unique SpawnData
+record SpawnData {
+}
+null NoSpawnDataRef = SpawnDataRef
+
+u8 Ok = 0
+u8 Fail = 1
+sum SpawnResult = Ok | Fail
+
+record Thread {
+}
+pointer ThreadRef = shared Thread
