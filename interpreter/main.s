@@ -237,8 +237,43 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 	mov qword ptr [\PREFIX\()_STACK_HEAD], \x
  .endm
  .macro \prefix\()_pop x:req
-	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD + 8*0]
 	add \PREFIX\()_STACK_HEAD, 8
+ .endm
+ .macro \prefix\()_pop2 x:req y:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD + 8*0]
+	mov \y, qword ptr [\PREFIX\()_STACK_HEAD + 8*1]
+	add \PREFIX\()_STACK_HEAD, 16
+ .endm
+ .macro \prefix\()_pop3 x:req y:req z:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD + 8*0]
+	mov \y, qword ptr [\PREFIX\()_STACK_HEAD + 8*1]
+	mov \z, qword ptr [\PREFIX\()_STACK_HEAD + 8*2]
+	add \PREFIX\()_STACK_HEAD, 24
+ .endm
+ .macro \prefix\()_pop4 x:req y:req z:req w:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD + 8*0]
+	mov \y, qword ptr [\PREFIX\()_STACK_HEAD + 8*1]
+	mov \z, qword ptr [\PREFIX\()_STACK_HEAD + 8*2]
+	mov \w, qword ptr [\PREFIX\()_STACK_HEAD + 8*3]
+	add \PREFIX\()_STACK_HEAD, 32
+ .endm
+ .macro \prefix\()_pop5 x:req y:req z:req w:req v:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD + 8*0]
+	mov \y, qword ptr [\PREFIX\()_STACK_HEAD + 8*1]
+	mov \z, qword ptr [\PREFIX\()_STACK_HEAD + 8*2]
+	mov \w, qword ptr [\PREFIX\()_STACK_HEAD + 8*3]
+	mov \v, qword ptr [\PREFIX\()_STACK_HEAD + 8*4]
+	add \PREFIX\()_STACK_HEAD, 40
+ .endm
+ .macro \prefix\()_pop6 x:req y:req z:req w:req v:req u:req
+	mov \x, qword ptr [\PREFIX\()_STACK_HEAD + 8*0]
+	mov \y, qword ptr [\PREFIX\()_STACK_HEAD + 8*1]
+	mov \z, qword ptr [\PREFIX\()_STACK_HEAD + 8*2]
+	mov \w, qword ptr [\PREFIX\()_STACK_HEAD + 8*3]
+	mov \v, qword ptr [\PREFIX\()_STACK_HEAD + 8*4]
+	mov \u, qword ptr [\PREFIX\()_STACK_HEAD + 8*5]
+	add \PREFIX\()_STACK_HEAD, 48
  .endm
  .macro \prefix\()_peek x:req
 	mov \x, qword ptr [\PREFIX\()_STACK_HEAD]
@@ -1187,17 +1222,9 @@ dict_begin Sys.Door
 		num_replace rax
 	enddef
 
-.macro g arg args:vararg
- .ifnb \arg
-	g \args
-	num_pop \arg
- .endif
-.endm
-.macro f argc:req args:vararg
+.macro f argc:req npop:req args:vararg
 	def_as "call:\argc->0" call_\argc\()_0
-		num_pop rbx
-		num_pop rax
-		g \args
+		num_pop\npop rbx rax \args
 		call [rbx + rax * 8]
 	enddef
 	def_as "call:\argc->1" call_\argc\()_1
@@ -1209,13 +1236,12 @@ dict_begin Sys.Door
 		num_push rdx
 	enddef
 .endm
-	f 0
-	f 1 rdi
-	f 2 rdi rsi
-	f 3 rdi rsi rdx
-	f 4 rdi rsi rdx rcx
+	f 0 2
+	f 1 3 rdi
+	f 2 4 rsi rdi
+	f 3 5 rdx rsi rdi
+	f 4 6 rcx rdx rsi rdi
 .purgem f
-.purgem g
 
 dict_end Sys.Door
 
@@ -1318,8 +1344,7 @@ dict_begin X86.Io
 		num_push rax
 	enddef
 	def out\x
-		num_pop rdx
-		num_pop rax
+		num_pop2 rdx rax
 		out dx, \a
 	enddef
 .endm
