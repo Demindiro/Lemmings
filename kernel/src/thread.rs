@@ -276,9 +276,14 @@ impl Thread {
     /// Enter this thread, saving the state of the current thread before entering.
     fn resume(&self, lock: SpinLockGuard<'_, '_, ThreadManager>) {
         let current = current();
-        debug!("resume {:?} -> {:?}", current.0.0, unsafe {
-            ThreadRef::wrap(self.into()).0
-        });
+        let self_ref = unsafe { ThreadRef::wrap(self.into()) };
+        // FIXME this seems very wrong?
+        // we shouldn't get in this situation in the first place...
+        if current.0.0 == self_ref.0 {
+            debug!("resume {:?} -> {:?} (ignore)", current.0.0, self_ref.0);
+            return;
+        }
+        debug!("resume {:?} -> {:?}", current.0.0, self_ref.0);
         // SAFETY: we will disengage the lock exactly once in the assembly code
         let lock = unsafe { lock.into_inner_lock() };
         unsafe {
