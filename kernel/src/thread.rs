@@ -423,12 +423,13 @@ pub fn current() -> ThreadHandle {
     unsafe { ThreadHandle(ThreadRef::wrap_tcb(tcb)) }
 }
 
-/// Spawn a new thread and add it to the scheduler.
+/// Spawn a new thread and run it immediately.
 pub fn spawn(priority: Priority, entry: extern "sysv64" fn()) -> Result<(), ThreadSpawnError> {
     let thr = Thread::new(priority, entry)?;
     critical_section::with(|cs| unsafe {
-        // SAFETY: we just created the thread
-        manager().lock(cs).enqueue(thr)
+        let mut m = manager().lock(cs);
+        m.enqueue(current());
+        thr.0.resume(m);
     });
     Ok(())
 }
