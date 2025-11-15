@@ -21,13 +21,16 @@ door Pci {
 	-- Release exclusive access to a device.
 	release_dev = Bdf -> Void
 
-	-- Subscribe the current thread for an MSI.
+	-- Map a MSI to an interrupt vector.
 	--
 	-- The returned address and value should be programmed in the device.
-	subscribe_msi = Void -> MaybeMsi
+	msi_map = Void -> MaybeMsi
 
-	-- Unsubscribe the thread for an MSI.
-	unsubscribe_msi = Msi -> Void
+	-- Unmap a MSI.
+	msi_unmap = Msi -> Void
+
+	-- Wait for a MSI.
+	msi_wait = Msi -> Void
 
 	-- Allocate 32-bit MMIO space.
 	--

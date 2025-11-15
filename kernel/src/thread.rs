@@ -8,6 +8,7 @@ use crate::{
     sync::{self, SpinLock, SpinLockGuard},
 };
 use core::{arch::asm, cell::Cell, fmt, mem, ops, ptr::NonNull};
+use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
 
@@ -20,9 +21,8 @@ pub mod door {
     door! {
         [lemmings_idl_thread Threads "Threads"]
         spawn
-        notify
-        acquire
-        release
+        park
+        unpark
         current
     }
 
@@ -37,25 +37,24 @@ pub mod door {
         Ok.into()
     }
 
-    fn notify(thread: ThreadRef) {
-        handle(thread).notify();
+    fn park() {
+        critical_section::with(super::park)
     }
 
-    // TODO reference counting
-    fn acquire(_thread: ThreadRef) {}
+    fn unpark(thread: Thread) {
+        critical_section::with(|cs| unsafe { super::unpark(cs, handle(thread)) })
+    }
 
-    fn release(_thread: ThreadRef) {}
-
-    fn current() -> ThreadRef {
+    fn current() -> Thread {
         unhandle(super::current())
     }
 
-    fn handle(thread: ThreadRef) -> super::ThreadHandle {
+    fn handle(thread: Thread) -> super::ThreadHandle {
         super::ThreadHandle(super::ThreadRef(thread.0.cast()))
     }
 
-    fn unhandle(thread: super::ThreadHandle) -> ThreadRef {
-        ThreadRef(thread.0.0.cast())
+    fn unhandle(thread: super::ThreadHandle) -> Thread {
+        Thread(thread.0.0.cast())
     }
 }
 
@@ -91,7 +90,6 @@ struct ThreadControlBlock {
     /// Only valid while enqueued. Value is indeterminate while running.
     next: Cell<ThreadRef>,
     priority: Priority,
-    state: Cell<ThreadState>,
     program_counter: Cell<*const u8>,
     stack_pointer: Cell<*const u8>,
 }
@@ -101,35 +99,6 @@ struct Thread {
     stack: [Cell<mem::MaybeUninit<usize>>;
         (4096 - mem::size_of::<ThreadControlBlock>()) / mem::size_of::<usize>()],
     tcb: ThreadControlBlock,
-}
-
-/// ```
-///                    wait
-///          .---------------------.    .----.
-///          |                     |    |    |
-///          v                     |    v    | resume
-///      +--------+              +--------+  |
-///      | parked |          .---| active |--'
-///      +--------+   notify |   +--------+
-///          |               v       ^
-///   notify |      +----------+     | resume/wait
-///          '----->| notified |-----'
-///                 +----------+
-/// ```
-// You may think "this should be an atomic to avoid locking".
-// However, spinlocks are *very* fast.
-// The reason locks are considered slow is primarily because of poor control
-// over scheduling in mainstream OSes.
-// Here, a spinlock will always be very fast.
-// Unless there is a ridiculous amount of contention, it should not be an issue.
-//
-// But more importantly, lock-free algorithms are *very* hard to get right.
-// Unless you can prove it is *significantly* faster, do not change this!
-#[derive(Clone, Copy)]
-enum ThreadState {
-    Parked = 0b00,
-    Active = 0b01,
-    Notified = 0b11,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -222,36 +191,6 @@ impl RoundRobinQueue {
     }
 }
 
-impl ThreadState {
-    /// Follow a wait edge.
-    ///
-    /// Returns `true` if the thread should resume immediately.
-    #[must_use]
-    fn wait(&mut self) -> bool {
-        let resume = matches!(self, Self::Notified);
-        *self = if resume { Self::Active } else { Self::Parked };
-        resume
-    }
-
-    /// Follow a notify edge.
-    ///
-    /// Returns `true` if the thread needs to be scheduled.
-    /// (if `false`, the thread is already scheduled.)
-    #[must_use]
-    fn notify(&mut self) -> bool {
-        let reschedule = matches!(self, Self::Parked);
-        *self = Self::Notified;
-        reschedule
-    }
-
-    /// Follow a resume edge
-    fn resume(&mut self) {
-        if !matches!(self, Self::Notified) {
-            *self = Self::Active;
-        }
-    }
-}
-
 impl ThreadRef {
     // Offset such that we point right at the TCB
     // This allows more efficient encoding of memory instructions with immediates.
@@ -290,7 +229,6 @@ impl Thread {
             base.write(ThreadControlBlock {
                 next: Cell::new(thread),
                 priority,
-                state: Cell::new(ThreadState::Active),
                 program_counter: Cell::new(entry as *const u8),
                 stack_pointer: Cell::new(base.cast::<usize>().as_ptr().sub(1).cast()),
             });
@@ -387,6 +325,14 @@ impl Thread {
         }
     }
 
+    fn resume_noarg(&self, lock: SpinLockGuard<'_, '_, ThreadManager>) {
+        // The argument is redundant but:
+        // - xor r32,r32 uses renaming, so it is basically free (0 latency)
+        // - the thread will overwrite it anyway
+        // so no ill effects.
+        self.resume(core::ptr::null(), lock)
+    }
+
     fn exit() -> ! {
         todo!("exit thread");
     }
@@ -436,34 +382,6 @@ impl fmt::Debug for ThreadSpawnError {
     }
 }
 
-impl ThreadHandle {
-    pub fn notify(&self) {
-        critical_section::with(|cs| {
-            let mut m = manager().lock(cs);
-            if self.with_state(|x| x.notify()) {
-                debug!("notify {:?} -> resume", self.0.0);
-                // FIXME priority check!
-                // SAFETY: according to flags, this thread is not currently queued.
-                unsafe {
-                    m.enqueue(self.clone());
-                }
-            } else {
-                debug!("notify {:?} -> nop", self.0.0);
-            }
-        });
-    }
-
-    fn with_state<R, F>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut ThreadState) -> R,
-    {
-        let mut s = self.0.state.get();
-        let ret = (f)(&mut s);
-        self.0.state.set(s);
-        ret
-    }
-}
-
 unsafe fn set_current(thread: &Thread) {
     unsafe { lemmings_x86_64::set_fs(&thread.tcb as *const _ as *mut u8) }
 }
@@ -489,27 +407,31 @@ pub fn spawn(
     Ok(())
 }
 
-/// Wait for a notification.
+/// Park the current thread.
 ///
-/// If a notification has already been signaled,
-/// this function returns immediately.
-pub fn wait() {
-    critical_section::with(|cs| {
-        let mut m = manager().lock(cs);
-        if current().with_state(|x| x.wait()) {
-            debug!("thread::wait {:?} -> return", current().0.0);
-            return;
-        }
-        debug!("thread::wait {:?} -> yield", current().0.0);
-        let next = m.dequeue_next();
-        // The argument is redundant but:
-        // - xor r32,r32 uses renaming, so it is basically free (0 latency)
-        // - the thread will overwrite it anyway
-        // so no ill effects.
-        let arg = core::ptr::null();
-        next.0.resume(arg, m);
-        debug!("thread::wait {:?} -> continue", current().0.0);
-    })
+/// # Warning
+///
+/// If the thread is not referenced anywhere, it will leak!
+pub fn park(cs: CriticalSection<'_>) {
+    debug!("thread::park {:?}", current().0.0);
+    let mut m = manager().lock(cs);
+    let next = m.dequeue_next();
+    next.0.resume_noarg(m);
+    debug!("thread::park {:?} -> continue", current().0.0);
+}
+
+/// # Safety
+///
+/// Every unpark must be matched by a park.
+pub unsafe fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
+    debug!("thread::unpark {:?} -> {:?}", current().0.0, thread.0.0);
+    let mut m = manager().lock(cs);
+    // SAFETY: if the thread was parked only once, then unparking once
+    // means we have exclusive access to the thread.
+    unsafe { m.enqueue(thread) };
+    let next = m.dequeue_next();
+    next.0.resume_noarg(m);
+    debug!("thread::unpark {:?} -> continue", current().0.0);
 }
 
 pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! {
