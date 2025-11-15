@@ -187,7 +187,8 @@ def emit(outf, idl):
 
     if any(isinstance(t, gen.PointerType) for t in idl.types.values()):
         out('use core::ptr::NonNull;')
-        out('')
+    out('use core::num::NonZero;')
+    out('')
 
     class Scope:
         def __init__(self, s, *, suffix = ''):
@@ -276,7 +277,9 @@ def emit(outf, idl):
     emit_documentation(idl)
     out(f'#[derive(Debug)]')
     out(f'#[repr(C)]')
+    out('#[allow(non_snake_case)]')
     with Scope(f'pub struct {idl.name.replace("_", "")}'):
+        out('pub ID: NonZero<u128>,')
         for name, routine in idl.routines.items():
             args = sysv_splat_params(routine.input)
             ret = sysv_splat_ret(routine.output)
@@ -471,6 +474,7 @@ def emit(outf, idl):
                 out(f'{name} = $impl_{name}:expr,')
         with Scope('', suffix = ';'):
             with Scope(f'$crate::{idl.name}'):
+                out(f'ID: <{idl.name} as lemmings_idl::Api>::ID,')
                 for name, routine in idl.routines.items():
                     args = sysv_splat_params(routine.input, macro = True)
                     ret = sysv_splat_ret(routine.output, macro = True)
