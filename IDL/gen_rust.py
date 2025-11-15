@@ -24,91 +24,7 @@ def fix_builtin_ident_collisions(idl):
     """
     # TODO
 
-
-def types_to_sysv64(idl):
-    """
-    Generates SysV64 compatible structures for all types
-    """
-    import gen
-
-    def from_integer(signed, bits):
-        def f(ty):
-            start = ty.start
-            until = (1<<64) if ty.until is gen.IntegerType.ADDRESS_MAX_EXCL else ty.until
-            x = None
-            if start < 0:
-                for x in range(4):
-                    bits = 1 << ((8 << x) - 1)
-                    if -bits <= start and until <= bits:
-                        break
-            else:
-                for x in range(4):
-                    bits = 1 << (8 << x)
-                    if until <= bits:
-                        break
-            if x is None:
-                assert 0, "todo: integers larger than u64"
-            return Sysv64Type(1 << x, 1 << x)
-        return f
-
-    def from_null(ty):
-        return resolve(ty.type)
-
-    def from_pointer(ty):
-        return Sysv64Type(8, 8)
-
-    def from_record(ty):
-        sysv = Sysv64Type(0, 0)
-        for m_name, m_ty in ty.members.items():
-            m_sysv = resolve(m_ty)
-            sysv.memory_alignment = max(sysv.memory_alignment, m_sysv.memory_alignment)
-            # make sure succeeding types are aligned
-            sysv.round_memory_size()
-            sysv.memory_size += m_sysv.memory_size
-        return sysv
-
-    def from_routine(ty):
-        return Sysv64Type(8, 8)
-
-    def from_sum(ty):
-        sysv = Sysv64Type(0, 0)
-        for v_ty in ty.variants:
-            v_sysv = resolve(v_ty)
-            sysv.memory_size = max(sysv.memory_size, v_sysv.memory_size)
-            sysv.memory_alignment = max(sysv.memory_alignment, v_sysv.memory_alignment)
-        return sysv
-
-    vtbl = {
-        gen.IntegerType: from_integer,
-        gen.NullType: from_null,
-        gen.RecordType: from_record,
-        gen.SumType: from_sum,
-        gen.UPtrType: from_integer(False, None),
-        gen.SPtrType: from_integer(True, None),
-        gen.RoutineType: from_routine,
-    }
-    for x in ('Constant', 'Shared', 'Unique'):
-        vtbl[gen.__dict__[f'{x}PointerType']] = from_pointer
-    for s in 'US':
-        for x in range(3, 8):
-            vtbl[gen.__dict__[f'{s}{1 << x}Type']] = from_integer(s == 'S', 1 << x)
-
-    resolving = set()
-    resolved = {}
-    def resolve(name):
-        if name in resolved:
-            return resolved[name]
-        if name in resolving:
-            raise Exception('recursive type')
-        ty = idl.types[name]
-        resolving.add(name)
-        sysv = resolved[name] = vtbl[type(ty)](ty)
-        resolving.remove(name)
-        return sysv
-
-    return { name: resolve(name) for name in idl.types }
-
-def emit_ffi(outf, idl, sysv):
+def emit_ffi(outf, idl):
     import gen
 
     outf_depth = 0
@@ -143,6 +59,10 @@ def emit_ffi(outf, idl, sysv):
             out('#[inline]')
             super().__init__(f'{vis}fn {name}({args}){ret}')
 
+    def is_empty(name):
+        ty = idl.types[name]
+        return type(ty) is gen.RecordType and len(ty.members) == 0
+
     def newtype(name, wrap):
         out('#[derive(Clone, Copy)]')
         out('#[repr(transparent)]')
@@ -151,7 +71,7 @@ def emit_ffi(outf, idl, sysv):
     def emit_integer(signed, bits):
         x = f'{"ui"[signed]}{bits or "size"}'
         until_limit = 1 << bits if bits else gen.IntegerType.ADDRESS_MAX_EXCL
-        def f(name, ty, sysv_ty):
+        def f(name, ty):
             newtype(name, x)
             is_unit = ty.start + 1 == ty.until
             full_range = ty.start == 0 and ty.until == until_limit
@@ -180,7 +100,7 @@ def emit_ffi(outf, idl, sysv):
                     out('x.0')
         return f
 
-    def emit_null(name, ty, sysv_ty):
+    def emit_null(name, ty):
         x = idl.types[name].type
         newtype(name, x)
         with Impl(name):
@@ -190,13 +110,13 @@ def emit_ffi(outf, idl, sysv):
             with Fn('default', '', 'Self', vis = ''):
                 out(f'Self({x}(None))')
 
-    def emit_pointer(name, ty, sysv_ty):
+    def emit_pointer(name, ty):
         newtype(name, f'Option<NonNull<{ty.deref_type}>>')
         with Impl(name):
             with Fn('is_valid', f'self', 'bool', dead_code = True):
                 out('self.0.is_some()')
 
-    def emit_record(name, ty, sysv_ty):
+    def emit_record(name, ty):
         tr = lambda x: f'r#{x}' if x in RESERVED_KEYWORDS else x
         def members():
             yield from ((tr(k), v) for k, v in ty.members.items())
@@ -209,13 +129,13 @@ def emit_ffi(outf, idl, sysv):
             with Fn('is_valid', '&self', 'bool', dead_code = True):
                 out(' && '.join(f'self.{m_name}.is_valid()' for m_name, m_ty in members()))
 
-    def emit_routine(name, ty, sysv_ty):
+    def emit_routine(name, ty):
         newtype(name, f'Option<unsafe extern "sysv64" fn()>')
         with Impl(name):
             with Fn('is_valid', f'self', 'bool', dead_code = True):
                 out('self.0.is_some()')
 
-    def emit_sum(name, ty, sysv_ty):
+    def emit_sum(name, ty):
         out(f'#[derive(Clone, Copy)]')
         out(f'#[repr(C)]')
         with Scope(f'pub union {name}'):
@@ -248,18 +168,17 @@ def emit_ffi(outf, idl, sysv):
             out('use core::ptr::NonNull;')
             out('')
         for name, ty in idl.types.items():
-            sysv_ty = sysv[name]
-            if sysv_ty.memory_size == 0:
+            if is_empty(name):
                 # do emit for pointers and stuff
                 out(f'pub struct {name};')
                 continue
-            vtbl[type(ty)](name, ty, sysv_ty)
+            vtbl[type(ty)](name, ty)
             out('')
 
-def emit(outf, idl, sysv):
+def emit(outf, idl):
     import gen
 
-    emit_ffi(outf, idl, sysv)
+    emit_ffi(outf, idl)
 
     outf_depth = 0
     out = lambda s: outf('    ' * outf_depth + s) if s else outf('')
@@ -268,7 +187,8 @@ def emit(outf, idl, sysv):
 
     if any(isinstance(t, gen.PointerType) for t in idl.types.values()):
         out('use core::ptr::NonNull;')
-        out('')
+    out('use core::num::NonZero;')
+    out('')
 
     class Scope:
         def __init__(self, s, *, suffix = ''):
@@ -306,10 +226,12 @@ def emit(outf, idl, sysv):
         for l in documentation(ty):
             out(f'/// {l}')
 
+    def is_empty(name):
+        ty = idl.types[name]
+        return type(ty) is gen.RecordType and len(ty.members) == 0
     def is_void(name):
-        sysv_ty = sysv[name]
-        # be defensive about alignment, just in case
-        return name == 'Void' and sysv_ty.memory_size == 0 and sysv_ty.memory_alignment <= 1
+        # be defensive just in case
+        return name == 'Void' and is_empty(name)
     def is_unit(name):
         ty = idl.types[name]
         if type(ty) is gen.NullType:
@@ -334,7 +256,7 @@ def emit(outf, idl, sysv):
         if should_unpack(name):
             ty = idl.types[name]
             return ', '.join(f'{tr(m_name)}: {ffi_name(m_ty, macro)}' for m_name, m_ty in ty.members.items())
-        return f'x: {ffi_name(name, macro)}' if sysv[name].memory_size > 0 else ''
+        return f'x: {ffi_name(name, macro)}' if not is_empty(name) else ''
     def sysv_splat_ret(name, *, macro = False) -> str:
         return '' if is_void(name) else f'-> {ffi_name(name, macro)}'
     def sysv_splat_members(name, *, macro = False) -> str:
@@ -355,7 +277,9 @@ def emit(outf, idl, sysv):
     emit_documentation(idl)
     out(f'#[derive(Debug)]')
     out(f'#[repr(C)]')
+    out('#[allow(non_snake_case)]')
     with Scope(f'pub struct {idl.name.replace("_", "")}'):
+        out('pub ID: NonZero<u128>,')
         for name, routine in idl.routines.items():
             args = sysv_splat_params(routine.input)
             ret = sysv_splat_ret(routine.output)
@@ -367,7 +291,7 @@ def emit(outf, idl, sysv):
     def emit_integer(signed, bits):
         x = f'{"ui"[signed]}{bits or "size"}'
         until_limit = 1 << bits if bits else gen.IntegerType.ADDRESS_MAX_EXCL
-        def f(name, ty, sysv):
+        def f(name, ty):
             # Don't bother with unit integers
             # They are only relevant for sum types
             if is_unit(name):
@@ -407,11 +331,11 @@ def emit(outf, idl, sysv):
             '''
         return f
 
-    def emit_null(name, ty, sysv):
+    def emit_null(name, ty):
         out(f'#[derive(Clone, Debug)]')
         out(f'pub struct {name};')
 
-    def emit_pointer(name, ty, sysv):
+    def emit_pointer(name, ty):
         x = f'NonNull<ffi::{ty.deref_type}>'
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
@@ -426,12 +350,12 @@ def emit(outf, idl, sysv):
             with Fn('from', f'x: {x}', 'Self'):
                 out(f'Self(x)')
 
-    def emit_record(name, ty, sysv_ty):
+    def emit_record(name, ty):
         if is_void(name):
             return
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
-        if sysv_ty.memory_size == 0:
+        if is_empty(name):
             out(f'pub struct {name};')
             return
         def members():
@@ -457,7 +381,7 @@ def emit(outf, idl, sysv):
                         out(f'{m_name}: {expr},')
                     del m_name, m_ty, expr
 
-    def emit_routine(name, ty, sysv_ty):
+    def emit_routine(name, ty):
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
         out(f'pub struct {name}(pub unsafe extern "sysv64" fn());')
@@ -467,13 +391,13 @@ def emit(outf, idl, sysv):
             with Fn('to_ffi', 'self', f'ffi::{name}'):
                 out(f'ffi::{name}(Some(self.0))')
 
-    def emit_sum(name, ty, sysv_ty):
+    def emit_sum(name, ty):
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
         with Scope(f'pub enum {name}'):
             for v in ty.variants:
                 out(f'{v},' if is_unit(v) else f'{v}({v}),')
-        if sysv_ty.memory_size == 0:
+        if is_empty(name):
             return
         with Impl(name):
             with Fn('from_ffi', f'x: ffi::{name}', 'Self', macro_public = True):
@@ -516,7 +440,7 @@ def emit(outf, idl, sysv):
             vtbl[gen.__dict__[f'{s}{1 << x}Type']] = emit_integer(s == 'S', 1 << x)
 
     for name, ty in idl.types.items():
-        vtbl[type(ty)](name, ty, sysv[name])
+        vtbl[type(ty)](name, ty)
         out('')
 
     with ImplFor('lemmings_idl::Api', idl.name, unsafe = True):
@@ -525,14 +449,14 @@ def emit(outf, idl, sysv):
     with Impl(idl.name):
         for name, routine in idl.routines.items():
             emit_documentation(routine)
-            x = '' if sysv[routine.input].memory_size == 0 else 'x'
+            x = '' if is_empty(routine.input) else 'x'
             params = '' if is_void(routine.input) else f', {x or "_"}: {routine.input}'
             ret = '' if is_void(routine.output) else routine.output
             with Fn(name, f'&self{params}', ret, public = True):
                 if x:
                     out(f'let {sysv_splat_pattern(routine.input)} = x.to_ffi();')
                 args = sysv_splat_members(routine.input)
-                if sysv[routine.output].memory_size > 0:
+                if not is_empty(routine.output):
                     out(f'let x = unsafe {{ (self.{name})({args}).into() }};')
                     out(f'{routine.output}::from_ffi(x)')
                 else:
@@ -550,6 +474,7 @@ def emit(outf, idl, sysv):
                 out(f'{name} = $impl_{name}:expr,')
         with Scope('', suffix = ';'):
             with Scope(f'$crate::{idl.name}'):
+                out(f'ID: <{idl.name} as lemmings_idl::Api>::ID,')
                 for name, routine in idl.routines.items():
                     args = sysv_splat_params(routine.input, macro = True)
                     ret = sysv_splat_ret(routine.output, macro = True)
@@ -561,13 +486,13 @@ def emit(outf, idl, sysv):
                             x = 'x'
                             if is_void(routine.input):
                                 x = ''
-                            elif sysv[routine.input].memory_size > 0:
+                            elif not is_empty(routine.input):
                                 out(f'let x = {routine.input}::from_ffi({sysv_splat_pattern(routine.input, macro = True)});')
                             else:
                                 out(f'let x = {routine.input};')
                             if is_void(routine.output):
                                 out(f'$impl_{name}({x})')
-                            elif sysv[routine.output].memory_size > 0:
+                            elif not is_empty(routine.output):
                                 out(f'let x: {routine.output} = $impl_{name}({x});')
                                 out(f'x.to_ffi().into()')
                             else:
@@ -584,7 +509,6 @@ def main(idl_path, out_path):
     print(idl.name, '->', hex(idl.api_id))
 
     fix_builtin_ident_collisions(idl)
-    sysv64 = types_to_sysv64(idl)
 
     out_path = Path(out_path)
     (out_path / 'src').mkdir(parents=True, exist_ok=True)
@@ -603,7 +527,7 @@ lemmings-idl = {{ path = "../_" }}
         f.write('\n')
         f.write('pub use lemmings_idl;\n')
         f.write('\n')
-        emit(lambda s: f.write(f'{s}\n'), idl, sysv64)
+        emit(lambda s: f.write(f'{s}\n'), idl)
 
 
 if __name__ == '__main__':

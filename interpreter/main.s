@@ -226,10 +226,10 @@ f 7 wait
 find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 
 
-.equ door.archive.root, 8 * 0
-.equ door.archive.dir_iter, 8 * 1
-.equ door.archive.dir_find, 8 * 2
-.equ door.archive.file_read, 8 * 3
+.equ door.archive.root     , 16 + 8 * 0
+.equ door.archive.dir_iter , 16 + 8 * 1
+.equ door.archive.dir_find , 16 + 8 * 2
+.equ door.archive.file_read, 16 + 8 * 3
 
 .macro f prefix:req PREFIX:req
  .macro \prefix\()_push x:req
@@ -1225,7 +1225,7 @@ dict_begin Sys.Door
 .macro f argc:req npop:req args:vararg
 	def_as "call:\argc->0" call_\argc\()_0
 		num_pop\npop rbx rax \args
-		call [rbx + rax * 8]
+		call [rbx + 16 + rax * 8]
 	enddef
 	def_as "call:\argc->1" call_\argc\()_1
 		call call_\argc\()_0
