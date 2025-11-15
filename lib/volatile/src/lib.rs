@@ -11,6 +11,10 @@ impl<T> VolatileCell<T>
 where
     T: Copy,
 {
+    pub const fn new(value: T) -> Self {
+        Self(UnsafeCell::new(value))
+    }
+
     pub fn get(&self) -> T {
         unsafe { ptr::read_volatile(self.0.get()) }
     }
