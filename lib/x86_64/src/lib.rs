@@ -5,6 +5,7 @@ pub mod gdt;
 pub mod hpet;
 pub mod idt;
 pub mod io;
+pub mod kvm;
 pub mod mmu;
 pub mod mtrr;
 pub mod pic;
@@ -132,6 +133,10 @@ pub fn gs() -> *mut u8 {
     let x;
     unsafe { asm!("rdgsbase {}", out(reg) x, options(nomem, nostack, pure, preserves_flags)) };
     x
+}
+
+pub fn tsc() -> u64 {
+    unsafe { core::arch::x86_64::_rdtsc() }
 }
 
 reg! {
