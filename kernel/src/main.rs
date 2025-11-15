@@ -101,6 +101,7 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     // SAFETY: this is the _start function
     let token = unsafe { KernelEntryToken::new() };
     let token = framebuffer::init(entry, token);
+    let token = time::init(token);
     let token = arch::init(entry, token);
     let token = page::init(entry, token);
     let token = archive::init(entry, token);
