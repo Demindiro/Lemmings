@@ -34,7 +34,7 @@ impl Monotonic {
 }
 
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {
-    if TimeInfo::is_present() && false {
+    if TimeInfo::is_present() {
         log!("using pvclock");
         let root = unsafe { mmu::current_root::<mmu::L4>() };
         let virt = mmu::Virt::new((&raw const TIME_INFO).addr() as u64).unwrap();
