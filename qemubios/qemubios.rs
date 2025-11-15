@@ -1106,6 +1106,18 @@ mod apic {
     }
 }
 
+mod hpet {
+    use crate::*;
+
+    const BASE: u32 = 0xfed00000;
+
+    pub fn init() {
+        let x = const { NonNull::new(BASE as _).unwrap() };
+        let r = unsafe { x..x.byte_add(4096) };
+        page::identity_map_rw(r);
+    }
+}
+
 mod boot {
     // Intentionally separated from the `lemmings-qemubios` crate because you
     // better have a damn good reason to touch this.
@@ -1307,6 +1319,7 @@ extern "sysv64" fn boot(kernel: sys::File, data: sys::File) -> NonNull<u8> {
     let (entry, kernel) = elf::load(kernel);
     let data = load_file(data);
     apic::init();
+    hpet::init();
     boot::collect_info(kernel, data, fb);
     entry
 }
