@@ -26,6 +26,10 @@ impl Monotonic {
     pub fn nanos(&self) -> u64 {
         self.0
     }
+
+    pub fn micros(&self) -> u64 {
+        self.0 / 1000
+    }
 }
 
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {
