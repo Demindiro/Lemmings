@@ -93,7 +93,6 @@ struct SysFn(*const ());
 
 #[repr(C)]
 struct InterfaceInfo {
-    api: ApiId,
     name: Slice<u8>,
 }
 
@@ -173,7 +172,6 @@ unsafe extern "sysv64" fn door_list(
     door::list(api, cookie).map_or(Tuple2(None, cookie), |(cookie, x)| {
         info.map(|w| {
             w.write(InterfaceInfo {
-                api: x.api,
                 name: Slice::from(x.name),
             })
         });
@@ -183,9 +181,9 @@ unsafe extern "sysv64" fn door_list(
 
 // XXX: u128 ought to be FFI-safe
 #[allow(improper_ctypes_definitions)]
-unsafe extern "sysv64" fn door_register(api: ApiId, name: Slice<u8>, table: Table) {
+unsafe extern "sysv64" fn door_register(name: Slice<u8>, table: Table) {
     let name = unsafe { name.as_str() };
-    unsafe { door::register(api, name, table) };
+    unsafe { door::register(name, table) };
 }
 
 unsafe extern "sysv64" fn wait() {
