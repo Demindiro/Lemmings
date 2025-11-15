@@ -22,17 +22,17 @@ macro_rules! log {
 
 #[macro_export]
 macro_rules! debug {
-	($($arg:tt)*) => {{
-		if option_env!("KERNEL_DEBUG").is_some() {
-			// TODO auto include function name
-			// ... why the hell does Rust *still* not provide a __func__ equivalent?
-			use core::fmt::Write;
-			$crate::sys::with_log(|mut log| {
+    ($($arg:tt)*) => {{
+        if option_env!("KERNEL_DEBUG").is_some() {
+            // TODO auto include function name
+            // ... why the hell does Rust *still* not provide a __func__ equivalent?
+            use core::fmt::Write;
+            $crate::sys::with_log(|mut log| {
                 log.prefix_time();
-				let _ = writeln!(&mut log, $($arg)*);
-			});
-		}
-	}};
+                let _ = writeln!(&mut log, $($arg)*);
+            });
+        }
+    }};
 }
 
 #[macro_export]
