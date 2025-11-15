@@ -1,6 +1,7 @@
 use crate::{KernelEntryToken, page};
-use core::fmt;
+use core::{fmt, sync::atomic::Ordering};
 use lemmings_x86_64::{
+    hpet::{self, Hpet, HpetHelper},
     kvm::{self, TimeInfo, TimeInfoResult},
     mmu,
 };
@@ -33,7 +34,8 @@ impl Monotonic {
 }
 
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {
-    if TimeInfo::is_present() {
+    if TimeInfo::is_present() && false {
+        log!("using pvclock");
         let root = unsafe { mmu::current_root::<mmu::L4>() };
         let virt = mmu::Virt::new((&raw const TIME_INFO).addr() as u64).unwrap();
         let phys = root
@@ -41,7 +43,39 @@ pub fn init(token: KernelEntryToken) -> KernelEntryToken {
             .expect("TIME_INFO must be mapped");
         unsafe { TimeInfo::enable(phys) };
     } else {
-        todo!("manually calibrate TimeInfo with HPET");
+        log!("calibrating with HPET");
+        // FIXME get from bootinfo
+        let hpet = unsafe { &*(0xfed00000 as *const Hpet) };
+        let hpet = HpetHelper::new(hpet);
+
+        // Calibrate manually
+        let dt = hpet::Ns(10_000_000);
+        hpet.enable();
+        let end = hpet.now().saturating_add(dt);
+        let t = lemmings_x86_64::tsc();
+        while hpet.now() < end { /* pass */ }
+        let dtsc = lemmings_x86_64::tsc() - t;
+        let mut tsc_to_system_mul = (dt.0 << 32) / u128::from(dtsc);
+        let mut tsc_shift = 0;
+        let mut tsc_to_system_mul = loop {
+            if let Ok(n) = u32::try_from(tsc_to_system_mul) {
+                break n;
+            } else {
+                tsc_to_system_mul /= 2;
+                tsc_shift += 1;
+            }
+        };
+        while let Some(n) = tsc_to_system_mul.checked_mul(2) {
+            tsc_to_system_mul = n;
+            tsc_shift -= 1;
+        }
+        TIME_INFO
+            .tsc_to_system_mul
+            .store(tsc_to_system_mul, Ordering::Relaxed);
+        TIME_INFO.tsc_shift.store(tsc_shift, Ordering::Relaxed);
+        TIME_INFO
+            .tsc_timestamp
+            .store(lemmings_x86_64::tsc(), Ordering::Release);
     }
     token
 }

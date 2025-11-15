@@ -9,13 +9,13 @@ const MSR_KVM_SYSTEM_TIME_NEW: u32 = 0x4b564d01;
 
 #[repr(C, align(4))]
 pub struct TimeInfo {
-    version: AtomicU32,
+    pub version: AtomicU32,
     _pad0: AtomicU32,
-    tsc_timestamp: AtomicU64,
-    system_time: AtomicU64,
-    tsc_to_system_mul: AtomicU32,
-    tsc_shift: AtomicI8,
-    flags: AtomicU8,
+    pub tsc_timestamp: AtomicU64,
+    pub system_time: AtomicU64,
+    pub tsc_to_system_mul: AtomicU32,
+    pub tsc_shift: AtomicI8,
+    pub flags: AtomicU8,
     _pad: AtomicU16,
 }
 
