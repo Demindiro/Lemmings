@@ -1,21 +1,22 @@
 use crate::mmu;
-use core::fmt;
-use lemmings_volatile::VolatileCell;
+use core::{
+    fmt,
+    sync::atomic::{AtomicI8, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering},
+};
 
 const CPUID_PRESENT: u32 = 1 << 3;
 const MSR_KVM_SYSTEM_TIME_NEW: u32 = 0x4b564d01;
 
 #[repr(C, align(4))]
 pub struct TimeInfo {
-    // TODO volatile certainly works on x86, but is it correct?
-    version: VolatileCell<u32>,
-    _pad0: VolatileCell<u32>,
-    tsc_timestamp: VolatileCell<u64>,
-    system_time: VolatileCell<u64>,
-    tsc_to_system_mul: VolatileCell<u32>,
-    tsc_shift: VolatileCell<i8>,
-    flags: VolatileCell<u8>,
-    _pad: VolatileCell<u16>,
+    version: AtomicU32,
+    _pad0: AtomicU32,
+    tsc_timestamp: AtomicU64,
+    system_time: AtomicU64,
+    tsc_to_system_mul: AtomicU32,
+    tsc_shift: AtomicI8,
+    flags: AtomicU8,
+    _pad: AtomicU16,
 }
 
 // TODO
@@ -59,34 +60,34 @@ impl TimeInfo {
 
     pub const fn new() -> Self {
         Self {
-            version: VolatileCell::new(0),
-            _pad0: VolatileCell::new(0),
-            tsc_timestamp: VolatileCell::new(0),
-            system_time: VolatileCell::new(0),
-            tsc_to_system_mul: VolatileCell::new(0),
-            tsc_shift: VolatileCell::new(0),
-            flags: VolatileCell::new(0),
-            _pad: VolatileCell::new(0),
+            version: AtomicU32::new(0),
+            _pad0: AtomicU32::new(0),
+            tsc_timestamp: AtomicU64::new(0),
+            system_time: AtomicU64::new(0),
+            tsc_to_system_mul: AtomicU32::new(0),
+            tsc_shift: AtomicI8::new(0),
+            flags: AtomicU8::new(0),
+            _pad: AtomicU16::new(0),
         }
     }
 
     pub fn get(&self) -> TimeInfoResult {
         // https://wiki.osdev.org/Timekeeping_in_virtual_machines#pvclock
-        let v = self.version.get();
+        let v = self.version.load(Ordering::Acquire);
         if v & 1 == 1 {
             return TimeInfoResult::Updating;
         }
         // use wrapping functions to eliminate panics
-        let t = crate::tsc().wrapping_sub(self.tsc_timestamp.get());
-        let s = self.tsc_shift.get();
+        let t = crate::tsc().wrapping_sub(self.tsc_timestamp.load(Ordering::Relaxed));
+        let s = self.tsc_shift.load(Ordering::Relaxed);
         let t = if s < 0 {
             t.wrapping_shr(-s as _)
         } else {
             t.wrapping_shl(s as _)
         };
-        let t = (u128::from(t) * u128::from(self.tsc_to_system_mul.get()) >> 32) as u64;
-        let t = t.wrapping_add(self.system_time.get());
-        if v != self.version.get() {
+        let t = u128::from(t) * u128::from(self.tsc_to_system_mul.load(Ordering::Relaxed)) >> 32;
+        let t = (t as u64).wrapping_add(self.system_time.load(Ordering::Relaxed));
+        if v != self.version.load(Ordering::Acquire) {
             return TimeInfoResult::Updating;
         }
         TimeInfoResult::Ok(Ns(t))
@@ -109,12 +110,12 @@ impl fmt::Display for Ns {
 impl fmt::Debug for TimeInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(stringify!(TimeInfo))
-            .field("version", &self.version.get())
-            .field("system_time", &self.system_time.get())
-            .field("tsc_timestamp", &self.tsc_timestamp.get())
-            .field("system_time", &self.system_time.get())
-            .field("tsc_shift", &self.tsc_shift.get())
-            .field("flags", &self.flags.get())
+            .field("version", &self.version.load(Ordering::Relaxed))
+            .field("system_time", &self.system_time.load(Ordering::Relaxed))
+            .field("tsc_timestamp", &self.tsc_timestamp.load(Ordering::Relaxed))
+            .field("system_time", &self.system_time.load(Ordering::Relaxed))
+            .field("tsc_shift", &self.tsc_shift.load(Ordering::Relaxed))
+            .field("flags", &self.flags.load(Ordering::Relaxed))
             .finish()
     }
 }
