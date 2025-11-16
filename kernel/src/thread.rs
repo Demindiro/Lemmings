@@ -209,21 +209,16 @@ impl Thread {
         // - the page we allocated is valid and writeable.
         // - we will initialize it right now.
         let thread = unsafe {
-            dbg!(page);
             let thread = page
                 .byte_add(page::PAGE_SIZE - mem::size_of::<Thread>())
                 .cast::<Thread>();
-            dbg!(thread);
             let mut stack_pointer = thread.cast::<usize>().sub(1);
             // stack must be 16-byte aligned *before* call
             // hence, ret will operate on 16*N+8
-            dbg!(stack_pointer);
             if stack_pointer.addr().get() & 15 == 0 {
                 stack_pointer = stack_pointer.sub(1);
             }
-            dbg!(stack_pointer);
             stack_pointer.write(Thread::exit as usize);
-            dbg!();
             thread.write(Thread {
                 priority,
                 tcb: SpinLock::new(ThreadControlBlock {
@@ -232,10 +227,8 @@ impl Thread {
                     stack_pointer: stack_pointer.as_ptr().cast::<u8>() as *const u8,
                 }),
             });
-            dbg!();
             ThreadRef::wrap(thread)
         };
-        dbg!();
         Ok(ThreadHandle(thread))
     }
 
