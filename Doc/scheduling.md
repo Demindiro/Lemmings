@@ -28,3 +28,13 @@ Threads with a higher priority *always* run first.
 
 If no threads are queued, the idle thread will run by default.
 This thread's priority is always lower than the provided priorities.
+
+
+Events
+------
+
+When a thread needs to wait on an event, it is put in a queue and "parked":
+the main scheduler forgets about the thread until it is "unparked".
+
+Generally, a thread can only wait on a single event at a time.
+One thread per event should be created.
