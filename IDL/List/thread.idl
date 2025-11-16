@@ -24,8 +24,21 @@ door Threads {
 	-- hence it is omitted.
 	spawn = Spawn -> SpawnResult
 
+	-- Begin a critical section.
+	--
+	-- Any code between the start and end of this section is guaranteed
+	-- to be executed atomically between all other threads who use the same
+	-- mechanism and participate in the same scheduler.
+	--
+	-- In effect, this acts a "big global lock".
+	-- Appropriate measures must be taken if contention is a concern.
+	critical_section_begin = Void -> CriticalSection
+
+	-- End a critical section.
+	critical_section_end = CriticalSection -> Void
+
 	-- Park the current thread.
-	park = Void -> Void
+	park = CriticalSection -> Void
 
 	-- Unpark a thread.
 	unpark = Thread -> Void
@@ -57,3 +70,5 @@ pointer Thread = shared ThreadData
 
 record ThreadData {
 }
+
+u32 CriticalSection = 0 to 0xffff_ffff

@@ -21,6 +21,8 @@ pub mod door {
     door! {
         [lemmings_idl_thread Threads "Threads"]
         spawn
+        critical_section_begin
+        critical_section_end
         park
         unpark
         current
@@ -37,8 +39,22 @@ pub mod door {
         Ok.into()
     }
 
-    fn park() {
-        critical_section::with(super::park)
+    fn critical_section_begin() -> CriticalSection {
+        let x: u32;
+        unsafe { core::arch::asm!("pushf; pop {:r}", out(reg) x) };
+        CriticalSection::from(x)
+    }
+
+    fn critical_section_end(x: CriticalSection) {
+        let x = u32::from(x);
+        unsafe { core::arch::asm!("push {:r}; popf", in(reg) x) };
+    }
+
+    fn park<'a>(x: CriticalSection) {
+        // SAFETY: called inside a critical section
+        let cs = unsafe { super::CriticalSection::<'a>::new() };
+        super::park(cs);
+        critical_section_end(x)
     }
 
     fn unpark(thread: Thread) {
