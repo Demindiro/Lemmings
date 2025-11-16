@@ -291,7 +291,7 @@ impl Thread {
                 // x86 supports TSO, so a simple mov does the trick.
                 // ... well, not quite because of the store buffer,
                 // but stores are ordered wrt other stores *on the same core*,
-                // so any changes made to the PriorityQueue will be visible before this store.
+                // so any changes made to the thread will be visible before this store.
                 "mov byte ptr [{lock}], {UNLOCK}",
                 "mov rsp, {sp}",
                 "jmp {pc}",
