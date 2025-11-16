@@ -31,14 +31,12 @@
 // actually returns 2 values, but we don't care about the latter
 : archive->file_read 3 archive-door Sys Door call:4->1 ;
 
-0xfb3495b3454f87dc 0xd34a42ac4fbdc8cd "threads" find-door
+0x8f8c45677f9b9a08 0x1f5744c88b77e44e "threads" find-door
 : threads-door ! const ;
 : threads->spawn   0 threads-door Sys Door call:2->1 ;
-: threads->critical-section-begin 1 threads-door Sys Door call:0->1 ;
-: threads->critical-section-end   2 threads-door Sys Door call:1->0 ;
-: threads->park    3 threads-door Sys Door call:1->0 ;
-: threads->unpark  4 threads-door Sys Door call:1->0 ;
-: threads->current 5 threads-door Sys Door call:0->1 ;
+: threads->park    1 threads-door Sys Door call:0->0 ;
+: threads->unpark  2 threads-door Sys Door call:1->0 ;
+: threads->current 3 threads-door Sys Door call:0->1 ;
 
 
 : trace-num  #dup String natural  Sys log ;
