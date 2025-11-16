@@ -15,6 +15,59 @@ pub mod uart;
 
 use core::arch::asm;
 
+mod private {
+    use core::{arch::asm, ptr::NonNull};
+
+    pub trait GsValue: Copy {
+        unsafe fn load<const BYTE_OFFSET: usize>() -> Self;
+        unsafe fn store<const BYTE_OFFSET: usize>(self);
+    }
+
+    pub trait FsValue: Copy {
+        unsafe fn load<const BYTE_OFFSET: usize>() -> Self;
+        unsafe fn store<const BYTE_OFFSET: usize>(self);
+    }
+
+    macro_rules! imp {
+        (fs $ty:ident $load:literal $store:literal) => { imp!(@ FsValue $ty $load $store); };
+        (gs $ty:ident $load:literal $store:literal) => { imp!(@ GsValue $ty $load $store); };
+        (@ $trait:ident $ty:ident $load:literal $store:literal) => {
+            impl $trait for $ty {
+                unsafe fn load<const BYTE_OFFSET: usize>() -> Self {
+                    let x: Self;
+                    unsafe { asm!($load, OFFSET = const BYTE_OFFSET, x = out(reg) x, options(nostack, readonly)) }
+                    x
+                }
+                unsafe fn store<const BYTE_OFFSET: usize>(self) {
+                    unsafe { asm!($store, OFFSET = const BYTE_OFFSET, x = in(reg) self, options(nostack)) }
+                }
+            }
+        };
+    }
+    imp!(fs u32   "mov {x:e}, fs:[{OFFSET}]" "mov fs:[{OFFSET}], {x:e}");
+    imp!(gs u32   "mov {x:e}, gs:[{OFFSET}]" "mov gs:[{OFFSET}], {x:e}");
+    imp!(fs u64   "mov {x:r}, fs:[{OFFSET}]" "mov fs:[{OFFSET}], {x:r}");
+    imp!(gs u64   "mov {x:r}, gs:[{OFFSET}]" "mov gs:[{OFFSET}], {x:r}");
+    imp!(fs usize "mov {x:r}, fs:[{OFFSET}]" "mov fs:[{OFFSET}], {x:r}");
+    imp!(gs usize "mov {x:r}, gs:[{OFFSET}]" "mov gs:[{OFFSET}], {x:r}");
+
+    macro_rules! imp_nonnull {
+        ($($trait:ident)*) => {
+        $(
+            impl<T> $trait for NonNull<T> {
+                unsafe fn load<const BYTE_OFFSET: usize>() -> Self {
+                    unsafe { NonNull::new_unchecked(<usize as $trait>::load::<BYTE_OFFSET>() as *mut T) }
+                }
+                unsafe fn store<const BYTE_OFFSET: usize>(self) {
+                    unsafe { <usize as $trait>::store::<BYTE_OFFSET>(self.addr().get() as usize) }
+                }
+            }
+        )*
+        };
+    }
+    imp_nonnull!(FsValue GsValue);
+}
+
 pub fn halt() {
     unsafe { core::arch::asm!("hlt", options(nomem, nostack, preserves_flags)) };
 }
@@ -133,6 +186,34 @@ pub fn gs() -> *mut u8 {
     let x;
     unsafe { asm!("rdgsbase {}", out(reg) x, options(nomem, nostack, pure, preserves_flags)) };
     x
+}
+
+pub unsafe fn fs_load<const BYTE_OFFSET: usize, T>() -> T
+where
+    T: private::FsValue,
+{
+    unsafe { T::load::<BYTE_OFFSET>() }
+}
+
+pub unsafe fn fs_store<const BYTE_OFFSET: usize, T>(x: T)
+where
+    T: private::FsValue,
+{
+    unsafe { T::store::<BYTE_OFFSET>(x) }
+}
+
+pub unsafe fn gs_load<const BYTE_OFFSET: usize, T>() -> T
+where
+    T: private::GsValue,
+{
+    unsafe { T::load::<BYTE_OFFSET>() }
+}
+
+pub unsafe fn gs_store<const BYTE_OFFSET: usize, T>(x: T)
+where
+    T: private::GsValue,
+{
+    unsafe { T::store::<BYTE_OFFSET>(x) }
 }
 
 pub fn tsc() -> u64 {
