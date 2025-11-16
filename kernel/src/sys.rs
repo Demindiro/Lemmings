@@ -13,22 +13,26 @@ use core::{
 macro_rules! log {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        $crate::sys::with_log(|mut log| { let _ = writeln!(&mut log, $($arg)*); });
+        $crate::sys::with_log(|mut log| {
+            log.prefix_time();
+            let _ = writeln!(&mut log, $($arg)*);
+        });
     }};
 }
 
 #[macro_export]
 macro_rules! debug {
-	($($arg:tt)*) => {{
-		if option_env!("KERNEL_DEBUG").is_some() {
-			// TODO auto include function name
-			// ... why the hell does Rust *still* not provide a __func__ equivalent?
-			use core::fmt::Write;
-			$crate::sys::with_log(|mut log| {
-				let _ = writeln!(&mut log, $($arg)*);
-			});
-		}
-	}};
+    ($($arg:tt)*) => {{
+        if option_env!("KERNEL_DEBUG").is_some() {
+            // TODO auto include function name
+            // ... why the hell does Rust *still* not provide a __func__ equivalent?
+            use core::fmt::Write;
+            $crate::sys::with_log(|mut log| {
+                log.prefix_time();
+                let _ = writeln!(&mut log, $($arg)*);
+            });
+        }
+    }};
 }
 
 #[macro_export]
@@ -81,7 +85,6 @@ systable! {
     4 panic_begin
     5 panic_push
     6 panic_end
-    7 wait
 }
 
 pub struct Log<'cs> {
@@ -94,6 +97,14 @@ struct SysFn(*const ());
 #[repr(C)]
 struct InterfaceInfo {
     name: Slice<u8>,
+}
+
+impl Log<'_> {
+    pub fn prefix_time(&mut self) {
+        let us = crate::time::Monotonic::now().micros();
+        let (s, us) = (us / 1_000_000, us % 1_000_000);
+        let _ = write!(self, "[{s:>5}.{us:06}] ");
+    }
 }
 
 impl Write for Log<'_> {
@@ -113,6 +124,7 @@ unsafe impl Sync for SysFn {}
 unsafe extern "sysv64" fn log(msg: Slice<u8>) {
     let msg = unsafe { msg.as_str() };
     with_log(|mut log| {
+        log.prefix_time();
         let _ = log.write_str(msg);
         let _ = log.write_str("\n");
     })
@@ -184,10 +196,6 @@ unsafe extern "sysv64" fn door_list(
 unsafe extern "sysv64" fn door_register(name: Slice<u8>, table: Table) {
     let name = unsafe { name.as_str() };
     unsafe { door::register(name, table) };
-}
-
-unsafe extern "sysv64" fn wait() {
-    crate::thread::wait();
 }
 
 pub fn with_log<F, R>(f: F) -> R

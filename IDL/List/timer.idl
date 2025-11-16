@@ -1,0 +1,39 @@
+door Timer {
+
+	-- Get the time from an arbitrary point in nanoseconds.
+	--
+	-- The returned value is guaranteed to increase monotonically.
+	now = Void -> NanoSeconds
+
+	-- Create a timer object.
+	--
+	-- To use, write a deadline to the timer.
+	-- Then wait until the deadline is hit.
+	--
+	-- The deadline can be adjusted while a thread is waiting.
+	timer_create = Void -> MaybeTimer
+
+	-- Set timer object deadline.
+	timer_set = TimerSet -> Void
+
+	-- Wait on a timer object to expire.
+	timer_wait = Timer -> Void
+}
+
+record Void {
+}
+
+u64 NanoSeconds = 0 to 0xffff_ffff_ffff_ffff
+
+pointer Timer = shared TimerData
+null Fail = Timer
+
+sum MaybeTimer = Timer | Fail
+
+record TimerSet {
+	timer = Timer
+	deadline = NanoSeconds
+}
+
+record TimerData {
+}

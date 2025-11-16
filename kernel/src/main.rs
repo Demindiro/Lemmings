@@ -27,6 +27,8 @@ mod sync;
 mod thread;
 mod time;
 
+use ::critical_section::CriticalSection;
+
 mod private {
     /// This token MUST ONLY be constructed in [`_start`]!
     ///
@@ -75,11 +77,13 @@ fn main_init() {
 
 extern "sysv64" fn main<'a>(_: *const ()) {
     main_init();
-    // SAFETY: enabling interrupts and halting is safe at this point.
     loop {
-        debug!("idle wait");
-        thread::wait();
+        // SAFETY: interrupts are disabled.
+        let cs = unsafe { CriticalSection::new() };
+        debug!("idle park");
+        thread::park(cs);
         debug!("idle halt");
+        // SAFETY: enabling interrupts and halting is safe at this point.
         unsafe {
             core::arch::asm! {
                 "sti",
@@ -102,6 +106,7 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     let token = unsafe { KernelEntryToken::new() };
     let token = framebuffer::init(entry, token);
     let token = arch::init(entry, token);
+    let token = time::init(token);
     let token = page::init(entry, token);
     let token = archive::init(entry, token);
     let token = sys::init(entry, token);

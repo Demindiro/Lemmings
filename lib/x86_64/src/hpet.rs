@@ -1,4 +1,4 @@
-use core::fmt;
+use core::{cmp, fmt, ops};
 use lemmings_volatile::VolatileCell;
 
 pub trait LossyConvert<To> {
@@ -15,17 +15,47 @@ impl Div1e3 for u128 {
     }
 }
 
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Monotonic<T>(pub T);
 /// Nanoseconds
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Ns<T>(pub T);
 /// Picoseconds
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Ps<T>(pub T);
 /// Femtoseconds
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Fs<T>(pub T);
+
+#[derive(Debug)]
+pub struct HpetHelper<'a> {
+    hpet: &'a Hpet,
+}
+
+#[repr(C)]
+pub struct Hpet {
+    capabilities_id: Reg,
+    configuration: Reg,
+    interrupt_status: Reg,
+    _reserved: [Reg; 0xf - 0x3],
+    counter: Reg,
+    timers: [Timer; 32],
+}
+
+#[repr(transparent)]
+pub struct CapabilitiesId(u64);
+
+#[repr(C)]
+pub struct Timer {
+    configuration_capabilities: VolatileCell<u64>,
+    comparator_value: VolatileCell<u64>,
+    fsb_interrupt_route: VolatileCell<u64>,
+    _reserved: VolatileCell<u64>,
+}
 
 impl<T> LossyConvert<Ps<T>> for Fs<T>
 where
@@ -55,17 +85,11 @@ where
     }
 }
 
-pub struct HpetHelper<'a> {
-    hpet: &'a Hpet,
-}
-
+// Dammit Intel!
 #[repr(C)]
-pub struct Hpet {
-    capabilities_id: VolatileCell<u64>,
-    configuration: VolatileCell<u64>,
-    interrupt_status: VolatileCell<u64>,
-    _reserved: [VolatileCell<u64>; 0xc],
-    pub counter: VolatileCell<u64>,
+struct Reg {
+    reg: VolatileCell<u64>,
+    _reserved: VolatileCell<u64>,
 }
 
 impl Hpet {
@@ -99,10 +123,8 @@ impl<'a> HpetHelper<'a> {
         Self { hpet }
     }
 
-    pub unsafe fn enable(&self) {
-        self.hpet
-            .configuration
-            .set(self.hpet.configuration.get() | 1);
+    pub fn enable(&self) {
+        self.hpet.configuration.set(1);
     }
 
     pub fn now(&self) -> Monotonic<Fs<u128>> {
@@ -113,19 +135,60 @@ impl<'a> HpetHelper<'a> {
     }
 }
 
-#[repr(transparent)]
-pub struct CapabilitiesId(u64);
+impl Monotonic<Fs<u128>> {
+    pub fn saturating_add(self, t: Ns<u128>) -> Self {
+        Self(Fs(self.0.0.saturating_add(t.0.saturating_mul(1_000_000))))
+    }
+}
+
+macro_rules! cmp {
+    ($ty:ident) => {
+        impl<T, U> cmp::PartialEq<$ty<U>> for $ty<T>
+        where
+            T: PartialEq<U>,
+        {
+            fn eq(&self, rhs: &$ty<U>) -> bool {
+                self.0.eq(&rhs.0)
+            }
+        }
+
+        impl<T> cmp::Eq for $ty<T> where T: Eq {}
+
+        impl<T, U> cmp::PartialOrd<$ty<U>> for $ty<T>
+        where
+            T: PartialOrd<U>,
+        {
+            fn partial_cmp(&self, rhs: &$ty<U>) -> Option<cmp::Ordering> {
+                self.0.partial_cmp(&rhs.0)
+            }
+        }
+
+        impl<T> cmp::Ord for $ty<T>
+        where
+            T: Ord,
+        {
+            fn cmp(&self, rhs: &Self) -> cmp::Ordering {
+                self.0.cmp(&rhs.0)
+            }
+        }
+    };
+}
+
+cmp!(Monotonic);
+cmp!(Fs);
+cmp!(Ps);
+cmp!(Ns);
+
+impl ops::Deref for Reg {
+    type Target = VolatileCell<u64>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.reg
+    }
+}
 
 impl CapabilitiesId {
     pub fn period(&self) -> u32 {
         (self.0 >> 32) as u32
     }
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-pub struct Timer {
-    configuration_capabilities: VolatileCell<u64>,
-    comparator_value: VolatileCell<u64>,
-    fsb_interrupt_route: VolatileCell<u64>,
 }

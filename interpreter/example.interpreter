@@ -10,11 +10,12 @@
 		@drop
 	end ;
 
-0x527a31dcf1053f1b 0x89616ff91383a800 "interrupt" find-door
+0x4311bc6974a63948 0x3fdd0de1dc07e4a6 "IRQ" find-door
 : interrupt-door ! const ;
-: interrupt->subscribe   0 interrupt-door Sys Door call:2->1 ;
-: interrupt->unsubscribe 1 interrupt-door Sys Door call:1->0 ;
-: interrupt->done       2 interrupt-door Sys Door call:1->0 ;
+: interrupt->map   0 interrupt-door Sys Door call:2->1 ;
+: interrupt->unmap 1 interrupt-door Sys Door call:1->0 ;
+: interrupt->wait  2 interrupt-door Sys Door call:1->0 ;
+: interrupt->done  3 interrupt-door Sys Door call:1->0 ;
 : interrupt->LEVEL 0 ;
 : interrupt->EDGE  1 ;
 
@@ -30,13 +31,12 @@
 // actually returns 2 values, but we don't care about the latter
 : archive->file_read 3 archive-door Sys Door call:4->1 ;
 
-0xc78f91af838c941c 0xcc4ffe41d29450f0 "threads" find-door
+0x8f8c45677f9b9a08 0x1f5744c88b77e44e "threads" find-door
 : threads-door ! const ;
 : threads->spawn   0 threads-door Sys Door call:2->1 ;
-: threads->notify  1 threads-door Sys Door call:1->0 ;
-: threads->acquire 2 threads-door Sys Door call:1->0 ;
-: threads->release 3 threads-door Sys Door call:1->0 ;
-: threads->current 4 threads-door Sys Door call:0->1 ;
+: threads->park    1 threads-door Sys Door call:0->0 ;
+: threads->unpark  2 threads-door Sys Door call:1->0 ;
+: threads->current 3 threads-door Sys Door call:0->1 ;
 
 
 : trace-num  #dup String natural  Sys log ;
@@ -139,12 +139,13 @@ if 0 <> then "[warn] failed to spawn thread for virtio-net" Sys log end
 
 ps2_init
 
-0x01 interrupt->LEVEL interrupt->subscribe
+1 interrupt->LEVEL interrupt->map
 if 0 <> then "failed to map IRQ 1" Sys panic end
-: ps2_done 0x01 interrupt->done ;
+: ps2_wait 1 interrupt->wait ;
+: ps2_done 1 interrupt->done ;
 
 if 1 then
-	Sys wait
+	ps2_wait
 	"Got an interrupt!!!" Sys log
 	ps2_read  String natural  Sys log
 	ps2_done
