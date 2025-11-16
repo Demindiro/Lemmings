@@ -5,20 +5,24 @@
 -- 2. Interrupt is claimed, disabling the interrupt.
 -- 3. Interrupt is marked as completed ("End Of Interrupt" / "EOI")
 door Irq {
-	-- Subscribe the current thread interrupt events of an IRQ.
+	-- Map an IRQ.
 	--
 	-- The interrupt is automatically claimed as soon as it occurs,
 	-- disabling the interrupt until done is called.
-	--
-	-- Only one thread can be subscribed to an IRQ at any time.
-	subscribe = Subscribe -> SubscribeResult
+	map = Map -> MapResult
 
-	-- Unsubscribe the current thread from interrupt events of an IRQ.
-	unsubscribe = IrqNr -> Void
+	-- Unmap an IRQ.
+	unmap = IrqNr -> Void
+
+	-- Wait for an IRQ.
+	--
+	-- The IRQ will be masked after the call.
+	-- It must be unmasked with `done()`.
+	wait = IrqNr -> Void
 
 	-- Mark an IRQ as completed.
 	--
-	-- This re-enables the interrupt.
+	-- This unmasks the interrupt.
 	done = IrqNr -> Void
 }
 
@@ -36,12 +40,11 @@ u8 Level = 0
 u8 Edge = 1
 sum TriggerMode = Level | Edge
 
-record Subscribe {
+record Map {
 	irq = IrqNr
 	mode = TriggerMode
 }
 
 u8 Ok = 0
 u8 Fail = 1
-u8 AlreadySubscribed = 2
-sum SubscribeResult = Ok | Fail | AlreadySubscribed
+sum MapResult = Ok | Fail

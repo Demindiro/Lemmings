@@ -1,7 +1,7 @@
 use crate::{
     KernelEntryToken, page,
-    sync::SpinLock,
-    thread::{self, ThreadHandle},
+    sync::{SpinLock, SpinLockGuard},
+    thread::{self, RoundRobinQueue},
 };
 use core::{arch::naked_asm, mem::MaybeUninit, num::NonZero};
 use critical_section::CriticalSection;
@@ -37,28 +37,48 @@ pub mod door {
 
     door! {
         [lemmings_idl_irq Irq "x86-64 IRQ"]
-        subscribe
-        unsubscribe
+        map
+        unmap
+        wait
         done
     }
 
-    fn subscribe(Subscribe { irq, mode }: Subscribe) -> SubscribeResult {
-        debug!("irq subscribe {irq:?} {mode:?}");
+    fn map(Map { irq, mode }: Map) -> MapResult {
+        debug!("irq map {irq:?} {mode:?}");
         let irq = irqnr(irq);
         let edge = matches!(mode, TriggerMode::Edge);
-        let res = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).subscribe_irq(irq, edge));
-        debug!("irq subscribe -> {res:?}");
+        let res = critical_section::with(|cs| {
+            let mut h = INTERRUPT_HANDLERS.lock(cs);
+            let vector = h.alloc_vector()?;
+            h.map_irq(irq, vector, edge);
+            Result::Ok(vector)
+        });
+        debug!("irq map -> {res:?}");
         match res {
-            Result::Ok(()) => Ok.into(),
-            Result::Err(SubscribeIrqError::AlreadySubscribed) => AlreadySubscribed.into(),
-            Result::Err(_) => Fail.into(),
+            Result::Ok(_) => Ok.into(),
+            Result::Err(super::OutOfVectors) => Fail.into(),
         }
     }
 
-    fn unsubscribe(irq: IrqNr) {
-        debug!("irq unsubscribe {irq:?}");
+    fn unmap(irq: IrqNr) {
+        debug!("irq unmap {irq:?}");
         let irq = irqnr(irq);
-        critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).unsubscribe_irq(irq));
+        critical_section::with(|cs| {
+            let mut h = INTERRUPT_HANDLERS.lock(cs);
+            let vector = h.irq_to_vector(irq).expect("unmapped irq");
+            h.unmap_irq(irq);
+            h.free_vector(vector);
+        });
+    }
+
+    fn wait(irq: IrqNr) {
+        debug!("irq wait {irq:?}");
+        let irq = irqnr(irq);
+        critical_section::with(|cs| {
+            let h = INTERRUPT_HANDLERS.lock(cs);
+            let vector = h.irq_to_vector(irq).expect("unmapped irq");
+            InterruptHandlers::wait(h, vector);
+        });
     }
 
     fn done(irq: IrqNr) {
@@ -93,17 +113,14 @@ struct InvalidIrqNr;
 #[derive(Debug)]
 struct InvalidVectorNr;
 
-#[derive(Debug)]
-enum SubscribeIrqError {
-    OutOfVectors,
-    AlreadySubscribed,
-}
-
 struct InterruptHandlers {
-    subscribed: [Option<ThreadHandle>; VECTOR_NR],
-    allocated: [u32; (VECTOR_NR + 32) / 32],
+    queues: [RoundRobinQueue; VECTOR_NR],
+    allocated: BitArray<VECTOR_NR, 7>,
+    signaled: BitArray<VECTOR_NR, 7>,
     vector_to_irq: [u8; VECTOR_NR],
 }
+
+struct BitArray<const N: usize, const WORDS: usize>([u32; WORDS]);
 
 impl TryFrom<u32> for IrqNr {
     type Error = InvalidIrqNr;
@@ -152,87 +169,71 @@ impl From<VectorNr> for u32 {
     }
 }
 
-impl From<OutOfVectors> for SubscribeIrqError {
-    fn from(_: OutOfVectors) -> Self {
-        SubscribeIrqError::OutOfVectors
-    }
-}
-
 impl InterruptHandlers {
     const fn new() -> Self {
         Self {
-            subscribed: [const { None }; VECTOR_NR],
-            allocated: [0; (VECTOR_NR + 32) / 32],
+            queues: [const { RoundRobinQueue::new() }; VECTOR_NR],
+            allocated: BitArray([0; (VECTOR_NR + 32) / 32]),
+            signaled: BitArray([0; (VECTOR_NR + 32) / 32]),
             vector_to_irq: [0; VECTOR_NR],
         }
     }
 
-    fn subscribe(&mut self) -> Result<VectorNr, OutOfVectors> {
-        let vector = self.reserve().ok_or(OutOfVectors)?;
+    fn wait(mut slf: SpinLockGuard<'_, '_, Self>, vector: VectorNr) {
         let i = Self::vector_to_i(vector);
-        self.subscribed[i] = Some(thread::current());
-        Ok(vector)
+        slf.queues[i].enqueue(thread::current());
+        let cs = slf.cs;
+        drop(slf);
+        thread::park(cs);
     }
 
-    fn unsubscribe(&mut self, vector: VectorNr) {
+    fn handle(mut slf: SpinLockGuard<'_, '_, Self>, vector: VectorNr) {
         let i = Self::vector_to_i(vector);
-        self.subscribed[i] = None;
-        self.release(vector);
-    }
-
-    fn subscribe_irq(&mut self, irq: IrqNr, edge: bool) -> Result<(), SubscribeIrqError> {
-        if self.vector_to_irq.contains(&irq.0) {
-            return Err(SubscribeIrqError::AlreadySubscribed);
+        if let Some(thread) = slf.queues[i].dequeue() {
+            slf.eoi();
+            let cs = slf.cs;
+            drop(slf);
+            unsafe { thread::unpark(cs, thread) };
+        } else {
+            slf.mask_vector(vector);
+            slf.signaled.set(i, true);
+            slf.eoi();
         }
-        let vector = self.subscribe()?;
+    }
+
+    fn alloc_vector(&mut self) -> Result<VectorNr, OutOfVectors> {
+        self.allocated
+            .alloc()
+            .map(Self::i_to_vector)
+            .ok_or(OutOfVectors)
+    }
+
+    fn free_vector(&mut self, vector: VectorNr) {
         let i = Self::vector_to_i(vector);
-        self.map(irq, vector, edge);
-        self.vector_to_irq[i] = irq.0;
-        Ok(())
-    }
-
-    fn unsubscribe_irq(&mut self, irq: IrqNr) {
-        let i = self
-            .vector_to_irq
-            .iter()
-            .position(|x| *x == irq.0)
-            .expect("unmapped irq");
-        self.vector_to_irq[i] = 0xff;
-        self.unsubscribe(Self::i_to_vector(i));
-    }
-
-    fn notify(&self, vector: VectorNr) {
-        let i = usize::from(vector.0.get() - VECTOR_STUB_OFFSET);
-        self.subscribed[i].as_ref().map(|x| x.notify());
-    }
-
-    fn reserve(&mut self) -> Option<VectorNr> {
-        for (i, n) in self.allocated.iter_mut().enumerate() {
-            if *n == u32::MAX {
-                continue;
-            }
-            let b = n.trailing_ones() as usize;
-            *n |= 1 << b;
-            return Some(Self::i_to_vector(i * 32 + b));
-        }
-        None
-    }
-
-    fn release(&mut self, vector: VectorNr) {
-        let i = Self::vector_to_i(vector);
-        let [k, b] = [i / 32, i % 32];
-        self.allocated[k] &= !(1 << b);
+        assert!(self.allocated.get(i), "vector is not allocated");
+        self.allocated.set(i, false);
         self.vector_to_irq[i] = 0xff;
     }
 
-    fn map(&mut self, irq: IrqNr, vector: VectorNr, edge: bool) {
+    fn map_irq(&mut self, irq: IrqNr, vector: VectorNr, edge: bool) {
         // FIXME detect Local APIC ID
         let mode = if edge {
             TriggerMode::Edge
         } else {
             TriggerMode::Level
         };
+        let i = Self::vector_to_i(vector);
+        self.vector_to_irq[i] = irq.0;
         unsafe { self.ioapic().set_irq(irq.0, 0, vector.into(), mode, false) }
+    }
+
+    fn unmap_irq(&mut self, irq: IrqNr) {
+        unsafe {
+            self.ioapic()
+                .set_irq(irq.0, 0, 0xff, TriggerMode::Edge, false)
+        }
+        //let i = Self::vector_to_i(vector);
+        //self.vector_to_irq[i] = 0xff;
     }
 
     fn mask_irq(&mut self, irq: IrqNr) {
@@ -249,6 +250,13 @@ impl InterruptHandlers {
         if irq != 0xff {
             self.mask_irq(IrqNr(irq));
         }
+    }
+
+    fn irq_to_vector(&self, irq: IrqNr) -> Option<VectorNr> {
+        self.vector_to_irq
+            .iter()
+            .position(|x| *x == irq.0)
+            .map(Self::i_to_vector)
     }
 
     fn eoi(&mut self) {
@@ -276,17 +284,56 @@ impl InterruptHandlers {
     }
 }
 
-pub fn subscribe_msi() -> Result<Msi, OutOfVectors> {
-    let vector = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).subscribe())?;
+impl<const N: usize, const WORDS: usize> BitArray<N, WORDS> {
+    fn get(&self, i: usize) -> bool {
+        const {
+            assert!(WORDS == (N + 31) / 32);
+        }
+        let [k, b] = [i / 32, i % 32];
+        self.0[k] & 1 << b != 0
+    }
+
+    fn set(&mut self, i: usize, value: bool) {
+        let [k, b] = [i / 32, i % 32];
+        self.0[k] &= !(1 << b);
+        self.0[k] |= u32::from(value) << b;
+    }
+
+    fn alloc(&mut self) -> Option<usize> {
+        for (k, n) in self.0.iter_mut().enumerate() {
+            if *n == u32::MAX {
+                continue;
+            }
+            let b = n.trailing_ones() as usize;
+            let i = 32 * k + b;
+            return (i < N).then(|| {
+                *n |= 1 << b;
+                i
+            });
+        }
+        None
+    }
+}
+
+pub fn map_msi() -> Result<Msi, OutOfVectors> {
+    let vector = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).alloc_vector())?;
+    debug!("map_msi {vector:?}");
     Ok(Msi {
         data: vector.into(),
         address: apic::local::DEVICE_LAPIC_ADDRESS.into(),
     })
 }
 
-pub fn unsubscribe_msi(msi: Msi) {
+pub fn unmap_msi(msi: Msi) {
     let vector = (msi.data & 0xff).try_into().expect("invalid vector");
-    critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).unsubscribe(vector));
+    debug!("unmap_msi {vector:?}");
+    critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).free_vector(vector));
+}
+
+pub fn wait_msi(msi: Msi) {
+    let vector = (msi.data & 0xff).try_into().expect("invalid vector");
+    debug!("wait_msi {vector:?}");
+    critical_section::with(|cs| InterruptHandlers::wait(INTERRUPT_HANDLERS.lock(cs), vector));
 }
 
 pub fn init(token: KernelEntryToken) -> KernelEntryToken {
@@ -364,10 +411,8 @@ extern "sysv64" fn interrupt_handler<'a>(vector: VectorNr) {
     debug!("interrupt {vector:?}");
     // SAFETY: interrupts are disabled right now
     let cs = unsafe { CriticalSection::<'a>::new() };
-    let mut h = INTERRUPT_HANDLERS.lock(cs);
-    h.notify(vector);
-    h.mask_vector(vector);
-    h.eoi();
+    let h = INTERRUPT_HANDLERS.lock(cs);
+    InterruptHandlers::handle(h, vector);
 }
 
 extern "sysv64" fn timer_handler() {

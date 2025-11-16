@@ -51,7 +51,7 @@ pub struct SpinLock<T> {
 
 pub struct SpinLockGuard<'lock, 'cs, T> {
     lock: &'lock SpinLock<T>,
-    _cs: CriticalSection<'cs>,
+    pub cs: CriticalSection<'cs>,
 }
 
 impl<T> SpinLock<T> {
@@ -64,10 +64,7 @@ impl<T> SpinLock<T> {
 
     pub fn lock<'lock, 'cs>(&'lock self, cs: CriticalSection<'cs>) -> SpinLockGuard<'lock, 'cs, T> {
         self.lock.lock();
-        SpinLockGuard {
-            lock: self,
-            _cs: cs,
-        }
+        SpinLockGuard { lock: self, cs }
     }
 
     pub fn set(&self, value: T, token: KernelEntryToken) -> KernelEntryToken {
