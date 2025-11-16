@@ -42,7 +42,7 @@ pub mod door {
     }
 
     fn unpark(thread: Thread) {
-        critical_section::with(|cs| unsafe { super::unpark(cs, handle(thread)) })
+        critical_section::with(|cs| super::unpark(cs, handle(thread)))
     }
 
     fn current() -> Thread {

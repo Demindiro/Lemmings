@@ -193,7 +193,7 @@ impl InterruptHandlers {
         if let Some(thread) = slf.queues[i].dequeue(cs) {
             slf.eoi();
             drop(slf);
-            unsafe { thread::unpark(cs, thread) };
+            thread::unpark(cs, thread);
         } else {
             slf.mask_vector(vector);
             slf.signaled.set(i, true);
