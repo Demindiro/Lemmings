@@ -258,7 +258,7 @@ def emit(outf, idl):
             return ', '.join(f'{tr(m_name)}: {ffi_name(m_ty, macro)}' for m_name, m_ty in ty.members.items())
         return f'x: {ffi_name(name, macro)}' if not is_empty(name) else ''
     def sysv_splat_ret(name, *, macro = False) -> str:
-        return '' if is_void(name) else f'-> {ffi_name(name, macro)}'
+        return '' if is_empty(name) else f'-> {ffi_name(name, macro)}'
     def sysv_splat_members(name, *, macro = False) -> str:
         if is_void(name):
             return ''
