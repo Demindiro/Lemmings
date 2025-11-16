@@ -75,6 +75,21 @@ impl<T> SpinLock<T> {
     pub const fn get_mut(&mut self) -> &mut T {
         self.value.get_mut()
     }
+
+    /// It isn't always practical to carry around a SpinLockGuard.
+    ///
+    /// As workaround, after calling [`SpinLockGuard::into_inner_lock`],
+    /// this function can be called to reacquire the lock.
+    ///
+    /// # Safety
+    ///
+    /// The lock must have already been acquired before by the same caller.
+    pub unsafe fn lock_unchecked<'lock, 'cs>(
+        &'lock self,
+        cs: CriticalSection<'cs>,
+    ) -> SpinLockGuard<'lock, 'cs, T> {
+        SpinLockGuard { lock: self, cs }
+    }
 }
 
 impl<'lock, 'cs, T> SpinLockGuard<'lock, 'cs, T> {
@@ -82,11 +97,16 @@ impl<'lock, 'cs, T> SpinLockGuard<'lock, 'cs, T> {
     ///
     /// The lock may only get disengaged once.
     ///
+    /// Once the lock is disengaged, the inner value may no longer be accessed.
+    ///
     /// # Warning
     ///
     /// The lock must get disengaged manually.
-    pub unsafe fn into_inner_lock(self) -> &'lock imp::SpinLock {
-        &core::mem::ManuallyDrop::new(self).lock.lock
+    #[must_use]
+    pub unsafe fn into_inner_lock(self) -> (&'lock imp::SpinLock, &'lock mut T) {
+        let s = &core::mem::ManuallyDrop::new(self).lock;
+        let v = unsafe { &mut *s.value.get() };
+        (&s.lock, v)
     }
 }
 

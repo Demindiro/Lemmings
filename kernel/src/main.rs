@@ -43,6 +43,10 @@ mod private {
         pub unsafe fn new() -> Self {
             Self(())
         }
+
+        pub fn cs(&self) -> super::CriticalSection<'_> {
+            unsafe { super::CriticalSection::new() }
+        }
     }
 }
 
@@ -57,6 +61,7 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 // do not inline so the stupid compiler frees up stack space.
 #[inline(never)]
 fn main_init() {
+    log!("registering doors");
     arch::door::register();
     archive::door::register();
     //framebuffer::door::register();
