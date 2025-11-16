@@ -12,7 +12,7 @@ use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
 
-static mut MANAGER: mem::MaybeUninit<SpinLock<ThreadManager>> = mem::MaybeUninit::uninit();
+static mut MANAGER: mem::MaybeUninit<SpinLock<PriorityQueue>> = mem::MaybeUninit::uninit();
 
 pub mod door {
     use core::{mem, ptr};
@@ -79,7 +79,7 @@ pub struct RoundRobinQueue {
 #[derive(Clone)]
 pub struct ThreadHandle(ThreadRef);
 
-struct ThreadManager {
+struct PriorityQueue {
     pending: [RoundRobinQueue; PRIORITY_COUNT],
     idle_thread: ThreadHandle,
 }
@@ -107,7 +107,7 @@ struct RoundRobinQueueLink {
     first: ThreadRef,
 }
 
-impl ThreadManager {
+impl PriorityQueue {
     pub const fn new(idle_thread: ThreadHandle) -> Self {
         Self {
             pending: [const { RoundRobinQueue::new() }; PRIORITY_COUNT],
@@ -291,7 +291,7 @@ impl Thread {
                 // x86 supports TSO, so a simple mov does the trick.
                 // ... well, not quite because of the store buffer,
                 // but stores are ordered wrt other stores *on the same core*,
-                // so any changes made to the ThreadManager will be visible before this store.
+                // so any changes made to the PriorityQueue will be visible before this store.
                 "mov byte ptr [{lock}], {UNLOCK}",
                 "mov rsp, {sp}",
                 "jmp {pc}",
@@ -447,12 +447,12 @@ pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! 
     // SAFETY: we have exclusive access to MANAGER
     // TODO better enforcement
     let mngr = unsafe { &mut *(&raw mut MANAGER) };
-    mngr.write(SpinLock::new(ThreadManager::new(idle_thread)))
+    mngr.write(SpinLock::new(PriorityQueue::new(idle_thread)))
         .get_mut()
         .start(token);
 }
 
-fn manager() -> &'static SpinLock<ThreadManager> {
+fn manager() -> &'static SpinLock<PriorityQueue> {
     // SAFETY: no code outside init() accesses MANAGER with exclusive access
     // and init() should have initialized the manager.
     unsafe { (&*(&raw const MANAGER)).assume_init_ref() }
