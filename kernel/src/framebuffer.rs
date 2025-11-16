@@ -43,7 +43,10 @@ pub fn log<'cs>(cs: CriticalSection<'cs>) -> Log<'static, 'cs> {
     Log { tty }
 }
 
-pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+pub fn init<'a>(
+    entry: &lemmings_qemubios::Entry,
+    token: KernelEntryToken<'a>,
+) -> KernelEntryToken<'a> {
     use lemmings_qemubios::ColorFormat;
     let fb = &entry.framebuffer;
     match fb.format {

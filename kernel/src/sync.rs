@@ -67,7 +67,7 @@ impl<T> SpinLock<T> {
         SpinLockGuard { lock: self, cs }
     }
 
-    pub fn set(&self, value: T, token: KernelEntryToken) -> KernelEntryToken {
+    pub fn set<'a>(&self, value: T, token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
         unsafe { *self.value.get() = value }
         token
     }

@@ -219,7 +219,10 @@ impl Item {
     }
 }
 
-pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+pub fn init<'a>(
+    entry: &lemmings_qemubios::Entry,
+    token: KernelEntryToken<'a>,
+) -> KernelEntryToken<'a> {
     unsafe {
         let start = page::phys_to_virt(entry.data.start).cast::<u8>();
         let end = page::phys_to_virt(entry.data.end).cast::<u8>();

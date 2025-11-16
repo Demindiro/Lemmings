@@ -10,7 +10,10 @@ pub mod door {
     }
 }
 
-pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+pub fn init<'a>(
+    entry: &lemmings_qemubios::Entry,
+    token: KernelEntryToken<'a>,
+) -> KernelEntryToken<'a> {
     let _ = entry;
     let token = x86_64::init(token);
     token

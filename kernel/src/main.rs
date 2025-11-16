@@ -34,18 +34,18 @@ mod private {
     ///
     /// It is used to indicate a function may only be called during kernel setup.
     /// This reduced the amount of unsafe annotations required.
-    pub struct KernelEntryToken(());
+    pub struct KernelEntryToken<'a>(super::CriticalSection<'a>);
 
-    impl KernelEntryToken {
+    impl<'a> KernelEntryToken<'a> {
         /// # Safety
         ///
         /// May only be called in [`_start`].
-        pub unsafe fn new() -> Self {
-            Self(())
+        pub unsafe fn new(cs: super::CriticalSection<'a>) -> Self {
+            Self(cs)
         }
 
-        pub fn cs(&self) -> super::CriticalSection<'_> {
-            unsafe { super::CriticalSection::new() }
+        pub fn cs(&self) -> super::CriticalSection<'a> {
+            self.0
         }
     }
 }
@@ -107,8 +107,10 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
         cr0::update(|x| x | cr0::WRITE_PROTECT);
         cr4::update(|x| x | cr4::FSGSBASE);
     }
+    // SAFETY: interrupts are disabled on entry
+    let cs = unsafe { CriticalSection::new() };
     // SAFETY: this is the _start function
-    let token = unsafe { KernelEntryToken::new() };
+    let token = unsafe { KernelEntryToken::new(cs) };
     let token = framebuffer::init(entry, token);
     let token = arch::init(entry, token);
     let token = time::init(token);
