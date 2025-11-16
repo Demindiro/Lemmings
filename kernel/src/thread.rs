@@ -425,8 +425,6 @@ pub fn park(cs: CriticalSection<'_>) {
 pub unsafe fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
     debug!("thread::unpark {:?} -> {:?}", current().0.0, thread.0.0);
     let mut m = manager().lock(cs);
-    // SAFETY: if the thread was parked only once, then unparking once
-    // means we have exclusive access to the thread.
     m.enqueue(cs, thread);
     let next = m.dequeue(cs);
     drop(m);
