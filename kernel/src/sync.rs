@@ -72,6 +72,7 @@ impl<T> SpinLock<T> {
         token
     }
 
+    #[allow(dead_code)]
     pub const fn get_mut(&mut self) -> &mut T {
         self.value.get_mut()
     }

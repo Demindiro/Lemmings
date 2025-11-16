@@ -12,7 +12,7 @@ use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
 
-static mut MANAGER: mem::MaybeUninit<SpinLock<PriorityQueue>> = mem::MaybeUninit::uninit();
+static MANAGER: SpinLock<PriorityQueue> = SpinLock::new(PriorityQueue::new());
 
 pub mod door {
     use core::{mem, ptr};
@@ -81,7 +81,6 @@ pub struct ThreadHandle(ThreadRef);
 
 struct PriorityQueue {
     pending: [RoundRobinQueue; PRIORITY_COUNT],
-    idle_thread: ThreadHandle,
 }
 
 struct ThreadControlBlock {
@@ -107,11 +106,15 @@ struct RoundRobinQueueLink {
     first: ThreadRef,
 }
 
+struct HartLocal {
+    current_thread: ThreadRef,
+    idle_thread: ThreadRef,
+}
+
 impl PriorityQueue {
-    pub const fn new(idle_thread: ThreadHandle) -> Self {
+    pub const fn new() -> Self {
         Self {
             pending: [const { RoundRobinQueue::new() }; PRIORITY_COUNT],
-            idle_thread,
         }
     }
 
@@ -127,11 +130,6 @@ impl PriorityQueue {
         Ok(())
     }
 
-    /// Start the scheduler.
-    pub fn start(&mut self, token: KernelEntryToken) -> ! {
-        self.dequeue(token.cs()).0.enter(token)
-    }
-
     /// Enqueue a thread.
     ///
     /// The thread will be added to the end of its respective queue.
@@ -141,21 +139,13 @@ impl PriorityQueue {
     /// Enqueueing the same thread twice shouldn't lead to soundness issues,
     /// but it will almost certainly result in a deadlock sooner or later.
     fn enqueue(&mut self, cs: CriticalSection<'_>, thread: ThreadHandle) {
-        // FIXME we should have a better mechanism for handling the idle thread
-        if thread.0 == self.idle_thread.0 {
-            debug!("enqueue {:?} (ignore)", thread.0.0);
-            return;
-        }
         debug!("enqueue {:?}", thread.0.0);
         self.pending[thread.0.priority as usize].enqueue(cs, thread)
     }
 
     /// Dequeue the next thread with the higher priority.
-    fn dequeue(&mut self, cs: CriticalSection<'_>) -> ThreadHandle {
-        self.pending
-            .iter_mut()
-            .find_map(|x| x.dequeue(cs))
-            .unwrap_or_else(|| self.idle_thread.clone())
+    fn dequeue(&mut self, cs: CriticalSection<'_>) -> Option<ThreadHandle> {
+        self.pending.iter_mut().find_map(|x| x.dequeue(cs))
     }
 }
 
@@ -257,12 +247,6 @@ impl Thread {
     fn resume(&self, arg: *const (), cs: CriticalSection<'_>) {
         let current = current();
         let self_ref = unsafe { ThreadRef::wrap(self.into()) };
-        // FIXME this seems very wrong?
-        // we shouldn't get in this situation in the first place...
-        if current.0.0 == self_ref.0 {
-            debug!("resume {:?} -> {:?} (ignore)", current.0.0, self_ref.0);
-            return;
-        }
         debug!("resume {:?} -> {:?}", current.0.0, self_ref.0);
         // (1) SAFETY: current has the lock acquired, as it is currently running.
         let current_tcb = unsafe { current.0.tcb.lock_unchecked(cs) };
@@ -379,15 +363,24 @@ impl fmt::Debug for ThreadSpawnError {
     }
 }
 
-unsafe fn set_current(thread: &Thread) {
-    unsafe { lemmings_x86_64::set_fs(thread as *const _ as *mut u8) }
+macro_rules! imp_hartlocal {
+    ($vis:vis $field:ident $get:ident $set:ident) => {
+        unsafe fn $set(thread: &Thread) {
+            let thread = NonNull::from(thread);
+            unsafe { lemmings_x86_64::fs_store::<{ mem::offset_of!(HartLocal, $field) }, _>(thread) }
+        }
+
+        $vis fn $get() -> ThreadHandle {
+            unsafe {
+                let t = lemmings_x86_64::fs_load::<{ mem::offset_of!(HartLocal, $field) }, _>();
+                ThreadHandle(ThreadRef::wrap(t))
+            }
+        }
+    };
 }
 
-pub fn current() -> ThreadHandle {
-    let t = lemmings_x86_64::fs().cast::<Thread>();
-    let t = NonNull::new(t).expect("fs register should not be null");
-    unsafe { ThreadHandle(ThreadRef::wrap(t)) }
-}
+imp_hartlocal!(pub current_thread current set_current);
+imp_hartlocal!(idle_thread idle_thread set_idle_thread);
 
 /// Spawn a new thread and run it immediately.
 pub fn spawn(
@@ -397,7 +390,7 @@ pub fn spawn(
 ) -> Result<(), ThreadSpawnError> {
     let thr = Thread::new(priority, entry)?;
     critical_section::with(|cs| {
-        let mut m = manager().lock(cs);
+        let mut m = MANAGER.lock(cs);
         m.enqueue(cs, current());
         drop(m);
         thr.0.resume(arg, cs);
@@ -412,8 +405,8 @@ pub fn spawn(
 /// If the thread is not referenced anywhere, it will leak!
 pub fn park(cs: CriticalSection<'_>) {
     debug!("thread::park {:?}", current().0.0);
-    let mut m = manager().lock(cs);
-    let next = m.dequeue(cs);
+    let mut m = MANAGER.lock(cs);
+    let next = m.dequeue(cs).unwrap_or_else(idle_thread);
     drop(m);
     next.0.resume_noarg(cs);
     debug!("thread::park {:?} -> continue", current().0.0);
@@ -424,27 +417,41 @@ pub fn park(cs: CriticalSection<'_>) {
 /// An unpark not matched by a [`park`] will eventually result in a deadlock.
 pub fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
     debug!("thread::unpark {:?} -> {:?}", current().0.0, thread.0.0);
-    let mut m = manager().lock(cs);
+    let mut m = MANAGER.lock(cs);
     m.enqueue(cs, thread);
-    let next = m.dequeue(cs);
-    drop(m);
-    next.0.resume_noarg(cs);
+    if let Some(next) = m.dequeue(cs) {
+        drop(m);
+        next.0.resume_noarg(cs);
+    } else {
+        todo!("wtf?");
+    }
     debug!("thread::unpark {:?} -> continue", current().0.0);
 }
 
-pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! {
-    let idle_thread =
-        Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
-    // SAFETY: we have exclusive access to MANAGER
-    // TODO better enforcement
-    let mngr = unsafe { &mut *(&raw mut MANAGER) };
-    mngr.write(SpinLock::new(PriorityQueue::new(idle_thread)))
-        .get_mut()
-        .start(token);
+/// Entrypoint for idle threads.
+///
+/// This function does nothing but halt in a loop.
+pub fn idle_main() -> ! {
+    loop {
+        unsafe {
+            asm! {
+                // "If IF = 0, maskable hardware interrupts remain inhibited ..."
+                // ^~~ we need to ensure IF=0, otherwise sti won't cast an interrupt shadow.
+                "cli",
+                "sti",
+                "hlt",
+                options(nomem, nostack),
+            }
+        }
+    }
 }
 
-fn manager() -> &'static SpinLock<PriorityQueue> {
-    // SAFETY: no code outside init() accesses MANAGER with exclusive access
-    // and init() should have initialized the manager.
-    unsafe { (&*(&raw const MANAGER)).assume_init_ref() }
+pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! {
+    // TODO proper allocator
+    let local = crate::page::alloc_one().expect("failed to create CPU-local data");
+    unsafe { lemmings_x86_64::set_fs(local.as_ptr()) };
+    let idle_thread =
+        Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
+    unsafe { set_idle_thread(&idle_thread.0) }
+    idle_thread.0.enter(token);
 }
