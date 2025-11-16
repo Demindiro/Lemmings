@@ -136,10 +136,11 @@ impl ThreadManager {
     ///
     /// The thread will be added to the end of its respective queue.
     ///
-    /// # Safety
+    /// # Warning
     ///
-    /// The thread may not already be enqueued.
-    unsafe fn enqueue(&mut self, cs: CriticalSection<'_>, thread: ThreadHandle) {
+    /// Enqueueing the same thread twice shouldn't lead to soundness issues,
+    /// but it will almost certainly result in a deadlock sooner or later.
+    fn enqueue(&mut self, cs: CriticalSection<'_>, thread: ThreadHandle) {
         // FIXME we should have a better mechanism for handling the idle thread
         if thread.0 == self.idle_thread.0 {
             debug!("enqueue {:?} (ignore)", thread.0.0);
@@ -402,7 +403,7 @@ pub fn spawn(
     arg: *const (),
 ) -> Result<(), ThreadSpawnError> {
     let thr = Thread::new(priority, entry)?;
-    critical_section::with(|cs| unsafe {
+    critical_section::with(|cs| {
         let mut m = manager().lock(cs);
         m.enqueue(cs, current());
         drop(m);
@@ -433,7 +434,7 @@ pub unsafe fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
     let mut m = manager().lock(cs);
     // SAFETY: if the thread was parked only once, then unparking once
     // means we have exclusive access to the thread.
-    unsafe { m.enqueue(cs, thread) };
+    m.enqueue(cs, thread);
     let next = m.dequeue(cs);
     drop(m);
     next.0.resume_noarg(cs);
