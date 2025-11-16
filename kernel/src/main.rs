@@ -34,18 +34,32 @@ mod private {
     ///
     /// It is used to indicate a function may only be called during kernel setup.
     /// This reduced the amount of unsafe annotations required.
-    pub struct KernelEntryToken<'a>(super::CriticalSection<'a>);
+    pub struct KernelEntryToken<'a> {
+        cs: super::CriticalSection<'a>,
+        info: &'a lemmings_qemubios::Entry,
+    }
 
     impl<'a> KernelEntryToken<'a> {
         /// # Safety
         ///
         /// May only be called in [`_start`].
-        pub unsafe fn new(cs: super::CriticalSection<'a>) -> Self {
-            Self(cs)
+        pub unsafe fn new(
+            cs: super::CriticalSection<'a>,
+            info: &'a lemmings_qemubios::Entry,
+        ) -> Self {
+            Self { cs, info }
         }
 
         pub fn cs(&self) -> super::CriticalSection<'a> {
-            self.0
+            self.cs
+        }
+    }
+
+    impl core::ops::Deref for KernelEntryToken<'_> {
+        type Target = lemmings_qemubios::Entry;
+
+        fn deref(&self) -> &Self::Target {
+            self.info
         }
     }
 }
@@ -110,14 +124,14 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
     // SAFETY: interrupts are disabled on entry
     let cs = unsafe { CriticalSection::new() };
     // SAFETY: this is the _start function
-    let token = unsafe { KernelEntryToken::new(cs) };
-    let token = framebuffer::init(entry, token);
-    let token = arch::init(entry, token);
+    let token = unsafe { KernelEntryToken::new(cs, entry) };
+    let token = framebuffer::init(token);
+    let token = arch::init(token);
     let token = time::init(token);
-    let token = page::init(entry, token);
-    let token = archive::init(entry, token);
-    let token = sys::init(entry, token);
-    let token = pci::init(entry, token);
+    let token = page::init(token);
+    let token = archive::init(token);
+    let token = sys::init(token);
+    let token = pci::init(token);
     thread::init(main, token)
 }
 

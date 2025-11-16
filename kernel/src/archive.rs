@@ -219,13 +219,10 @@ impl Item {
     }
 }
 
-pub fn init<'a>(
-    entry: &lemmings_qemubios::Entry,
-    token: KernelEntryToken<'a>,
-) -> KernelEntryToken<'a> {
+pub fn init<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
     unsafe {
-        let start = page::phys_to_virt(entry.data.start).cast::<u8>();
-        let end = page::phys_to_virt(entry.data.end).cast::<u8>();
+        let start = page::phys_to_virt(token.data.start).cast::<u8>();
+        let end = page::phys_to_virt(token.data.end).cast::<u8>();
         let len = end.offset_from(start) as usize;
         BASE = core::slice::from_raw_parts(start.as_ptr(), len);
     }

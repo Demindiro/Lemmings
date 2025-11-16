@@ -75,14 +75,11 @@ pub mod door {
     }
 }
 
-pub fn init<'a>(
-    entry: &lemmings_qemubios::Entry,
-    token: KernelEntryToken<'a>,
-) -> KernelEntryToken<'a> {
-    let virt = page::phys_to_virt(entry.pcie.base).cast();
+pub fn init<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
+    let virt = page::phys_to_virt(token.pcie.base).cast();
     log!(
         "PCIe configuration region at {:?} ({:?})",
-        entry.pcie.base,
+        token.pcie.base,
         virt
     );
     unsafe { BASE = MaybeUninit::new(virt) };
