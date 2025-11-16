@@ -419,10 +419,10 @@ pub fn park(cs: CriticalSection<'_>) {
     debug!("thread::park {:?} -> continue", current().0.0);
 }
 
-/// # Safety
+/// # Warning
 ///
-/// Every unpark must be matched by a park.
-pub unsafe fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
+/// An unpark not matched by a [`park`] will eventually result in a deadlock.
+pub fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
     debug!("thread::unpark {:?} -> {:?}", current().0.0, thread.0.0);
     let mut m = manager().lock(cs);
     m.enqueue(cs, thread);
