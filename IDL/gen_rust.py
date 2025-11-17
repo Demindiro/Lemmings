@@ -137,10 +137,14 @@ def emit_ffi(outf, idl):
         out(f'#[repr(C)]')
         with Scope(f'pub struct {name}'):
             for m_name, m_ty in ty.members.items():
-                out(f'pub {tr(m_name)}: {m_ty},')
+                if not is_empty(m_ty):
+                    out(f'pub {tr(m_name)}: {m_ty},')
         with Impl(name):
-            with Fn('is_valid', '&self', 'bool', dead_code = True):
-                out(' && '.join(f'self.{m_name}.is_valid()' for m_name, m_ty in members()))
+            expr = ' && '.join(f'self.{m_name}.is_valid()' for m_name, m_ty in members() if not is_empty(m_ty))
+            if expr:
+                with Fn('is_valid', '&self', 'bool', dead_code = True):
+                    out(expr)
+            del expr
 
     def emit_routine(name, ty):
         newtype(name, f'Option<unsafe extern "sysv64" fn()>')
@@ -267,6 +271,8 @@ def emit(outf, idl):
         if isinstance(ty, gen.IntegerType):
             if ty.start + 1 == ty.until:
                 return True
+        if type(ty) is gen.RecordType and len(ty.members) == 0:
+            return True
         return False
 
     def ffi_name(name, macro) -> str:
@@ -274,7 +280,7 @@ def emit(outf, idl):
             return 'bool'
         return f'{"$crate::" if macro else ""}ffi::{name}'
     def unpack_record_members(ty, *, prefix = '') -> str:
-        return ", ".join(f"{tr(m_name)}" for m_name in ty.members)
+        return ", ".join(f"{tr(m_name)}" for m_name, m_ty in ty.members.items() if not is_empty(m_ty))
     def unpack_record_pattern(name, ty) -> str:
         return f'{name} {{ {unpack_record_members(ty)} }}'
     def should_unpack(name) -> bool:
@@ -285,7 +291,7 @@ def emit(outf, idl):
     def sysv_splat_params(name, *, macro = False) -> str:
         if should_unpack(name):
             ty = idl.types[name]
-            return ', '.join(f'{tr(m_name)}: {ffi_name(m_ty, macro)}' for m_name, m_ty in ty.members.items())
+            return ', '.join(f'{tr(m_name)}: {ffi_name(m_ty, macro)}' for m_name, m_ty in ty.members.items() if not is_empty(m_ty))
         return f'x: {ffi_name(name, macro)}' if not is_empty(name) else ''
     def sysv_splat_ret(name, *, macro = False) -> str:
         return '' if is_empty(name) else f'-> {ffi_name(name, macro)}'
@@ -408,9 +414,11 @@ def emit(outf, idl):
             with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
                 with Scope(f'ffi::{name}'):
                     for m_name, m_ty in members():
+                        if is_empty(m_ty):
+                            continue
                         expr = f'ffi::{m_ty}::default()' if is_unit(m_ty) else f'self.{m_name}.to_ffi()'
                         out(f'{m_name}: {expr},')
-                    del m_name, m_ty, expr
+                        del m_name, m_ty, expr
 
     def emit_routine(name, ty):
         emit_documentation(ty)
