@@ -189,6 +189,7 @@ def emit_ffi(outf, idl):
         for name, ty in idl.types.items():
             if is_empty(name):
                 # do emit for pointers and stuff
+                out(f'#[derive(Clone, Copy)]')
                 out(f'pub struct {name};')
                 continue
             vtbl[type(ty)](name, ty)
