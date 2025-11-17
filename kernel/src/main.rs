@@ -131,6 +131,7 @@ unsafe extern "C" fn memset(dst: *mut u8, c: i32, n: usize) -> *mut u8 {
             in("al") c as u8,
             inout("rdi") dst => _,
             inout("rcx") n => _,
+            options(nostack),
         }
     }
     dst
@@ -144,6 +145,7 @@ unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
             inout("rdi") dst => _,
             inout("rsi") src => _,
             inout("rcx") n => _,
+            options(nostack),
         }
     }
     dst
