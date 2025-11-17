@@ -62,6 +62,19 @@ def emit_ffi(outf, idl):
     def is_empty(name):
         ty = idl.types[name]
         return type(ty) is gen.RecordType and len(ty.members) == 0
+    def is_bool(name):
+        if name != 'Bool':
+            return False
+        ty = idl.types[name]
+        if type(ty) is not gen.SumType or len(ty.variants) != 2:
+            return False
+        a, b = sorted(ty.variants)
+        if (a, b) != ('False', 'True'):
+            return False
+        a, b = idl.types[a], idl.types[b]
+        if not all(type(x) is gen.U8Type and x.start + 1 == x.until for x in (a, b)):
+            return False
+        return a.start == 0 and b.start == 1
 
     def newtype(name, wrap):
         out('#[derive(Clone, Copy)]')
@@ -136,6 +149,8 @@ def emit_ffi(outf, idl):
                 out('self.0.is_some()')
 
     def emit_sum(name, ty):
+        if is_bool(name):
+            return
         out(f'#[derive(Clone, Copy)]')
         out(f'#[repr(C)]')
         with Scope(f'pub union {name}'):
@@ -232,6 +247,19 @@ def emit(outf, idl):
     def is_void(name):
         # be defensive just in case
         return name == 'Void' and is_empty(name)
+    def is_bool(name):
+        if name != 'Bool':
+            return False
+        ty = idl.types[name]
+        if type(ty) is not gen.SumType or len(ty.variants) != 2:
+            return False
+        a, b = sorted(ty.variants)
+        if (a, b) != ('False', 'True'):
+            return False
+        a, b = idl.types[a], idl.types[b]
+        if not all(type(x) is gen.U8Type and x.start + 1 == x.until for x in (a, b)):
+            return False
+        return a.start == 0 and b.start == 1
     def is_unit(name):
         ty = idl.types[name]
         if type(ty) is gen.NullType:
@@ -242,6 +270,8 @@ def emit(outf, idl):
         return False
 
     def ffi_name(name, macro) -> str:
+        if is_bool(name):
+            return 'bool'
         return f'{"$crate::" if macro else ""}ffi::{name}'
     def unpack_record_members(ty, *, prefix = '') -> str:
         return ", ".join(f"{tr(m_name)}" for m_name in ty.members)
@@ -393,6 +423,8 @@ def emit(outf, idl):
                 out(f'ffi::{name}(Some(self.0))')
 
     def emit_sum(name, ty):
+        if is_bool(name):
+            return
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
         with Scope(f'pub enum {name}'):
@@ -447,23 +479,31 @@ def emit(outf, idl):
     with ImplFor('lemmings_idl::Api', idl.name, unsafe = True):
         out(f'const ID: core::num::NonZero<u128> = core::num::NonZero::new({idl.api_id:#x}).unwrap();')
 
+    def tr_ty(x):
+        if is_bool(x):
+            return 'bool'
+        return x;
+
     with Impl(idl.name):
         for name, routine in idl.routines.items():
             emit_documentation(routine)
             x = '' if is_empty(routine.input) else 'x'
-            params = '' if is_void(routine.input) else f', {x or "_"}: {routine.input}'
-            ret = '' if is_void(routine.output) else routine.output
+            params = '' if is_void(routine.input) else f', {x or "_"}: {tr_ty(routine.input)}'
+            ret = '' if is_void(routine.output) else tr_ty(routine.output)
             with Fn(name, f'&self{params}', ret, public = True):
                 if x:
                     out(f'let {sysv_splat_pattern(routine.input)} = x.to_ffi();')
                 args = sysv_splat_members(routine.input)
                 if not is_empty(routine.output):
                     out(f'let x = unsafe {{ (self.{name})({args}).into() }};')
-                    out(f'{routine.output}::from_ffi(x)')
+                    if is_bool(routine.output):
+                        out(f'x')
+                    else:
+                        out(f'{routine.output}::from_ffi(x)')
                 else:
                     out(f'unsafe {{ (self.{name})({args}) }};')
                     if not is_void(routine.output):
-                        out(f'{routine.output}')
+                        out(f'{tr_ty(routine.output)}')
         del name, routine, x
 
     out('')
@@ -492,7 +532,7 @@ def emit(outf, idl):
                                 out(f'let x = {routine.input}::from_ffi({sysv_splat_pattern(routine.input, macro = True)});')
                             else:
                                 out(f'let x = {routine.input};')
-                            if is_void(routine.output):
+                            if is_void(routine.output) or is_bool(routine.output):
                                 out(f'$impl_{name}({x})')
                             elif not is_empty(routine.output):
                                 out(f'let x: {routine.output} = $impl_{name}({x});')
