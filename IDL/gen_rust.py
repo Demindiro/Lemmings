@@ -474,7 +474,7 @@ def emit(outf, idl):
                 out(f'{name} = $impl_{name}:expr,')
         with Scope('', suffix = ';'):
             with Scope(f'$crate::{idl.name}'):
-                out(f'ID: <{idl.name} as lemmings_idl::Api>::ID,')
+                out(f'ID: <$crate::{idl.name} as lemmings_idl::Api>::ID,')
                 for name, routine in idl.routines.items():
                     args = sysv_splat_params(routine.input, macro = True)
                     ret = sysv_splat_ret(routine.output, macro = True)
