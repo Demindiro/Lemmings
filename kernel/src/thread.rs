@@ -260,7 +260,6 @@ impl Thread {
             asm! {
                 "push rbx",
                 "push rbp",
-                "pushf",
                 "lea {scratch}, [rip + 2f]",
                 "mov [{cur} + {TCB_SP}], rsp",
                 "mov [{cur} + {TCB_PC}], {scratch}",
@@ -273,7 +272,7 @@ impl Thread {
                 "mov rsp, {sp}",
                 "jmp {pc}",
                 "2:",
-                "popf",
+                "cld",
                 "pop rbp",
                 "pop rbx",
                 in("rdi") arg,
@@ -301,7 +300,6 @@ impl Thread {
                 lateout("r13") _,
                 lateout("r14") _,
                 lateout("r15") _,
-                options(preserves_flags),
             }
         }
     }
