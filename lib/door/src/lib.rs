@@ -219,6 +219,16 @@ impl<'a, T> Door<'a, T> {
     }
 }
 
+impl<'table, 'name, T> From<(&'table T, &'name str)> for Door<'table, 'name, T> {
+    fn from((table, name): (&'table T, &'name str)) -> Self {
+        Self {
+            table: table.into(),
+            name,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl Log {
     pub fn new() -> Self {
         Self {
