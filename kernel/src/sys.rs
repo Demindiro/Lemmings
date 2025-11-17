@@ -225,7 +225,7 @@ pub fn hexdump(data: &[u8]) {
 }
 
 #[inline]
-pub fn init(_: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+pub fn init<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
     unsafe { lemmings_x86_64::set_gs(TABLE.as_ptr() as *mut _) };
     token
 }

@@ -354,14 +354,14 @@ pub unsafe fn map_region_zero(
 }
 
 #[inline]
-pub fn init(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
-    let token = init_page(entry, token);
-    let token = init_virt(entry, token);
+pub fn init<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
+    let token = init_page(token);
+    let token = init_virt(token);
     token
 }
 
-fn init_page(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
-    let regions = unsafe { region_to_slice::<MemoryRegion>(entry.memory.list) };
+fn init_page<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
+    let regions = unsafe { region_to_slice::<MemoryRegion>(token.memory.list) };
     let mut head = None;
     let mut contiguous_base = Virt::dangling();
     let mut contiguous_num = 0;
@@ -405,16 +405,16 @@ fn init_page(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> Kerne
     token
 }
 
-fn init_virt(entry: &lemmings_qemubios::Entry, token: KernelEntryToken) -> KernelEntryToken {
+fn init_virt<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
     let constant_pages = unsafe { &mut *(&raw mut CONSTANT_PAGES) };
     let f = |x: lemmings_qemubios::Phys| {
         mmu::Phys::<mmu::A12>::new(x.0).expect("constant page is not aligned!")
     };
     constant_pages.write(ConstantPages {
-        zero: entry.paging.zero.map(f),
-        ones: entry.paging.ones.map(f),
+        zero: token.paging.zero.map(f),
+        ones: token.paging.ones.map(f),
     });
-    let head = entry.paging.kernel.end.0;
+    let head = token.paging.kernel.end.0;
     let token = VIRT.set(VirtManager { head }, token);
     token
 }

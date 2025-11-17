@@ -34,14 +34,32 @@ mod private {
     ///
     /// It is used to indicate a function may only be called during kernel setup.
     /// This reduced the amount of unsafe annotations required.
-    pub struct KernelEntryToken(());
+    pub struct KernelEntryToken<'a> {
+        cs: super::CriticalSection<'a>,
+        info: &'a lemmings_qemubios::Entry,
+    }
 
-    impl KernelEntryToken {
+    impl<'a> KernelEntryToken<'a> {
         /// # Safety
         ///
         /// May only be called in [`_start`].
-        pub unsafe fn new() -> Self {
-            Self(())
+        pub unsafe fn new(
+            cs: super::CriticalSection<'a>,
+            info: &'a lemmings_qemubios::Entry,
+        ) -> Self {
+            Self { cs, info }
+        }
+
+        pub fn cs(&self) -> super::CriticalSection<'a> {
+            self.cs
+        }
+    }
+
+    impl core::ops::Deref for KernelEntryToken<'_> {
+        type Target = lemmings_qemubios::Entry;
+
+        fn deref(&self) -> &Self::Target {
+            self.info
         }
     }
 }
@@ -57,6 +75,7 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 // do not inline so the stupid compiler frees up stack space.
 #[inline(never)]
 fn main_init() {
+    log!("registering doors");
     arch::door::register();
     archive::door::register();
     //framebuffer::door::register();
@@ -77,22 +96,7 @@ fn main_init() {
 
 extern "sysv64" fn main<'a>(_: *const ()) {
     main_init();
-    loop {
-        // SAFETY: interrupts are disabled.
-        let cs = unsafe { CriticalSection::new() };
-        debug!("idle park");
-        thread::park(cs);
-        debug!("idle halt");
-        // SAFETY: enabling interrupts and halting is safe at this point.
-        unsafe {
-            core::arch::asm! {
-                "sti",
-                "hlt",
-                "cli",
-                options(nomem, nostack),
-            }
-        }
-    }
+    thread::idle_main();
 }
 
 #[inline]
@@ -102,15 +106,17 @@ extern "sysv64" fn entry(entry: &lemmings_qemubios::Entry) -> ! {
         cr0::update(|x| x | cr0::WRITE_PROTECT);
         cr4::update(|x| x | cr4::FSGSBASE);
     }
+    // SAFETY: interrupts are disabled on entry
+    let cs = unsafe { CriticalSection::new() };
     // SAFETY: this is the _start function
-    let token = unsafe { KernelEntryToken::new() };
-    let token = framebuffer::init(entry, token);
-    let token = arch::init(entry, token);
+    let token = unsafe { KernelEntryToken::new(cs, entry) };
+    let token = framebuffer::init(token);
+    let token = arch::init(token);
     let token = time::init(token);
-    let token = page::init(entry, token);
-    let token = archive::init(entry, token);
-    let token = sys::init(entry, token);
-    let token = pci::init(entry, token);
+    let token = page::init(token);
+    let token = archive::init(token);
+    let token = sys::init(token);
+    let token = pci::init(token);
     thread::init(main, token)
 }
 

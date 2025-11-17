@@ -4,15 +4,15 @@
 
 use crate::{
     KernelEntryToken,
-    page::{self, PAGE_SIZE, PageAttr},
-    sync::{self, SpinLock, SpinLockGuard},
+    page::{self, PageAttr},
+    sync::{self, SpinLock},
 };
-use core::{arch::asm, cell::Cell, fmt, mem, ops, ptr::NonNull};
+use core::{arch::asm, fmt, mem, ops, ptr::NonNull};
 use critical_section::CriticalSection;
 
 const PRIORITY_COUNT: usize = 4;
 
-static mut MANAGER: mem::MaybeUninit<SpinLock<ThreadManager>> = mem::MaybeUninit::uninit();
+static MANAGER: SpinLock<PriorityQueue> = SpinLock::new(PriorityQueue::new());
 
 pub mod door {
     use core::{mem, ptr};
@@ -42,7 +42,7 @@ pub mod door {
     }
 
     fn unpark(thread: Thread) {
-        critical_section::with(|cs| unsafe { super::unpark(cs, handle(thread)) })
+        critical_section::with(|cs| super::unpark(cs, handle(thread)))
     }
 
     fn current() -> Thread {
@@ -79,26 +79,23 @@ pub struct RoundRobinQueue {
 #[derive(Clone)]
 pub struct ThreadHandle(ThreadRef);
 
-struct ThreadManager {
+struct PriorityQueue {
     pending: [RoundRobinQueue; PRIORITY_COUNT],
-    idle_thread: ThreadHandle,
 }
 
 struct ThreadControlBlock {
     /// # Note
     ///
     /// Only valid while enqueued. Value is indeterminate while running.
-    next: Cell<ThreadRef>,
-    priority: Priority,
-    program_counter: Cell<*const u8>,
-    stack_pointer: Cell<*const u8>,
+    next: ThreadRef,
+    program_counter: *const u8,
+    stack_pointer: *const u8,
 }
 
-#[repr(C, align(4096))]
+#[repr(C)]
 struct Thread {
-    stack: [Cell<mem::MaybeUninit<usize>>;
-        (4096 - mem::size_of::<ThreadControlBlock>()) / mem::size_of::<usize>()],
-    tcb: ThreadControlBlock,
+    tcb: SpinLock<ThreadControlBlock>,
+    priority: Priority,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -109,55 +106,46 @@ struct RoundRobinQueueLink {
     first: ThreadRef,
 }
 
-const _: () = assert!(mem::size_of::<Thread>() == PAGE_SIZE);
+struct HartLocal {
+    current_thread: ThreadRef,
+    idle_thread: ThreadRef,
+}
 
-impl ThreadManager {
-    pub const fn new(idle_thread: ThreadHandle) -> Self {
+impl PriorityQueue {
+    pub const fn new() -> Self {
         Self {
             pending: [const { RoundRobinQueue::new() }; PRIORITY_COUNT],
-            idle_thread,
         }
     }
 
     /// Create a new thread and put it at the *end* of the queue.
     pub fn spawn(
         &mut self,
+        cs: CriticalSection<'_>,
         priority: Priority,
         entry: extern "sysv64" fn(*const ()),
     ) -> Result<(), ThreadSpawnError> {
         let thread = Thread::new(priority, entry)?;
-        self.pending[priority as usize].enqueue(thread);
+        self.pending[priority as usize].enqueue(cs, thread);
         Ok(())
-    }
-
-    /// Start the scheduler.
-    pub fn start(&mut self, token: KernelEntryToken) -> ! {
-        self.dequeue_next().0.enter(token)
     }
 
     /// Enqueue a thread.
     ///
     /// The thread will be added to the end of its respective queue.
     ///
-    /// # Safety
+    /// # Warning
     ///
-    /// The thread may not already be enqueued.
-    unsafe fn enqueue(&mut self, thread: ThreadHandle) {
-        // FIXME we should have a better mechanism for handling the idle thread
-        if thread.0 == self.idle_thread.0 {
-            debug!("enqueue {:?} (ignore)", thread.0.0);
-            return;
-        }
+    /// Enqueueing the same thread twice shouldn't lead to soundness issues,
+    /// but it will almost certainly result in a deadlock sooner or later.
+    fn enqueue(&mut self, cs: CriticalSection<'_>, thread: ThreadHandle) {
         debug!("enqueue {:?}", thread.0.0);
-        self.pending[thread.0.priority as usize].enqueue(thread)
+        self.pending[thread.0.priority as usize].enqueue(cs, thread)
     }
 
     /// Dequeue the next thread with the higher priority.
-    fn dequeue_next(&mut self) -> ThreadHandle {
-        self.pending
-            .iter_mut()
-            .find_map(|x| x.dequeue())
-            .unwrap_or_else(|| self.idle_thread.clone())
+    fn dequeue(&mut self, cs: CriticalSection<'_>) -> Option<ThreadHandle> {
+        self.pending.iter_mut().find_map(|x| x.dequeue(cs))
     }
 }
 
@@ -166,7 +154,7 @@ impl RoundRobinQueue {
         Self { cur: None }
     }
 
-    pub fn enqueue(&mut self, ThreadHandle(thread): ThreadHandle) {
+    pub fn enqueue(&mut self, cs: CriticalSection<'_>, ThreadHandle(thread): ThreadHandle) {
         let Some(cur) = self.cur.as_mut() else {
             self.cur = Some(RoundRobinQueueLink {
                 first: thread,
@@ -175,16 +163,16 @@ impl RoundRobinQueue {
             return;
         };
         // last ==> last -> thread
-        cur.last.next.set(thread);
+        cur.last.lock(cs).next = thread;
         cur.last = thread;
     }
 
-    pub fn dequeue(&mut self) -> Option<ThreadHandle> {
+    pub fn dequeue(&mut self, cs: CriticalSection<'_>) -> Option<ThreadHandle> {
         let mut cur = self.cur.take()?;
         let thread = cur.first;
         if thread != cur.last {
             // first -> next ==> next
-            cur.first = thread.next.get();
+            cur.first = thread.lock(cs).next;
             self.cur = Some(cur);
         }
         Some(ThreadHandle(thread))
@@ -192,24 +180,11 @@ impl RoundRobinQueue {
 }
 
 impl ThreadRef {
-    // Offset such that we point right at the TCB
-    // This allows more efficient encoding of memory instructions with immediates.
-    const OFFSET: usize = page::PAGE_SIZE - mem::size_of::<ThreadControlBlock>();
-
     /// # Safety
     ///
     /// - Must be a valid pointer.
     /// - Must not be dereferenced before initialization.
     pub unsafe fn wrap(ptr: NonNull<Thread>) -> Self {
-        unsafe { Self(ptr.byte_add(Self::OFFSET)) }
-    }
-
-    /// # Safety
-    ///
-    /// - Must be a valid pointer.
-    /// - Must not be dereferenced before initialization.
-    /// - Must point to the TCB!
-    pub unsafe fn wrap_tcb(ptr: NonNull<ThreadControlBlock>) -> Self {
         Self(ptr.cast())
     }
 }
@@ -219,39 +194,46 @@ impl Thread {
         priority: Priority,
         entry: extern "sysv64" fn(*const ()),
     ) -> Result<ThreadHandle, ThreadSpawnError> {
-        let page = page::alloc_one_guarded(PageAttr::RW)?.cast::<Thread>();
+        let page = page::alloc_one_guarded(PageAttr::RW)?;
         // SAFETY:
         // - the page we allocated is valid and writeable.
         // - we will initialize it right now.
         let thread = unsafe {
-            let thread = ThreadRef::wrap(page);
-            let base = page.add(1).cast::<ThreadControlBlock>().sub(1);
-            base.write(ThreadControlBlock {
-                next: Cell::new(thread),
+            let thread = page
+                .byte_add(page::PAGE_SIZE - mem::size_of::<Thread>())
+                .cast::<Thread>();
+            let mut stack_pointer = thread.cast::<usize>().sub(1);
+            // stack must be 16-byte aligned *before* call
+            // hence, ret will operate on 16*N+8
+            if stack_pointer.addr().get() & 15 == 0 {
+                stack_pointer = stack_pointer.sub(1);
+            }
+            stack_pointer.write(Thread::exit as usize);
+            thread.write(Thread {
                 priority,
-                program_counter: Cell::new(entry as *const u8),
-                stack_pointer: Cell::new(base.cast::<usize>().as_ptr().sub(1).cast()),
+                tcb: SpinLock::new(ThreadControlBlock {
+                    next: ThreadRef::wrap(thread),
+                    program_counter: entry as *const u8,
+                    stack_pointer: stack_pointer.as_ptr().cast::<u8>() as *const u8,
+                }),
             });
-            thread
+            ThreadRef::wrap(thread)
         };
-        // FIXME alignment?
-        thread
-            .stack
-            .last()
-            .expect("not empty")
-            .set(mem::MaybeUninit::new(Thread::exit as usize));
         Ok(ThreadHandle(thread))
     }
 
-    fn enter(&self, _token: KernelEntryToken) -> ! {
+    fn enter(&self, token: KernelEntryToken) -> ! {
         debug!("enter {:?}", unsafe { ThreadRef::wrap(self.into()).0 });
+        let self_tcb = self.tcb.lock(token.cs());
+        // (3) SAFETY: we will reaqcuire and release this lock only in (2)
+        let (_, self_tcb) = unsafe { self_tcb.into_inner_lock() };
         unsafe {
             set_current(self);
             asm! {
                 "mov rsp, {sp}",
                 "jmp {pc}",
-                sp = in(reg) self.stack_pointer.get(),
-                pc = in(reg) self.program_counter.get(),
+                sp = in(reg) self_tcb.stack_pointer,
+                pc = in(reg) self_tcb.program_counter,
                 options(noreturn, nostack),
             }
         }
@@ -262,18 +244,17 @@ impl Thread {
     /// The argument will be copied to RDI.
     /// Even if the thread doesn't expect an argument, it should have stored its state
     /// on the stack, automatically overwriting it if it is not at thread start.
-    fn resume(&self, arg: *const (), lock: SpinLockGuard<'_, '_, ThreadManager>) {
+    fn resume(&self, arg: *const (), cs: CriticalSection<'_>) {
         let current = current();
         let self_ref = unsafe { ThreadRef::wrap(self.into()) };
-        // FIXME this seems very wrong?
-        // we shouldn't get in this situation in the first place...
-        if current.0.0 == self_ref.0 {
-            debug!("resume {:?} -> {:?} (ignore)", current.0.0, self_ref.0);
-            return;
-        }
         debug!("resume {:?} -> {:?}", current.0.0, self_ref.0);
-        // SAFETY: we will disengage the lock exactly once in the assembly code
-        let lock = unsafe { lock.into_inner_lock() };
+        // (1) SAFETY: current has the lock acquired, as it is currently running.
+        let current_tcb = unsafe { current.0.tcb.lock_unchecked(cs) };
+        // (2) SAFETY: we will disengage the lock exactly once in the assembly code
+        let (current_lock, current_tcb) = unsafe { current_tcb.into_inner_lock() };
+        let self_tcb = self.tcb.lock(cs);
+        // (3) SAFETY: we will reaqcuire and release this lock only in (2)
+        let (_, self_tcb) = unsafe { self_tcb.into_inner_lock() };
         unsafe {
             set_current(self);
             asm! {
@@ -287,7 +268,7 @@ impl Thread {
                 // x86 supports TSO, so a simple mov does the trick.
                 // ... well, not quite because of the store buffer,
                 // but stores are ordered wrt other stores *on the same core*,
-                // so any changes made to the ThreadManager will be visible before this store.
+                // so any changes made to the thread will be visible before this store.
                 "mov byte ptr [{lock}], {UNLOCK}",
                 "mov rsp, {sp}",
                 "jmp {pc}",
@@ -297,10 +278,10 @@ impl Thread {
                 "pop rbx",
                 in("rdi") arg,
                 scratch = out(reg) _,
-                cur = in(reg) &current.0.tcb,
-                sp = in(reg) self.stack_pointer.get(),
-                pc = in(reg) self.program_counter.get(),
-                lock = in(reg) lock,
+                cur = in(reg) current_tcb,
+                sp = in(reg) self_tcb.stack_pointer,
+                pc = in(reg) self_tcb.program_counter,
+                lock = in(reg) current_lock,
                 TCB_SP = const mem::offset_of!(ThreadControlBlock, stack_pointer),
                 TCB_PC = const mem::offset_of!(ThreadControlBlock, program_counter),
                 UNLOCK = const sync::imp::UNLOCKED,
@@ -325,12 +306,12 @@ impl Thread {
         }
     }
 
-    fn resume_noarg(&self, lock: SpinLockGuard<'_, '_, ThreadManager>) {
+    fn resume_noarg(&self, cs: CriticalSection<'_>) {
         // The argument is redundant but:
         // - xor r32,r32 uses renaming, so it is basically free (0 latency)
         // - the thread will overwrite it anyway
         // so no ill effects.
-        self.resume(core::ptr::null(), lock)
+        self.resume(core::ptr::null(), cs)
     }
 
     fn exit() -> ! {
@@ -344,12 +325,12 @@ impl ops::Deref for ThreadRef {
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
         // SAFETY: the pointer is valid
-        unsafe { self.0.byte_sub(Self::OFFSET).as_ref() }
+        unsafe { self.0.as_ref() }
     }
 }
 
 impl ops::Deref for Thread {
-    type Target = ThreadControlBlock;
+    type Target = SpinLock<ThreadControlBlock>;
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
@@ -382,15 +363,24 @@ impl fmt::Debug for ThreadSpawnError {
     }
 }
 
-unsafe fn set_current(thread: &Thread) {
-    unsafe { lemmings_x86_64::set_fs(&thread.tcb as *const _ as *mut u8) }
+macro_rules! imp_hartlocal {
+    ($vis:vis $field:ident $get:ident $set:ident) => {
+        unsafe fn $set(thread: &Thread) {
+            let thread = NonNull::from(thread);
+            unsafe { lemmings_x86_64::fs_store::<{ mem::offset_of!(HartLocal, $field) }, _>(thread) }
+        }
+
+        $vis fn $get() -> ThreadHandle {
+            unsafe {
+                let t = lemmings_x86_64::fs_load::<{ mem::offset_of!(HartLocal, $field) }, _>();
+                ThreadHandle(ThreadRef::wrap(t))
+            }
+        }
+    };
 }
 
-pub fn current() -> ThreadHandle {
-    let tcb = lemmings_x86_64::fs().cast::<ThreadControlBlock>();
-    let tcb = NonNull::new(tcb).expect("fs register should not be null");
-    unsafe { ThreadHandle(ThreadRef::wrap_tcb(tcb)) }
-}
+imp_hartlocal!(pub current_thread current set_current);
+imp_hartlocal!(idle_thread idle_thread set_idle_thread);
 
 /// Spawn a new thread and run it immediately.
 pub fn spawn(
@@ -399,10 +389,11 @@ pub fn spawn(
     arg: *const (),
 ) -> Result<(), ThreadSpawnError> {
     let thr = Thread::new(priority, entry)?;
-    critical_section::with(|cs| unsafe {
-        let mut m = manager().lock(cs);
-        m.enqueue(current());
-        thr.0.resume(arg, m);
+    critical_section::with(|cs| {
+        let mut m = MANAGER.lock(cs);
+        m.enqueue(cs, current());
+        drop(m);
+        thr.0.resume(arg, cs);
     });
     Ok(())
 }
@@ -414,39 +405,53 @@ pub fn spawn(
 /// If the thread is not referenced anywhere, it will leak!
 pub fn park(cs: CriticalSection<'_>) {
     debug!("thread::park {:?}", current().0.0);
-    let mut m = manager().lock(cs);
-    let next = m.dequeue_next();
-    next.0.resume_noarg(m);
+    let mut m = MANAGER.lock(cs);
+    let next = m.dequeue(cs).unwrap_or_else(idle_thread);
+    drop(m);
+    next.0.resume_noarg(cs);
     debug!("thread::park {:?} -> continue", current().0.0);
 }
 
-/// # Safety
+/// # Warning
 ///
-/// Every unpark must be matched by a park.
-pub unsafe fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
+/// An unpark not matched by a [`park`] will eventually result in a deadlock.
+pub fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
     debug!("thread::unpark {:?} -> {:?}", current().0.0, thread.0.0);
-    let mut m = manager().lock(cs);
-    // SAFETY: if the thread was parked only once, then unparking once
-    // means we have exclusive access to the thread.
-    unsafe { m.enqueue(thread) };
-    let next = m.dequeue_next();
-    next.0.resume_noarg(m);
+    let mut m = MANAGER.lock(cs);
+    m.enqueue(cs, thread);
+    if let Some(next) = m.dequeue(cs) {
+        drop(m);
+        next.0.resume_noarg(cs);
+    } else {
+        todo!("wtf?");
+    }
     debug!("thread::unpark {:?} -> continue", current().0.0);
 }
 
-pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! {
-    let idle_thread =
-        Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
-    // SAFETY: we have exclusive access to MANAGER
-    // TODO better enforcement
-    let mngr = unsafe { &mut *(&raw mut MANAGER) };
-    mngr.write(SpinLock::new(ThreadManager::new(idle_thread)))
-        .get_mut()
-        .start(token);
+/// Entrypoint for idle threads.
+///
+/// This function does nothing but halt in a loop.
+pub fn idle_main() -> ! {
+    loop {
+        unsafe {
+            asm! {
+                // "If IF = 0, maskable hardware interrupts remain inhibited ..."
+                // ^~~ we need to ensure IF=0, otherwise sti won't cast an interrupt shadow.
+                "cli",
+                "sti",
+                "hlt",
+                options(nomem, nostack),
+            }
+        }
+    }
 }
 
-fn manager() -> &'static SpinLock<ThreadManager> {
-    // SAFETY: no code outside init() accesses MANAGER with exclusive access
-    // and init() should have initialized the manager.
-    unsafe { (&*(&raw const MANAGER)).assume_init_ref() }
+pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! {
+    // TODO proper allocator
+    let local = crate::page::alloc_one().expect("failed to create CPU-local data");
+    unsafe { lemmings_x86_64::set_fs(local.as_ptr()) };
+    let idle_thread =
+        Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
+    unsafe { set_idle_thread(&idle_thread.0) }
+    idle_thread.0.enter(token);
 }

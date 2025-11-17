@@ -27,24 +27,6 @@ Thread switching is very fast too, requiring only registers to be saved
 and restored. No privilege switch is required as all threads run with
 full privileges.
 
-### Events
-
-Lemmings provides an event mechanism to notify threads of anything that
-happens in the system.
-Threads are able subscribe to multiple events at once,
-though an external mechanism is required to distinguish events
-(typically, simply polling all relevant objects).
-
-To listen for an event, a thread must:
-
-1. Subscribe itself to the event.
-2. Periodically check if the event has occurred.
-
-There are no event objects.
-Anything that can trigger an event must hold the handle of subscribed threads.
-
-A thread can `wait()` until any event occurs to avoid wasting CPU cycles.
-
 
 Fast, low-latency IPC
 ---------------------

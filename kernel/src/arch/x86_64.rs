@@ -181,19 +181,19 @@ impl InterruptHandlers {
 
     fn wait(mut slf: SpinLockGuard<'_, '_, Self>, vector: VectorNr) {
         let i = Self::vector_to_i(vector);
-        slf.queues[i].enqueue(thread::current());
         let cs = slf.cs;
+        slf.queues[i].enqueue(cs, thread::current());
         drop(slf);
         thread::park(cs);
     }
 
     fn handle(mut slf: SpinLockGuard<'_, '_, Self>, vector: VectorNr) {
         let i = Self::vector_to_i(vector);
-        if let Some(thread) = slf.queues[i].dequeue() {
+        let cs = slf.cs;
+        if let Some(thread) = slf.queues[i].dequeue(cs) {
             slf.eoi();
-            let cs = slf.cs;
             drop(slf);
-            unsafe { thread::unpark(cs, thread) };
+            thread::unpark(cs, thread);
         } else {
             slf.mask_vector(vector);
             slf.signaled.set(i, true);
