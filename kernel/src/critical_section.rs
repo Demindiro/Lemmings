@@ -25,7 +25,7 @@ unsafe impl critical_section::Impl for Impl {
                 "push {0:r}",
                 "popf",
                 in(reg) token,
-                options(nomem, preserves_flags),
+                options(nomem),
             }
         }
     }
