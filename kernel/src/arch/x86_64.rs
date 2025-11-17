@@ -450,9 +450,11 @@ core::arch::global_asm! {
     "push r9",  // 6
     "push r10", // 7
     "push r11", // 8
+    "pushf",    // 9
     "movzx edi, al",
     "cld",
     "call {interrupt_handler}",
+    "popf",    // 9
     "pop r11", // 8
     "pop r10", // 7
     "pop r9",  // 6
