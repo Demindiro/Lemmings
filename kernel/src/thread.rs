@@ -432,17 +432,10 @@ pub fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
 ///
 /// This function does nothing but halt in a loop.
 pub fn idle_main() -> ! {
+    // SAFETY: enabling interrupts is safe at this point, as the IDT is set up
+    unsafe { lemmings_x86_64::enable_interrupts() };
     loop {
-        unsafe {
-            asm! {
-                // "If IF = 0, maskable hardware interrupts remain inhibited ..."
-                // ^~~ we need to ensure IF=0, otherwise sti won't cast an interrupt shadow.
-                "cli",
-                "sti",
-                "hlt",
-                options(nomem, nostack),
-            }
-        }
+        lemmings_x86_64::halt()
     }
 }
 
