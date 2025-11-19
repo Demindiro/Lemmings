@@ -1,4 +1,5 @@
 #![no_std]
+#![no_main]
 
 use core::{cell::UnsafeCell, ptr::NonNull};
 
@@ -1270,6 +1271,11 @@ fn log(message: &str) {
 fn fail(reason: &str) -> ! {
     sys::println(reason);
     sys::exit_err();
+}
+
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
+    fail("panic");
 }
 
 #[unsafe(no_mangle)]
