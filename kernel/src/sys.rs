@@ -4,10 +4,7 @@ use crate::{
     ffi::{Slice, Tuple2},
     framebuffer,
 };
-use core::{
-    fmt::{self, Write},
-    mem::MaybeUninit,
-};
+use core::fmt::{self, Write};
 
 #[macro_export]
 macro_rules! log {
@@ -80,11 +77,12 @@ macro_rules! systable {
 systable! {
     0 log
     1 panic
-    2 door_list
-    3 door_register
-    4 panic_begin
-    5 panic_push
-    6 panic_end
+    2 panic_begin
+    3 panic_push
+    4 panic_end
+    5 door_list
+    6 door_find
+    7 door_register
 }
 
 pub struct Log<'cs> {
@@ -93,11 +91,6 @@ pub struct Log<'cs> {
 
 #[allow(dead_code)]
 struct SysFn(*const ());
-
-#[repr(C)]
-struct InterfaceInfo {
-    name: Slice<u8>,
-}
 
 impl Log<'_> {
     pub fn prefix_time(&mut self) {
@@ -174,28 +167,25 @@ unsafe extern "sysv64" fn panic_end(_handle: *const u8) -> ! {
     todo!("handle panic_end");
 }
 
-// XXX: u128 ought to be FFI-safe
-#[allow(improper_ctypes_definitions)]
-unsafe extern "sysv64" fn door_list(
-    api: Option<ApiId>,
-    cookie: Cookie,
-    info: Option<&mut MaybeUninit<InterfaceInfo>>,
-) -> Tuple2<Option<Table>, Cookie> {
-    door::list(api, cookie).map_or(Tuple2(None, cookie), |(cookie, x)| {
-        info.map(|w| {
-            w.write(InterfaceInfo {
-                name: Slice::from(x.name),
-            })
-        });
-        Tuple2(Some(x.table), cookie)
-    })
+unsafe extern "sysv64" fn door_list(cookie: Cookie) -> Tuple2<Option<Table>, Cookie> {
+    door::list(cookie).map_or(Tuple2(None, cookie), |(cookie, x)| Tuple2(Some(x), cookie))
 }
 
 // XXX: u128 ought to be FFI-safe
 #[allow(improper_ctypes_definitions)]
-unsafe extern "sysv64" fn door_register(name: Slice<u8>, table: Table) {
-    let name = unsafe { name.as_str() };
-    unsafe { door::register(name, table) };
+unsafe extern "sysv64" fn door_find(api: Option<ApiId>) -> Option<Table> {
+    // somebody is going to screw up and pass 0, so always check
+    let api = api.expect("door_find: API ID may not be 0");
+    door::find(api)
+}
+
+unsafe extern "sysv64" fn door_register(table: Table) -> isize {
+    let res = unsafe { door::register(table) };
+    match res {
+        Ok(()) => 0,
+        Err(door::RegisterError::Duplicate) => -1,
+        Err(door::RegisterError::Full) => -2,
+    }
 }
 
 pub fn with_log<F, R>(f: F) -> R
