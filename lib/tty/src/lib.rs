@@ -4,7 +4,8 @@
 use core::{fmt, ops, ptr::NonNull};
 
 const CHAR_DATA: (u32, u16, u16, &[u8]) = {
-    let &[a, b, c, d, e, f, g, h, ref data @ ..] = include_bytes!("../spleen-6x12.bin");
+    let &[a, b, c, d, e, f, g, h, ref data @ ..] =
+        include_bytes!(concat!(env!("OUT_DIR"), "/spleen-6x12.bin"));
     let n = u32::from_le_bytes([a, b, c, d]);
     let w = u16::from_le_bytes([e, f]);
     let h = u16::from_le_bytes([g, h]);
