@@ -193,9 +193,14 @@ unsafe extern "sysv64" fn door_list(
 
 // XXX: u128 ought to be FFI-safe
 #[allow(improper_ctypes_definitions)]
-unsafe extern "sysv64" fn door_register(name: Slice<u8>, table: Table) {
+unsafe extern "sysv64" fn door_register(name: Slice<u8>, table: Table) -> i32 {
     let name = unsafe { name.as_str() };
-    unsafe { door::register(name, table) };
+    let res = unsafe { door::register(name, table) };
+    match res {
+        Ok(()) => 0,
+        Err(door::RegisterError::Duplicate) => -1,
+        Err(door::RegisterError::Full) => -2,
+    }
 }
 
 pub fn with_log<F, R>(f: F) -> R

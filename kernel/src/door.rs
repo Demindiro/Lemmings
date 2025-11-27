@@ -17,7 +17,7 @@ macro_rules! door {
             let table = const {
                 $crate::door::Table(core::ptr::NonNull::new(&T as *const T as *mut T).unwrap().cast())
             };
-            unsafe { $crate::door::register($name, table) };
+            unsafe { $crate::door::register($name, table).expect("enough room in early boot") };
         }
     };
 }
@@ -45,6 +45,12 @@ pub struct Cookie(u64);
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Table(pub NonNull<NonNull<()>>);
+
+#[derive(Clone, Debug)]
+pub enum RegisterError {
+    Duplicate,
+    Full,
+}
 
 #[derive(Clone, Copy)]
 struct Name(u32);
@@ -96,21 +102,35 @@ pub fn list(api: Option<ApiId>, cookie: Cookie) -> Option<(Cookie, Interface<'st
     None
 }
 
+pub fn find(api: ApiId) -> Option<Interface<'static>> {
+    list(Some(api), Cookie(0)).map(|x| x.1)
+}
+
 /// # Safety
 ///
 /// The implementation must conform to the API.
-pub unsafe fn register(name: &str, table: Table) {
+pub unsafe fn register(name: &str, table: Table) -> Result<(), RegisterError> {
     log!(
         "registering door {:032x} @ {:?} {name:?}",
         table.id(),
         table.0
     );
+    if find(table.id()).is_some() {
+        log!("door entry duplicate");
+        return Err(RegisterError::Duplicate);
+    }
+    let n = unsafe { COUNT };
+    if n >= MAX_ENTRIES {
+        log!("door entries full");
+        return Err(RegisterError::Full);
+    }
     let name = alloc_name(name);
     unsafe {
-        NAMES[COUNT] = name;
-        TABLES[COUNT] = Some(table);
-        COUNT += 1;
+        NAMES[n] = name;
+        TABLES[n] = Some(table);
     }
+    unsafe { COUNT = n + 1 };
+    Ok(())
 }
 
 fn alloc_name(name: &str) -> Name {
