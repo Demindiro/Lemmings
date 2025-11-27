@@ -505,6 +505,16 @@ def emit(outf, idl):
 def main(idl_path, out_path):
     import gen
     from pathlib import Path
+
+    idl_path = Path(idl_path)
+    out_path = Path(out_path)
+
+    out_path_lib = out_path / 'src' / 'lib.rs'
+
+    if out_path_lib.exists() and idl_path.stat().st_mtime <= out_path_lib.stat().st_mtime:
+        print(f'{out_path} is up to date')
+        return
+
     with open(idl_path, 'r') as f:
         idl = f.read()
     idl = gen.parse_idl(idl)
