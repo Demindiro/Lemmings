@@ -90,7 +90,11 @@ for k in sorted(chars):
         ranges.append((k, [chars[k]]))
     prev = k
 
-with open('spleen-%dx%d.bin' % CHAR_DIM, 'wb') as f:
+import os
+from pathlib import Path
+out_dir = Path(os.getenv('OUT_DIR', ''))
+
+with open(out_dir / ('spleen-%dx%d.bin' % CHAR_DIM), 'wb') as f:
     f.write(len(ranges).to_bytes(4, 'little'))
     f.write(w.to_bytes(2, 'little'))
     f.write(h.to_bytes(2, 'little'))

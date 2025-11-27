@@ -2,7 +2,6 @@ use std::process::Command;
 
 fn main() {
     println!("cargo::rerun-if-changed=spleen-6x12.bdf");
-    println!("cargo::rerun-if-changed=spleen-6x12.bin");
     let res = Command::new("python3")
         .arg("bdf2bin.py")
         .spawn()
