@@ -209,26 +209,25 @@ f ne eq
 .endm
 f 0 log
 f 1 panic
-f 2 door_list
-f 3 door_register
+f 5 door_list
+f 6 door_find
+f 7 door_register
 .purgem f
 
 .macro find_door name:req, api_h:req, api_l:req
  .macro find_door_\name
 	movabs rdi, \api_l
 	movabs rsi, \api_h
-	xor edx, edx
-	xor ecx, ecx
-	syscall_door_list
+	syscall_door_find
  .endm
 .endm
 find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 
 
-.equ door.archive.root     , 16 + 8 * 0
-.equ door.archive.dir_iter , 16 + 8 * 1
-.equ door.archive.dir_find , 16 + 8 * 2
-.equ door.archive.file_read, 16 + 8 * 3
+.equ door.archive.root     , 32 + 8 * 0
+.equ door.archive.dir_iter , 32 + 8 * 1
+.equ door.archive.dir_find , 32 + 8 * 2
+.equ door.archive.file_read, 32 + 8 * 3
 
 .macro f prefix:req PREFIX:req
  .macro \prefix\()_push x:req
@@ -1211,16 +1210,14 @@ dict_begin Sys.Door
 	def find
 		num_pop rdi # high
 		num_peek rsi # low
-		xor edx, edx
-		xor ecx, ecx
-		syscall_door_list
+		syscall_door_find
 		num_replace rax
 	enddef
 
 .macro f argc:req npop:req args:vararg
 	def_as "call:\argc->0" call_\argc\()_0
 		num_pop\npop rbx rax \args
-		call [rbx + 16 + rax * 8]
+		call [rbx + 32 + rax * 8]
 	enddef
 	def_as "call:\argc->1" call_\argc\()_1
 		call call_\argc\()_0

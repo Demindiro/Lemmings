@@ -10,7 +10,7 @@ use core::{
     mem::{self, ManuallyDrop},
     ptr::NonNull,
 };
-use lemmings_door::{Cookie, Log, log};
+use lemmings_door::{Log, log};
 use lemmings_idl_pci::Pci;
 use lemmings_pci::{Header, Header0, HeaderCommon, ParsedBaseAddress};
 use lemmings_virtio_net::{Packet, PhysAddr, PhysRegion};
@@ -214,7 +214,7 @@ impl Drop for TxToken<'_, '_> {
 }
 
 fn main() {
-    let (door, _) = lemmings_door::door_find::<Pci>(Cookie(0)).expect("no PCI door found");
+    let door = lemmings_door::door_find::<Pci>().expect("no PCI door found");
     let door = door.get();
     let lemmings_idl_pci::Configuration {
         base,
@@ -291,7 +291,7 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
         transmit_queue: Some(1),
     };
     let bar_map = &map_bars(header);
-    let (door, _) = lemmings_door::door_find::<Allocator>(Cookie(0))
+    let door = lemmings_door::door_find::<Allocator>()
         .expect("no super-experimental Page Allocator 4K door found");
     let door = door.get();
     let dma_alloc = |n: usize| -> Result<_, ()> {

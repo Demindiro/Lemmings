@@ -5,7 +5,6 @@ use core::ptr::NonNull;
 use core::{
     fmt::{self, Write},
     marker::PhantomData,
-    mem::MaybeUninit,
     num::NonZero,
 };
 
@@ -66,6 +65,35 @@ mod ffi {
         x
     }
 
+    pub unsafe fn syscall_1_1<const ID: usize>(a: u64) -> u64 {
+        let x: u64;
+        unsafe {
+            asm! {
+                "call gs:[8 * {ID}]",
+                ID = const ID,
+                in("rdi") a,
+                lateout("rax") x,
+                clobber_abi("sysv64"),
+            }
+        }
+        x
+    }
+
+    pub unsafe fn syscall_1_2<const ID: usize>(a: u64) -> [u64; 2] {
+        let x @ y: u64;
+        unsafe {
+            asm! {
+                "call gs:[8 * {ID}]",
+                ID = const ID,
+                in("rdi") a,
+                lateout("rax") x,
+                lateout("rdx") y,
+                clobber_abi("sysv64"),
+            }
+        }
+        [x, y]
+    }
+
     pub unsafe fn syscall_2_0<const ID: usize>(a: u64, b: u64) {
         unsafe {
             asm! {
@@ -76,6 +104,21 @@ mod ffi {
                 clobber_abi("sysv64"),
             }
         }
+    }
+
+    pub unsafe fn syscall_2_1<const ID: usize>(a: u64, b: u64) -> u64 {
+        let x: u64;
+        unsafe {
+            asm! {
+                "call gs:[8 * {ID}]",
+                ID = const ID,
+                in("rdi") a,
+                in("rsi") b,
+                lateout("rax") x,
+                clobber_abi("sysv64"),
+            }
+        }
+        x
     }
 
     pub unsafe fn syscall_1_noreturn<const ID: usize>(a: u64) -> ! {
@@ -119,24 +162,6 @@ mod ffi {
         x
     }
 
-    pub unsafe fn syscall_4_2<const ID: usize>(a: u64, b: u64, c: u64, d: u64) -> [u64; 2] {
-        let x @ y: u64;
-        unsafe {
-            asm! {
-                "call gs:[8 * {ID}]",
-                ID = const ID,
-                in("rdi") a,
-                in("rsi") b,
-                in("rdx") c,
-                in("rcx") d,
-                lateout("rax") x,
-                lateout("rdx") y,
-                clobber_abi("sysv64"),
-            }
-        }
-        [x, y]
-    }
-
     pub fn api_to_args(api: Option<super::ApiId>) -> [u64; 2] {
         let api = api.map_or(0, |x| x.0.get());
         [api as u64, (api >> 64) as u64]
@@ -146,11 +171,12 @@ mod ffi {
 mod sys {
     pub const LOG: usize = 0;
     pub const PANIC: usize = 1;
-    pub const DOOR_LIST: usize = 2;
-    pub const DOOR_REGISTER: usize = 3;
-    pub const PANIC_BEGIN: usize = 4;
-    pub const PANIC_PUSH: usize = 5;
-    pub const PANIC_END: usize = 6;
+    pub const PANIC_BEGIN: usize = 2;
+    pub const PANIC_PUSH: usize = 3;
+    pub const PANIC_END: usize = 4;
+    pub const DOOR_LIST: usize = 5;
+    pub const DOOR_FIND: usize = 6;
+    pub const DOOR_REGISTER: usize = 7;
 }
 
 #[derive(Clone, Debug)]
@@ -170,47 +196,25 @@ pub struct Log {
 pub struct UntypedTable;
 
 #[derive(Clone, Copy)]
-pub struct Door<'table, 'name, T = UntypedTable> {
+pub struct Door<'a, T = UntypedTable> {
     table: NonNull<T>,
-    name: &'name str,
-    _marker: PhantomData<&'table ()>,
+    _marker: PhantomData<&'a ()>,
 }
 
 struct Panic(*const u8);
 
-#[repr(C)]
-struct InterfaceInfo {
-    name_ptr: NonNull<u8>,
-    name_len: usize,
-}
-
-impl<T> Door<'_, '_, T> {
+impl<'a, T> Door<'a, T> {
     pub fn api_id(&self) -> ApiId {
         unsafe { self.table.cast::<ApiId>().read() }
     }
-}
 
-impl<'table, 'name> Door<'table, 'name, UntypedTable> {
-    unsafe fn cast_unchecked<T>(self) -> Door<'table, 'name, T>
-    where
-        T: lemmings_idl::Api,
-    {
-        let Self {
-            table,
-            name,
-            _marker,
-        } = self;
-        let table = table.cast::<T>();
-        Door {
-            table,
-            name,
-            _marker,
-        }
+    pub fn name(&self) -> &'a str {
+        unsafe { self.table.cast::<ApiId>().add(1).cast::<&'a str>().as_ref() }
     }
 }
 
-impl<'table, 'name, T> Door<'table, 'name, T> {
-    pub fn get(&self) -> &'table T {
+impl<'a, T> Door<'a, T> {
+    pub fn get(&self) -> &'a T {
         unsafe { self.table.as_ref() }
     }
 }
@@ -297,12 +301,12 @@ impl fmt::Debug for ApiId {
     }
 }
 
-impl<T> fmt::Debug for Door<'_, '_, T> {
+impl<T> fmt::Debug for Door<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(stringify!(Door))
             .field("api", &self.api_id())
             .field("table", &self.table)
-            .field("name", &self.name)
+            .field("name", &self.name())
             .finish()
     }
 }
@@ -335,44 +339,34 @@ unsafe fn panic_end(handle: *const u8) -> ! {
 }
 
 #[inline(always)]
-pub fn door_list(api: Option<ApiId>, cookie: Cookie) -> Option<(Door<'static, 'static>, Cookie)> {
-    let mut door = MaybeUninit::<InterfaceInfo>::uninit();
-    let [a, b] = ffi::api_to_args(api);
-    let c = cookie.0;
-    let d = door.as_mut_ptr() as u64;
-    let [x, y] = unsafe { ffi::syscall_4_2::<{ sys::DOOR_LIST }>(a, b, c, d) };
-    let table = NonNull::new(x as *mut UntypedTable)?;
-    let InterfaceInfo { name_ptr, name_len } = unsafe { door.assume_init() };
-    let name = unsafe { core::slice::from_raw_parts(name_ptr.as_ptr(), name_len) };
-    let name = unsafe { core::str::from_utf8_unchecked(name) };
+pub fn door_list(cookie: Cookie) -> Option<(Door<'static>, Cookie)> {
+    let a = cookie.0;
+    let [x, y] = unsafe { ffi::syscall_1_2::<{ sys::DOOR_LIST }>(a) };
     let _marker = PhantomData;
-    Some((
-        Door {
-            table,
-            name,
-            _marker,
-        },
-        Cookie(y),
-    ))
+    NonNull::new(x as *mut UntypedTable)
+        .map(|table| Door { table, _marker })
+        .map(|x| (x, Cookie(y)))
 }
 
 #[inline(always)]
-pub fn door_find<T>(cookie: Cookie) -> Option<(Door<'static, 'static, T>, Cookie)>
+pub fn door_find<T>() -> Option<Door<'static, T>>
 where
     T: lemmings_idl::Api,
 {
-    door_list(Some(ApiId(T::ID)), cookie).map(|(x, y)| unsafe { (x.cast_unchecked(), y) })
+    let [a, b] = ffi::api_to_args(Some(ApiId(T::ID)));
+    let x = unsafe { ffi::syscall_2_1::<{ sys::DOOR_FIND }>(a, b) };
+    let _marker = PhantomData;
+    NonNull::new(x as *mut T).map(|table| Door { table, _marker })
 }
 
 /// # Safety
 ///
 /// `table` must be valid.
 #[inline(always)]
-pub unsafe fn door_register<T>(door: Door<'static, '_, T>) -> Result<(), HallwayIsFull> {
-    let Door { name, table, .. } = door;
-    let [a, b] = [name.as_ptr() as _, name.len() as _];
-    let c = table.as_ptr() as u64;
-    let x = unsafe { ffi::syscall_3_1::<{ sys::DOOR_REGISTER }>(a, b, c) };
+pub unsafe fn door_register<T>(door: Door<'static, T>) -> Result<(), HallwayIsFull> {
+    let Door { table, .. } = door;
+    let a = table.as_ptr() as u64;
+    let x = unsafe { ffi::syscall_1_1::<{ sys::DOOR_REGISTER }>(a) };
     (x == 0).then_some(()).ok_or(HallwayIsFull)
 }
 
