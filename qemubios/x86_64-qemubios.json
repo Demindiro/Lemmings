@@ -11,7 +11,7 @@
   "target-pointer-width": "64",
   "vendor": "unknown",
   "linker-flavor": "ld.lld",
-  "linker": "ld.lld",
+  "linker": "rust-lld",
   "disable-redzone": false,
   "panic-strategy": "abort",
   "features": "-mmx,-sse,+soft-float",
