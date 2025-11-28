@@ -215,7 +215,6 @@ impl Drop for TxToken<'_, '_> {
 
 fn main() {
     let door = lemmings_door::door_find::<Pci>().expect("no PCI door found");
-    let door = door.get();
     let lemmings_idl_pci::Configuration {
         base,
         segment_group: _,
@@ -293,7 +292,6 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
     let bar_map = &map_bars(header);
     let door = lemmings_door::door_find::<Allocator>()
         .expect("no super-experimental Page Allocator 4K door found");
-    let door = door.get();
     let dma_alloc = |n: usize| -> Result<_, ()> {
         let alloc = Alloc {
             len: n.into(),
