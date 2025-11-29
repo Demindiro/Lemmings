@@ -3,8 +3,14 @@ use crate::{
     door::{self, ApiId, Cookie, Table},
     ffi::{Slice, Tuple2},
     framebuffer,
+    sync::SpinLock,
+    thread::{self, RoundRobinQueue},
 };
 use core::fmt::{self, Write};
+use critical_section::CriticalSection;
+
+/// A list of panicked threads.
+static PANICKED_THREADS: SpinLock<RoundRobinQueue> = SpinLock::new(RoundRobinQueue::new());
 
 #[macro_export]
 macro_rules! log {
@@ -125,7 +131,13 @@ unsafe extern "sysv64" fn log(msg: Slice<u8>) {
 
 unsafe extern "sysv64" fn panic(msg: Slice<u8>) -> ! {
     let msg = unsafe { msg.as_str() };
-    todo!("handle thread panic (message: {msg:?})");
+    critical_section::with(|cs| {
+        let mut log = logger(cs);
+        log.prefix_time();
+        let _ = log.write_str("Oh no! ");
+        let _ = log.write_str(msg);
+        panic_halt(cs, log)
+    })
 }
 
 /// Begin panicking.
@@ -137,7 +149,10 @@ unsafe extern "sysv64" fn panic(msg: Slice<u8>) -> ! {
 ///
 /// A handle which must be used for [`panic_push`] and [`panic_end`]
 unsafe extern "sysv64" fn panic_begin() -> *const u8 {
-    let _ = with_log(|mut log| log.write_str("Oh no! "));
+    let _ = with_log(|mut log| {
+        log.prefix_time();
+        log.write_str("Oh no! ")
+    });
     core::ptr::null()
 }
 
@@ -163,8 +178,7 @@ unsafe extern "sysv64" fn panic_push(_handle: *const u8, msg: Slice<u8>) -> *con
 ///
 /// - `panic_begin` must have been called first.
 unsafe extern "sysv64" fn panic_end(_handle: *const u8) -> ! {
-    let _ = with_log(|mut log| log.write_char('\n'));
-    todo!("handle panic_end");
+    critical_section::with(|cs| panic_halt(cs, logger(cs)))
 }
 
 unsafe extern "sysv64" fn door_list(cookie: Cookie) -> Tuple2<Option<Table>, Cookie> {
@@ -192,11 +206,7 @@ pub fn with_log<F, R>(f: F) -> R
 where
     F: FnOnce(Log<'_>) -> R,
 {
-    critical_section::with(|cs| {
-        f(Log {
-            fb: framebuffer::log(cs),
-        })
-    })
+    critical_section::with(|cs| f(logger(cs)))
 }
 
 #[allow(dead_code)]
@@ -218,4 +228,22 @@ pub fn hexdump(data: &[u8]) {
 pub fn init<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
     unsafe { lemmings_x86_64::set_gs(TABLE.as_ptr() as *mut _) };
     token
+}
+
+fn logger(cs: CriticalSection<'_>) -> Log<'_> {
+    let fb = framebuffer::log(cs);
+    Log { fb }
+}
+
+fn panic_halt(cs: CriticalSection<'_>, mut log: Log<'_>) -> ! {
+    let _ = log.write_char('\n');
+    drop(log);
+    PANICKED_THREADS.lock(cs).enqueue(cs, thread::current());
+    // the only way we can get rescheduled is if something takes
+    // us out of the PANICKED_THREADS queue and forcibly unparks us.
+    //
+    // If they didn't fix anything, just immediately repark.
+    loop {
+        thread::park(cs)
+    }
 }

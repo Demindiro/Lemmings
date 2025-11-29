@@ -144,6 +144,8 @@ if 0 <> then "failed to map IRQ 1" Sys panic end
 : ps2_wait 1 interrupt->wait ;
 : ps2_done 1 interrupt->done ;
 
+"test panic" Sys panic
+
 if 1 then
 	ps2_wait
 	"Got an interrupt!!!" Sys log
