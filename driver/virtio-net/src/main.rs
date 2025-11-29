@@ -241,8 +241,8 @@ fn try_device(door_pci: &Pci, header: Header<'_>) {
 }
 
 fn start_device(door_pci: &Pci, header: &Header0) -> ! {
+    use lemmings_idl_allocator::*;
     use lemmings_idl_pci::*;
-    use lemmings_idl_physical_allocator::*;
 
     // we'll use one MSI-X vector for now
     let msi = match door_pci.msi_map() {
@@ -295,18 +295,16 @@ fn start_device(door_pci: &Pci, header: &Header0) -> ! {
         .expect("no super-experimental Page Allocator 4K door found");
     let door = door.get();
     let dma_alloc = |n: usize| -> Result<_, ()> {
-        let alloc = Alloc64 {
-            len: u64::try_from(n).unwrap().try_into().unwrap(),
-            align: 12.try_into().unwrap(),
+        let alloc = Alloc {
+            len: n.into(),
+            align: 12.into(),
         };
-        match door.alloc64(alloc) {
-            MaybeRegion64::Region64(Region64 { base, len: _ }) => {
-                let base = u64::from(base);
+        match door.alloc(alloc) {
+            MaybeRegion::Region(Region { base, len: _ }) => {
                 // FIXME use identity_base
-                let virt = NonNull::new(base as *mut u8).unwrap();
-                Ok((virt, PhysAddr(base.into())))
+                Ok((base.0.cast(), PhysAddr((base.0.as_ptr() as u64).into())))
             }
-            MaybeRegion64::NoRegion64(_) => todo!("oom"),
+            MaybeRegion::NoRegion(_) => todo!("oom"),
         }
     };
     let (dev, mac) =

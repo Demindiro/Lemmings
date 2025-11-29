@@ -20,49 +20,23 @@ static mut CONSTANT_PAGES: mem::MaybeUninit<ConstantPages> = mem::MaybeUninit::u
 
 // TODO should be moved to alloc.rs
 pub mod door {
-    use lemmings_idl_physical_allocator::*;
+    use lemmings_idl_allocator::*;
 
     door! {
-        [lemmings_idl_physical_allocator Allocator "Physical memory allocator"]
-        identity_base
-        alloc64
-        alloc32
+        [lemmings_idl_allocator Allocator "Physical memory allocator"]
+        alloc
         free
     }
 
-    fn identity_base() -> IdentityBase {
-        // fuck
-        todo!("it's fucked Jim");
-    }
-
-    fn alloc64(Alloc64 { len, align }: Alloc64) -> MaybeRegion64 {
+    fn alloc(Alloc { len, align }: Alloc) -> MaybeRegion {
         if u8::from(align) > 12 {
-            return NoRegion64 { len }.into();
+            return NoRegion { len }.into();
         }
-        usize::try_from((u64::from(len.clone()) + 0xfff) >> 12)
-            .ok()
-            .and_then(core::num::NonZero::new)
-            .and_then(|count| super::alloc_4k_phys(count).ok())
-            .map_or(NoRegion64 { len: len.clone() }.into(), |x| {
-                Region64 {
-                    base: x.0.try_into().unwrap(),
-                    len,
-                }
-                .into()
-            })
-    }
-
-    fn alloc32(Alloc32 { len, align }: Alloc32) -> MaybeRegion32 {
-        if u8::from(align) > 12 {
-            return NoRegion32 { len }.into();
-        }
-        usize::try_from((u32::from(len.clone()) + 0xfff) >> 12)
-            .ok()
-            .and_then(core::num::NonZero::new)
-            .and_then(|count| super::alloc_4k_phys(count).ok())
-            .map_or(NoRegion32 { len: len.clone() }.into(), |x| {
-                Region32 {
-                    base: u32::try_from(x.0).unwrap().try_into().unwrap(),
+        core::num::NonZero::new((usize::from(len.clone()) + 0xfff) >> 12)
+            .and_then(|count| super::alloc_4k(count).ok())
+            .map_or(NoRegion { len: len.clone() }.into(), |x| {
+                Region {
+                    base: x.cast().into(),
                     len,
                 }
                 .into()
@@ -271,6 +245,10 @@ impl From<ReserveRegionError> for AllocGuardedError {
             ReserveRegionError::OutOfVirtSpace => Self::OutOfVirtSpace,
         }
     }
+}
+
+fn alloc_4k(count: NonZero<usize>) -> Result<Virt, OutOfMemory> {
+    alloc_4k_phys(count).map(phys_to_virt)
 }
 
 fn alloc_4k_phys(count: NonZero<usize>) -> Result<Phys, OutOfMemory> {

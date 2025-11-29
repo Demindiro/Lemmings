@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 lemmings-idl-pci = { path = "../../IDL/rust/pci" }
-lemmings-idl-physical-allocator = { path = "../../IDL/rust/physical-allocator" }
+lemmings-idl-allocator = { path = "../../IDL/rust/allocator" }
 lemmings-door = { path = "../../lib/door" }
 lemmings-pci = { path = "../../lib/pci" }
 lemmings-virtio-net = { path = "../../lib/virtio-net" }

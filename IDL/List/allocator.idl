@@ -1,0 +1,46 @@
+-- Memory allocator for allocating contiguous memory regions.
+--
+-- The memory is assumed to be physically contiguous.
+-- This does not strictly have to be true in practice,
+-- but any process sharing memory must have the same view.
+--
+-- In particular, memory must either be identity mapped or any (IO)MMU must be
+-- configured to show the same view for all relevant processes/devices.
+door Allocator {
+	-- Allocate a contiguous range with the given alignment.
+	alloc = Alloc -> MaybeRegion
+	-- Release an allocation.
+	free = Free -> Void
+}
+
+record Void {
+}
+
+u8 Byte = 0 to 0xff
+pointer Base = unique Byte
+null NoBase = Base
+
+uptr Len = 0 to address_max
+
+record Region {
+	base = Base
+	len = Len
+}
+record NoRegion {
+	base = NoBase
+	len = Len
+}
+
+sum MaybeRegion = Region | NoRegion
+
+record Alloc {
+	len = Len
+	align = Align
+}
+
+u8 Align = 0 to 255
+
+record Free {
+	base = Base
+	len = Len
+}
