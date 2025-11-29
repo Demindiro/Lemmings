@@ -1,9 +1,6 @@
 #!/bin/sh
 
-echo formatting qemubios
-rustfmt qemubios/qemubios.rs
-
-for f in kernel lib/* driver/*
+for f in qemubios kernel lib/* driver/*
 do
 	echo formatting $f
 	(cd $f && cargo fmt)
