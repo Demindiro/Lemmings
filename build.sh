@@ -16,7 +16,7 @@ mkdir -p "$tmp"
 make -C IDL
 
 (cd qemubios && cargo b --release -Zbuild-std=core --target ./x86_64-qemubios.json)
-(cd kernel && ./build.sh)
+(cd runtime/kernel/x86_64 && ./build.sh)
 (cd interpreter && ./build.sh)
 (cd driver/virtio-net && cargo b --release -Zbuild-std=core)
 (cd service/net && cargo b --release -Zbuild-std=core)

@@ -361,6 +361,8 @@ fn main() -> ! {
     {
         use lemmings_idl_thread::*;
         let data = SpawnDataRef(NonNull::from(net).cast()).into();
+        let task_receive: unsafe extern "sysv64" fn(lemmings_idl_thread::ffi::MaybeSpawnDataRef) = task_receive;
+        let task_receive = unsafe { core::mem::transmute(task_receive) };
         let entry = SpawnEntry(task_receive);
         threads.spawn(Spawn { data, entry });
     }
