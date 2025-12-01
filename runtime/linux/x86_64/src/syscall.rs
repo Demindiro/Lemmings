@@ -20,6 +20,8 @@ macro_rules! sys {
             "syscall",
             in("eax") $id,
             lateout("rax") $ret,
+            lateout("rcx") _,
+            lateout("r11") _,
             options(nostack),
         }
     };
@@ -29,6 +31,8 @@ macro_rules! sys {
             in("eax") $id,
             in("rdi") $a0,
             lateout("rax") $ret,
+            lateout("rcx") _,
+            lateout("r11") _,
             options(nostack),
         }
     };
@@ -39,6 +43,8 @@ macro_rules! sys {
             in("rdi") $a0,
             in("rsi") $a1,
             lateout("rax") $ret,
+            lateout("rcx") _,
+            lateout("r11") _,
             options(nostack),
         }
     };
@@ -50,6 +56,8 @@ macro_rules! sys {
             in("rsi") $a1,
             in("rdx") $a2,
             lateout("rax") $ret,
+            lateout("rcx") _,
+            lateout("r11") _,
             options(nostack),
         }
     };
@@ -62,6 +70,8 @@ macro_rules! sys {
             in("rdx") $a2,
             in("r10") $a3,
             lateout("rax") $ret,
+            lateout("rcx") _,
+            lateout("r11") _,
             options(nostack),
         }
     };
@@ -75,6 +85,8 @@ macro_rules! sys {
             in("r10") $a3,
             in("r8") $a4,
             lateout("rax") $ret,
+            lateout("rcx") _,
+            lateout("r11") _,
             options(nostack),
         }
     };
@@ -89,6 +101,8 @@ macro_rules! sys {
             in("r8") $a4,
             in("r9") $a5,
             lateout("rax") $ret,
+            lateout("rcx") _,
+            lateout("r11") _,
             options(nostack),
         }
     };
