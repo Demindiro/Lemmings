@@ -1,0 +1,4 @@
+[package]
+name = "lemmings-runtime-linux-x86_64"
+version = "0.1.0"
+edition = "2024"
