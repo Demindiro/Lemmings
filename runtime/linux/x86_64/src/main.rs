@@ -11,9 +11,12 @@
 #![feature(naked_functions)] // stabilized in 1.88
 
 mod syscall;
+#[macro_use]
+mod sys;
 
 #[panic_handler]
-fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
+fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
+    log!("PANIC: {info}");
     unsafe {
         syscall::kill(syscall::getpid(), syscall::SIGABRT);
         // just in case...
@@ -21,14 +24,20 @@ fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
     }
 }
 
+unsafe extern "C" fn entry() {
+    todo!("RIP harambe");
+}
+
 #[unsafe(no_mangle)]
 #[naked]
-unsafe extern "C" fn _start() {
+unsafe extern "C" fn _start() -> ! {
     unsafe {
         core::arch::naked_asm! {
             "mov eax, 60",
             "mov edi, 42",
-            "syscall",
+            "call {entry}",
+            "ud2",
+            entry = sym entry,
         }
     }
 }
