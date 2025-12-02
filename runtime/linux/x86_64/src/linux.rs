@@ -15,14 +15,36 @@ pub struct AuxiliaryVector {
     pub val: *const u8,
 }
 
+#[derive(Clone, Debug)]
+pub struct CStrNotTerminated;
+
+#[repr(C)]
+pub struct LinuxDirent64 {
+    inode: u64,
+    offset: u64,
+    record_len: u16,
+    ty: u8,
+    name: [u8; 0],
+}
+
+#[repr(C)]
+pub struct Stat {}
+
 impl CStr {
-    // FIXME no UTF-8 guarantee!!
-    fn as_str(&self) -> &str {
-        let s = unsafe { slice::from_raw_parts(&self.0, self.len()) };
-        core::str::from_utf8(s).unwrap()
+    pub fn as_ptr(&self) -> *const u8 {
+        &self.0
     }
 
-    fn len(&self) -> usize {
+    // FIXME no UTF-8 guarantee!!
+    fn as_str(&self) -> &str {
+        core::str::from_utf8(self.as_bytes()).unwrap()
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(&self.0, self.len()) }
+    }
+
+    pub fn len(&self) -> usize {
         let p @ mut q = &self.0 as *const u8;
         unsafe {
             while q.read() != 0 {
@@ -30,6 +52,50 @@ impl CStr {
             }
             q.offset_from(p) as usize
         }
+    }
+}
+
+impl TryFrom<&[u8]> for &CStr {
+    type Error = CStrNotTerminated;
+
+    fn try_from(s: &[u8]) -> Result<Self, Self::Error> {
+        s.iter()
+            .any(|x| *x == b'\0')
+            .then(|| unsafe { &*(s.as_ptr() as *const CStr) })
+            .ok_or(CStrNotTerminated)
+    }
+}
+
+impl<const N: usize> TryFrom<&[u8; N]> for &CStr {
+    type Error = CStrNotTerminated;
+
+    fn try_from(s: &[u8; N]) -> Result<Self, Self::Error> {
+        (&s[..]).try_into()
+    }
+}
+
+impl LinuxDirent64 {
+    pub const TY_DIR: u8 = 4;
+    pub const TY_FILE: u8 = 8;
+
+    pub fn name(&self) -> Option<&CStr> {
+        <&CStr>::try_from(self.name_bytes()).ok()
+    }
+
+    pub fn record_len(&self) -> usize {
+        usize::from(self.record_len)
+    }
+
+    pub fn ty(&self) -> u8 {
+        self.ty
+    }
+
+    fn name_bytes(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.name.as_ptr(), self.name_len()) }
+    }
+
+    fn name_len(&self) -> usize {
+        self.record_len() - 2 - 8 * 2
     }
 }
 
@@ -42,6 +108,18 @@ impl fmt::Display for CStr {
 impl fmt::Debug for CStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.as_str().fmt(f)
+    }
+}
+
+impl fmt::Debug for LinuxDirent64 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(stringify!(LinuxDirent64))
+            .field("inode", &self.inode)
+            .field("offset", &self.offset)
+            .field("record_len", &self.record_len())
+            .field("ty", &self.ty)
+            .field("name", &self.name())
+            .finish()
     }
 }
 
