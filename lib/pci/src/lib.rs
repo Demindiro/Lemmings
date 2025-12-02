@@ -582,16 +582,16 @@ impl Pci {
 
     /// Perform internal iteration on all *valid* devices.
     // because external is a pain in the ass.
-    pub fn list<F>(&self, mut f: F)
+    pub fn list<'a, F>(&'a self, mut f: F)
     where
-        F: FnMut(Bdf, Header<'_>),
+        F: FnMut(Bdf, Header<'a>),
     {
         self.scan_bus(0, &mut f);
     }
 
-    fn scan_bus<F>(&self, bus: u8, f: &mut F)
+    fn scan_bus<'a, F>(&'a self, bus: u8, f: &mut F)
     where
-        F: FnMut(Bdf, Header<'_>),
+        F: FnMut(Bdf, Header<'a>),
     {
         for dev in 0..32 {
             let bdf = Bdf::new(bus, dev, 0).expect("dev number in range");
@@ -599,9 +599,9 @@ impl Pci {
         }
     }
 
-    fn scan_dev<F>(&self, bdf: Bdf, f: &mut F)
+    fn scan_dev<'a, F>(&'a self, bdf: Bdf, f: &mut F)
     where
-        F: FnMut(Bdf, Header<'_>),
+        F: FnMut(Bdf, Header<'a>),
     {
         let hdr = self.get(bdf);
         if hdr.vendor_id() != 0xffff {
