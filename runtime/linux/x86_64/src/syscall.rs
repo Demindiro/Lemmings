@@ -111,6 +111,14 @@ macro_rules! sys {
 
 pub const SIGABRT: i32 = 6;
 pub const O_RDONLY: i32 = 0o00;
+pub const PROT_R: u32 = 0x1;
+pub const PROT_W: u32 = 0x2;
+pub const PROT_X: u32 = 0x4;
+pub const PROT_RW: u32 = PROT_R | PROT_W;
+pub const PROT_RX: u32 = PROT_R | PROT_X;
+pub const PROT_RWX: u32 = PROT_RW | PROT_X;
+pub const MAP_PRIVATE: u32 = 0x02;
+pub const MAP_ANON: u32 = 0x20;
 
 // implement noreturn syscalls manually
 pub fn exit(status: i32) -> ! {
@@ -128,6 +136,9 @@ sys!(0 read(fd: i32, buf: *mut u8, count: usize) -> isize);
 sys!(1 write(fd: i32, buf: *const u8, count: usize) -> isize);
 sys!(2 open(path: *const u8, flags: i32, mode: i32) -> i32);
 sys!(3 close(fd: i32) -> i32);
+sys!(9 mmap(addr: *mut u8, len: usize, prot: u32, flags: u32, fd: i32, offset: u64) -> *mut u8);
+sys!(10 mprotect(addr: *mut u8, len: usize, prot: u32) -> i32);
+sys!(11 munmap(addr: *mut u8, len: usize) -> i32);
 sys!(39 getpid() -> i32);
 sys!(62 kill(pid: i32, signal: i32) -> i32);
 sys!(217 getdents64(fd: i32, dirent: *mut usize, count: usize) -> i32);
