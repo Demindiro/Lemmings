@@ -13,7 +13,13 @@
 mod syscall;
 #[macro_use]
 mod sys;
+mod archive;
 mod linux;
+
+fn load_init() {
+    let res = unsafe { syscall::open("init\0".as_ptr(), syscall::O_RDONLY, 0) };
+    dbg!(res);
+}
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
@@ -30,6 +36,8 @@ unsafe extern "C" fn entry(env: *const usize) {
     dbg!(linux::args());
     dbg!(linux::env());
     dbg!(linux::aux());
+    unsafe { archive::init() };
+    load_init();
     todo!("RIP harambe");
 }
 
