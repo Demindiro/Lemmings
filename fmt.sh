@@ -3,5 +3,6 @@
 for f in qemubios runtime/*/* lib/* driver/*
 do
 	echo formatting $f
-	(cd $f && cargo fmt)
+	(cd $f && cargo fmt) &
 done
+wait
