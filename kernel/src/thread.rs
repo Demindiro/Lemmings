@@ -10,7 +10,7 @@ use crate::{
 use core::{arch::asm, fmt, mem, ops, ptr::NonNull};
 use critical_section::CriticalSection;
 
-const PRIORITY_COUNT: usize = 4;
+const PRIORITY_COUNT: usize = 5;
 
 static MANAGER: SpinLock<PriorityQueue> = SpinLock::new(PriorityQueue::new());
 
@@ -65,6 +65,7 @@ pub enum Priority {
     User = 2,
     #[default]
     Regular = 3,
+    Idle = 4,
 }
 
 pub enum ThreadSpawnError {
@@ -76,7 +77,7 @@ pub struct RoundRobinQueue {
     cur: Option<RoundRobinQueueLink>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ThreadHandle(ThreadRef);
 
 struct PriorityQueue {
@@ -98,7 +99,7 @@ struct Thread {
     priority: Priority,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ThreadRef(NonNull<Thread>);
 
 struct RoundRobinQueueLink {
@@ -108,7 +109,6 @@ struct RoundRobinQueueLink {
 
 struct HartLocal {
     current_thread: ThreadRef,
-    idle_thread: ThreadRef,
 }
 
 impl PriorityQueue {
@@ -144,8 +144,11 @@ impl PriorityQueue {
     }
 
     /// Dequeue the next thread with the higher priority.
-    fn dequeue(&mut self, cs: CriticalSection<'_>) -> Option<ThreadHandle> {
-        self.pending.iter_mut().find_map(|x| x.dequeue(cs))
+    fn dequeue(&mut self, cs: CriticalSection<'_>) -> ThreadHandle {
+        self.pending
+            .iter_mut()
+            .find_map(|x| x.dequeue(cs))
+            .expect("at least one thread available (one idle thread per hart)")
     }
 }
 
@@ -378,7 +381,6 @@ macro_rules! imp_hartlocal {
 }
 
 imp_hartlocal!(pub current_thread current set_current);
-imp_hartlocal!(idle_thread idle_thread set_idle_thread);
 
 /// Spawn a new thread and run it immediately.
 pub fn spawn(
@@ -403,9 +405,7 @@ pub fn spawn(
 /// If the thread is not referenced anywhere, it will leak!
 pub fn park(cs: CriticalSection<'_>) {
     debug!("thread::park {:?}", current().0.0);
-    let mut m = MANAGER.lock(cs);
-    let next = m.dequeue(cs).unwrap_or_else(idle_thread);
-    drop(m);
+    let next = MANAGER.lock(cs).dequeue(cs);
     next.0.resume_noarg(cs);
     debug!("thread::park {:?} -> continue", current().0.0);
 }
@@ -415,14 +415,13 @@ pub fn park(cs: CriticalSection<'_>) {
 /// An unpark not matched by a [`park`] will eventually result in a deadlock.
 pub fn unpark(cs: CriticalSection<'_>, thread: ThreadHandle) {
     debug!("thread::unpark {:?} -> {:?}", current().0.0, thread.0.0);
-    let mut m = MANAGER.lock(cs);
-    m.enqueue(cs, thread);
-    if let Some(next) = m.dequeue(cs) {
-        drop(m);
-        next.0.resume_noarg(cs);
-    } else {
-        todo!("wtf?");
+    let cur = current();
+    if cur.0.priority <= thread.0.priority {
+        debug!("thread::unpark: current has higher priority");
+        return;
     }
+    MANAGER.lock(cs).enqueue(cs, current());
+    thread.0.resume_noarg(cs);
     debug!("thread::unpark {:?} -> continue", current().0.0);
 }
 
@@ -442,7 +441,6 @@ pub fn init(entry: extern "sysv64" fn(*const ()), token: KernelEntryToken) -> ! 
     let local = crate::page::alloc_one().expect("failed to create CPU-local data");
     unsafe { lemmings_x86_64::set_fs(local.as_ptr()) };
     let idle_thread =
-        Thread::new(Priority::Regular, entry).expect("failed to create initial/idle_thread thread");
-    unsafe { set_idle_thread(&idle_thread.0) }
+        Thread::new(Priority::Idle, entry).expect("failed to create initial/idle thread");
     idle_thread.0.enter(token);
 }
