@@ -13,6 +13,7 @@
 mod syscall;
 #[macro_use]
 mod sys;
+mod linux;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
@@ -24,7 +25,11 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
     }
 }
 
-unsafe extern "C" fn entry() {
+unsafe extern "C" fn entry(env: *const usize) {
+    unsafe { linux::init(env) };
+    dbg!(linux::args());
+    dbg!(linux::env());
+    dbg!(linux::aux());
     todo!("RIP harambe");
 }
 
@@ -35,6 +40,7 @@ unsafe extern "C" fn _start() -> ! {
         core::arch::naked_asm! {
             "mov eax, 60",
             "mov edi, 42",
+            "mov rdi, rsp",
             "call {entry}",
             "ud2",
             entry = sym entry,
