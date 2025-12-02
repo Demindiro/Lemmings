@@ -1,4 +1,4 @@
-use crate::KernelEntryToken;
+#![no_std]
 use core::{cell::UnsafeCell, ops};
 use critical_section::CriticalSection;
 
@@ -67,9 +67,13 @@ impl<T> SpinLock<T> {
         SpinLockGuard { lock: self, cs }
     }
 
-    pub fn set<'a>(&self, value: T, token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
+    /// # Safety
+    ///
+    /// No thread other than the caller may currently possess a reference to this *lock*.
+    pub unsafe fn set<'a>(&self, value: T) {
+        // SAFETY: no synchronization is required as no other thread
+        // has a shared reference to this value.
         unsafe { *self.value.get() = value }
-        token
     }
 
     #[allow(dead_code)]

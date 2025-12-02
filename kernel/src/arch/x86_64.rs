@@ -1,10 +1,10 @@
 use crate::{
     KernelEntryToken, page,
-    sync::{SpinLock, SpinLockGuard},
     thread::{self, RoundRobinQueue},
 };
 use core::{arch::naked_asm, mem::MaybeUninit, num::NonZero};
 use critical_section::CriticalSection;
+use lemmings_spinlock::{SpinLock, SpinLockGuard};
 use lemmings_x86_64::{
     apic::{
         self,

@@ -5,10 +5,10 @@
 use crate::{
     KernelEntryToken,
     page::{self, PageAttr},
-    sync::{self, SpinLock},
 };
 use core::{arch::asm, fmt, mem, ops, ptr::NonNull};
 use critical_section::CriticalSection;
+use lemmings_spinlock::SpinLock;
 
 const PRIORITY_COUNT: usize = 5;
 
@@ -286,7 +286,7 @@ impl Thread {
                 lock = in(reg) current_lock,
                 TCB_SP = const mem::offset_of!(ThreadControlBlock, stack_pointer),
                 TCB_PC = const mem::offset_of!(ThreadControlBlock, program_counter),
-                UNLOCK = const sync::imp::UNLOCKED,
+                UNLOCK = const lemmings_spinlock::imp::UNLOCKED,
                 lateout("rax") _,
                 lateout("rcx") _,
                 lateout("rdx") _,

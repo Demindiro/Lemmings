@@ -3,11 +3,11 @@ use crate::{
     door::{self, ApiId, Cookie, Table},
     ffi::{Slice, Tuple2},
     framebuffer,
-    sync::SpinLock,
     thread::{self, RoundRobinQueue},
 };
 use core::fmt::{self, Write};
 use critical_section::CriticalSection;
+use lemmings_spinlock::SpinLock;
 
 /// A list of panicked threads.
 static PANICKED_THREADS: SpinLock<RoundRobinQueue> = SpinLock::new(RoundRobinQueue::new());

@@ -14,6 +14,7 @@ lemmings-idl-loader-elf = { path = "../IDL/rust/loader-elf" }
 lemmings-idl-pci = { path = "../IDL/rust/pci" }
 lemmings-idl-allocator = { path = "../IDL/rust/allocator" }
 lemmings-idl-thread = { path = "../IDL/rust/thread" }
+lemmings-spinlock = { path = "../lib/spinlock" }
 
 [profile.release]
 lto = "fat"

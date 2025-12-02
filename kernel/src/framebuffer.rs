@@ -1,9 +1,7 @@
-use crate::{
-    KernelEntryToken,
-    sync::{SpinLock, SpinLockGuard},
-};
+use crate::KernelEntryToken;
 use core::{fmt, mem::MaybeUninit, ptr::NonNull};
 use critical_section::CriticalSection;
+use lemmings_spinlock::{SpinLock, SpinLockGuard};
 use lemmings_tty::Tty;
 
 static mut TTY: MaybeUninit<SpinLock<Tty<32>>> = MaybeUninit::uninit();

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 pub use lemmings_x86_64::mmu::PageAttr;
 
-use crate::{KernelEntryToken, sync::SpinLock};
+use crate::KernelEntryToken;
 use core::{
     mem,
     num::NonZero,
@@ -11,6 +11,7 @@ use core::{
 };
 use critical_section::CriticalSection;
 use lemmings_qemubios::MemoryRegion;
+use lemmings_spinlock::SpinLock;
 use lemmings_x86_64::mmu;
 
 static PAGE: SpinLock<PageManager> = SpinLock::new(PageManager::new());
@@ -372,14 +373,15 @@ fn init_page<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
             a = unsafe { a.byte_add(PAGE_SIZE) };
         }
     }
-    let token = PAGE.set(
-        PageManager {
+    // SAFETY: no other threads are currently running,
+    // hence no other threads can have a reference to this lock.
+    unsafe {
+        PAGE.set(PageManager {
             head,
             contiguous_base,
             contiguous_num,
-        },
-        token,
-    );
+        });
+    }
     token
 }
 
@@ -393,7 +395,11 @@ fn init_virt<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
         ones: token.paging.ones.map(f),
     });
     let head = token.paging.kernel.end.0;
-    let token = VIRT.set(VirtManager { head }, token);
+    // SAFETY: no other threads are currently running,
+    // hence no other threads can have a reference to this lock.
+    unsafe {
+        VIRT.set(VirtManager { head });
+    }
     token
 }
 
