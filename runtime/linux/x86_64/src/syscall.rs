@@ -1,3 +1,4 @@
+use crate::linux::CStr;
 use core::arch::asm;
 
 macro_rules! sys {
@@ -109,6 +110,7 @@ macro_rules! sys {
 }
 
 pub const SIGABRT: i32 = 6;
+pub const O_RDONLY: i32 = 0o00;
 
 // implement noreturn syscalls manually
 pub fn exit(status: i32) -> ! {
@@ -124,5 +126,9 @@ pub fn exit(status: i32) -> ! {
 
 sys!(0 read(fd: i32, buf: *mut u8, count: usize) -> isize);
 sys!(1 write(fd: i32, buf: *const u8, count: usize) -> isize);
+sys!(2 open(path: *const u8, flags: i32, mode: i32) -> i32);
+sys!(3 close(fd: i32) -> i32);
 sys!(39 getpid() -> i32);
 sys!(62 kill(pid: i32, signal: i32) -> i32);
+sys!(217 getdents64(fd: i32, dirent: *mut usize, count: usize) -> i32);
+sys!(257 openat(dfd: i32, path: *const u8, flags: i32, mode: i32) -> i32);
