@@ -313,6 +313,17 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 .purgem f
 
 
+.macro stackframe_enter
+	push rbp
+	mov rbp, rsp
+	and rsp, ~15
+.endm
+.macro stackframe_leave
+	mov rsp, rbp
+	pop rbp
+.endm
+
+
 .section .rodata.panic
 _panic_reasons:
 
@@ -1222,20 +1233,20 @@ dict_end Sys
 
 dict_begin Sys.Door
 	def find
-		push rbp
-		mov rbp, rsp
-		and rsp, ~15
+		stackframe_enter
 		num_pop rdi # high
 		num_peek rsi # low
 		syscall_door_find
 		num_replace rax
-		pop rbp
+		stackframe_leave
 	enddef
 
 .macro f argc:req npop:req args:vararg
 	def_as "call:\argc->0" call_\argc\()_0
+		stackframe_enter
 		num_pop\npop rbx rax \args
 		call [rbx + 32 + rax * 8]
+		stackframe_leave
 	enddef
 	def_as "call:\argc->1" call_\argc\()_1
 		call call_\argc\()_0
