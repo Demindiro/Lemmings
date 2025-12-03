@@ -1,0 +1,156 @@
+"Hello interpreter!" Sys log
+
+: shutdown 0x2000 0x604 X86 Io out16 ;
+
+: find-door
+	Sys Door find
+	if #dup 0 = then
+		"Failed to find " @swap String concat " door" String concat Sys panic
+	else
+		@drop
+	end ;
+
+0x4311bc6974a63948 0x3fdd0de1dc07e4a6 "IRQ" find-door
+: interrupt-door ! const ;
+: interrupt->map   0 interrupt-door Sys Door call:2->1 ;
+: interrupt->unmap 1 interrupt-door Sys Door call:1->0 ;
+: interrupt->wait  2 interrupt-door Sys Door call:1->0 ;
+: interrupt->done  3 interrupt-door Sys Door call:1->0 ;
+: interrupt->LEVEL 0 ;
+: interrupt->EDGE  1 ;
+
+0x1bca7b88685b852b 0x9f0f280f34d8dae9 "ELF loader" find-door
+: loader-elf-door ! const ;
+: loader-elf->load  0 loader-elf-door Sys Door call:4->2 ;
+
+0x12586ddb4350e1b6 0xc469fb24bb9a89c6 "archive" find-door
+: archive-door ! const ;
+: archive->root      0 archive-door Sys Door call:0->1 ;
+: archive->dir_iter  1 archive-door Sys Door call:4->2 ;
+: archive->dir_find  2 archive-door Sys Door call:3->2 ;
+// actually returns 2 values, but we don't care about the latter
+: archive->file_read 3 archive-door Sys Door call:4->1 ;
+
+0x8f8c45677f9b9a08 0x1f5744c88b77e44e "threads" find-door
+: threads-door ! const ;
+: threads->spawn   0 threads-door Sys Door call:2->1 ;
+: threads->park    1 threads-door Sys Door call:0->0 ;
+: threads->unpark  2 threads-door Sys Door call:1->0 ;
+: threads->current 3 threads-door Sys Door call:0->1 ;
+
+
+: trace-num  #dup String natural  Sys log ;
+
+: string-as-range @dup String !address String len ;
+
+: panic-prefix @swap String concat Sys panic ;
+: archive-find
+	@dup string-as-range archive->dir_find
+	if #swap #sign-ext-8 #dup -1 = then "item not found: " panic-prefix end
+	@drop ;
+: archive-assert-xxx if <> then panic-prefix end @drop ;
+: archive-assert-file 0 "not a file: "      archive-assert-xxx ;
+: archive-assert-dir  1 "not a directory: " archive-assert-xxx ;
+: archive-find-file @dup archive-find archive-assert-file ;
+: archive-find-dir  @dup archive-find archive-assert-dir  ;
+: archive-read
+	#dup 0 1 0 archive->file_read
+	0 #swap #dup String !reserve #swap archive->file_read #drop
+	String !commit ;
+
+"looking for virtio-net" Sys log
+archive->root
+"got /" Sys log
+"driver"     archive-find-dir
+"got /driver/" Sys log
+"virtio-net" archive-find-file
+"got /driver/virtio-net" Sys log
+"reading /driver/virtio-net" Sys log
+archive-read
+"loading /driver/virtio-net" Sys log
+string-as-range 1 0 loader-elf->load
+
+#drop
+if #dup 0 = then "Failed to load virtio-net" Sys panic end
+"Starting virtio-net" Sys log
+0 threads->spawn
+if 0 <> then "[warn] failed to spawn thread for virtio-net" Sys log end
+
+: IO_DATA    0x60 ;
+: IO_STATUS  0x64 ;
+: IO_COMMAND 0x64 ;
+
+: STATUS_OUTPUT_FULL 0 ;
+: STATUS_INPUT_FULL  1 ;
+
+: TIMEOUT_MS 100 ;
+
+: ps2_read    IO_DATA    X86 Io in8  ;
+: ps2_write   IO_DATA    X86 Io out8 ;
+: ps2_status  IO_STATUS  X86 Io in8  ;
+: ps2_command IO_COMMAND X86 Io out8 ;
+
+// : ps2_status_testbit ps2_status #testbit ;
+// : ps2_input_full   STATUS_INPUT_FULL ps2_status_testbit ;
+// : ps2_output_full STATUS_OUTPUT_FULL ps2_status_testbit ;
+// : ps2_output_empty ps2_output_full #not ;
+
+: ps2_read_nowait ps2_read ;
+// : ps2_write IF ps2_input_full   THEN REPEAT ps2_write ;
+// : ps2_read  IF ps2_output_empty THEN REPEAT ps2_read ;
+
+: ps2_disable_port1 0xad ps2_command ;
+: ps2_disable_port2 0xa7 ps2_command ;
+: ps2_enable_port1  0xae ps2_command ;
+: ps2_enable_port2  0xa8 ps2_command ;
+: ps2_disable_ports ps2_disable_port1 ps2_disable_port2 ;
+: ps2_enable_ports  ps2_enable_port1  ps2_enable_port2  ;
+
+: ps2_write_keyboard ps2_write ;
+: ps2_write_mouse 0xd4 ps2_command ps2_write ;
+
+: ps2_get_config  0x20 ps2_command  ps2_read  ;
+: ps2_set_config  0x60 ps2_command  ps2_write ;
+
+: CTRL_CFG_PORT_1_INTERRUPT_ENABLED 1 0 #sl ;
+: CTRL_CFG_PORT_2_INTERRUPT_ENABLED 1 1 #sl ;
+: CTRL_CFG_PORT_1_TRANSLATION       1 6 #sl ;
+
+: ps2_init_config
+	ps2_get_config
+	CTRL_CFG_PORT_1_INTERRUPT_ENABLED #or
+	CTRL_CFG_PORT_2_INTERRUPT_ENABLED #or
+	CTRL_CFG_PORT_1_TRANSLATION #not #and
+	ps2_set_config ;
+
+: ps2_keyboard_init ;
+: ps2_mouse_init ;
+
+: ps2_init
+	ps2_disable_ports
+	ps2_init_config
+	ps2_enable_ports
+	// ps2_keyboard_init
+	// ps2_mouse_init
+	;
+
+// 0xee ps2_write
+// ps2_read
+
+ps2_init
+
+1 interrupt->LEVEL interrupt->map
+if 0 <> then "failed to map IRQ 1" Sys panic end
+: ps2_wait 1 interrupt->wait ;
+: ps2_done 1 interrupt->done ;
+
+"test panic" Sys panic
+
+if 1 then
+	ps2_wait
+	"Got an interrupt!!!" Sys log
+	ps2_read  String natural  Sys log
+	ps2_done
+repeat
+
+Sys exit

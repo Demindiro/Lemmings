@@ -1,4 +1,4 @@
-use crate::linux::{CStr, Stat};
+use crate::linux::Stat;
 use core::arch::asm;
 
 macro_rules! sys {
