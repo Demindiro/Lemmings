@@ -137,7 +137,7 @@ sys!(1 write(fd: i32, buf: *const u8, count: usize) -> isize);
 sys!(2 open(path: *const u8, flags: i32, mode: i32) -> i32);
 sys!(3 close(fd: i32) -> i32);
 sys!(4 stat(path: *const u8, buf: *mut Stat) -> i32);
-sys!(4 fstat(fd: i32, buf: *mut Stat) -> i32);
+sys!(5 fstat(fd: i32, buf: *mut Stat) -> i32);
 sys!(9 mmap(addr: *mut u8, len: usize, prot: u32, flags: u32, fd: i32, offset: u64) -> *mut u8);
 sys!(10 mprotect(addr: *mut u8, len: usize, prot: u32) -> i32);
 sys!(11 munmap(addr: *mut u8, len: usize) -> i32);
