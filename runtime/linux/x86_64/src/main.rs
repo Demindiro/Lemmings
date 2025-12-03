@@ -14,11 +14,22 @@ mod syscall;
 #[macro_use]
 mod sys;
 mod archive;
+mod elf;
 mod linux;
+mod page;
 
 fn load_init() {
-    let res = unsafe { syscall::open("init\0".as_ptr(), syscall::O_RDONLY, 0) };
-    dbg!(res);
+    let init = match archive::root()
+        .find("init")
+        .expect("no init program present in archive")
+    {
+        archive::Item::Dir(_) => panic!("init program should be a file, not a directory"),
+        archive::Item::File(x) => x,
+    };
+    let entry = elf::load(init.data()).expect("failed to load init ELF program");
+    let entry = unsafe { core::mem::transmute::<_, unsafe extern "sysv64" fn()>(entry) };
+    // SAFETY: pray
+    unsafe { (entry)() }
 }
 
 #[panic_handler]

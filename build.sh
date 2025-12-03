@@ -18,7 +18,7 @@ make -C IDL
 mkdir -p "$databin/driver"
 mkdir -p "$databin/service"
 
-if true
+if false
 then
 	(cd qemubios && cargo b --release -Zbuild-std=core --target ./x86_64-qemubios.json)
 	(cd runtime/kernel/x86_64 && ./build.sh)
@@ -31,4 +31,6 @@ then
 	./create_archive.py "$out/data.bin" "$databin"
 else
 	(cd runtime/linux/x86_64 && cargo b --release -Zbuild-std=core)
+	(cd interpreter && ./build.sh)
+	cp interpreter/example-linux.interpreter "$databin/interpreter.init"
 fi
