@@ -1,4 +1,7 @@
-use crate::syscall;
+use crate::{
+    door::{self, ApiId, Cookie, Table},
+    syscall,
+};
 use core::{
     fmt::{self, Write},
     ptr::NonNull,
@@ -95,14 +98,6 @@ struct SysFn(*const ());
 
 struct Stderr;
 
-// TODO add door module
-#[repr(transparent)]
-struct Table(NonNull<()>);
-#[repr(transparent)]
-struct Cookie(u64);
-#[repr(transparent)]
-struct ApiId(u128);
-
 #[repr(C)]
 struct Slice<T> {
     base: *const T,
@@ -182,7 +177,7 @@ unsafe extern "sysv64" fn log(msg: Slice<u8>) {
 }
 
 unsafe extern "sysv64" fn panic(msg: Slice<u8>) -> ! {
-    todo!();
+    todo!("handle panic: {}", unsafe { msg.as_str() });
 }
 
 /// Begin panicking.
@@ -227,7 +222,9 @@ unsafe extern "sysv64" fn door_list(cookie: Cookie) -> Tuple2<Option<Table>, Coo
 // XXX: u128 ought to be FFI-safe
 #[allow(improper_ctypes_definitions)]
 unsafe extern "sysv64" fn door_find(api: Option<ApiId>) -> Option<Table> {
-    todo!("fucken nice");
+    // somebody is going to screw up and pass 0, so always check
+    let api = api.expect("door_find: API ID may not be 0");
+    door::find(api)
 }
 
 unsafe extern "sysv64" fn door_register(table: Table) -> isize {
