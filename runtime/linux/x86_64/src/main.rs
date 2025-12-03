@@ -13,6 +13,8 @@
 mod syscall;
 #[macro_use]
 mod sys;
+#[macro_use]
+mod door;
 mod archive;
 mod elf;
 mod linux;
@@ -46,6 +48,7 @@ unsafe extern "C" fn entry(env: *const usize) {
     unsafe { linux::init(env) };
     unsafe { sys::init() };
     unsafe { archive::init() };
+    archive::door::register();
     load_init();
     todo!("RIP harambe");
 }
