@@ -19,7 +19,108 @@ use core::{
 
 static mut ROOT: MaybeUninit<Dir> = MaybeUninit::uninit();
 
-#[derive(Clone, Copy)]
+pub mod door {
+    use core::ptr::NonNull;
+    use lemmings_idl_archive::*;
+
+    door! {
+        [lemmings_idl_archive Archive "boot archive"]
+        root
+        dir_iter
+        dir_find
+        file_read
+    }
+
+    fn to_dir(dir: super::Dir) -> Dir {
+        Dir::from(dir.base.as_ptr() as u64)
+    }
+    fn from_dir(dir: Dir) -> super::Dir {
+        let base = NonNull::new(u64::from(dir) as _).expect("invalid dir ref");
+        super::Dir { base }
+    }
+    fn to_file(file: super::File) -> File {
+        File::from(file.data as *const _ as u64)
+    }
+    fn from_file(file: File) -> super::File {
+        let data = NonNull::new(u64::from(file) as _).expect("invalid file ref");
+        let data = unsafe { data.as_ref() };
+        super::File { data }
+    }
+
+    fn root(_: Root) -> Dir {
+        to_dir(super::root())
+    }
+
+    unsafe fn dir_iter(x: DirIter) -> FindResult {
+        let DirIter {
+            dir,
+            mut cookie,
+            name,
+        } = x;
+        let cookie = unsafe { cookie.0.as_mut() };
+        let Some((c, entry)) = from_dir(dir).iter_next(cookie.clone().into()) else {
+            return ItemNone {
+                stub: Stub::from(0),
+            }
+            .into();
+        };
+        cookie.0 = c;
+        let n = NonNull::from(entry.name.as_bytes());
+        unsafe { name.base.0.copy_from_nonoverlapping(n.cast(), n.len()) }
+        match entry.item {
+            super::Item::Dir(dir) => ItemDir { dir: to_dir(dir) }.into(),
+            super::Item::File(file) => ItemFile {
+                file: to_file(file),
+            }
+            .into(),
+        }
+    }
+
+    unsafe fn dir_find(x: DirFind) -> FindResult {
+        let DirFind { dir, name } = x;
+        let name =
+            unsafe { core::slice::from_raw_parts(name.base.0.cast().as_ptr(), name.len.into()) };
+        let name = unsafe { core::str::from_utf8_unchecked(name) };
+        //let name = unsafe { name.as_str() };
+        match from_dir(dir).find(name) {
+            None => ItemNone {
+                stub: Stub::from(0),
+            }
+            .into(),
+            Some(super::Item::Dir(dir)) => ItemDir { dir: to_dir(dir) }.into(),
+            Some(super::Item::File(file)) => ItemFile {
+                file: to_file(file),
+            }
+            .into(),
+        }
+    }
+
+    unsafe fn file_read(x: FileRead) -> ReadResult {
+        let FileRead { file, offset, out } = x;
+        let file = from_file(file);
+        let data = file
+            .data()
+            .get(u64::from(offset).try_into().expect("u64 == usize")..)
+            .unwrap_or(&[]);
+        if data.is_empty() {
+            return ReadResult {
+                bytes_to_end: FileLen::from(0),
+                out_base: out.base,
+            };
+        }
+        unsafe {
+            let n = usize::from(out.len).min(data.len());
+            let src = NonNull::from(&data[..n]);
+            out.base.0.copy_from_nonoverlapping(src.cast(), src.len());
+        }
+        ReadResult {
+            bytes_to_end: FileLen::from(u64::try_from(data.len()).expect("u64 == usize")),
+            out_base: out.base,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum Item {
     File(File),
     Dir(Dir),
@@ -30,9 +131,9 @@ pub struct Dir {
     base: NonNull<u8>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct File {
-    data: &'static [u8],
+    data: &'static RawDirEntry,
 }
 
 #[derive(Debug)]
@@ -46,9 +147,7 @@ struct RawDirEntry {
 
 #[derive(Debug)]
 struct DirEntry<'a> {
-    child_buf: NonNull<u8>,
-    child_len: usize,
-    is_dir: bool,
+    item: Item,
     name: &'a str,
 }
 
@@ -60,31 +159,28 @@ struct IterDir<'a> {
 
 impl Dir {
     pub fn find(&self, name: &str) -> Option<Item> {
-        self.entries()
-            .find(|x| x.name == name)
-            .map(|x| match x.is_dir {
-                true => Item::Dir(Dir { base: x.child_buf }),
-                false => Item::File(File {
-                    data: unsafe { slice::from_raw_parts(x.child_buf.as_ptr(), x.child_len) },
-                }),
-            })
+        self.entries().find(|x| x.name == name).map(|x| x.item)
     }
 
-    fn entries(&self) -> impl Iterator<Item = DirEntry<'_>> + '_ {
+    pub fn len(&self) -> usize {
+        self.len_entries().0
+    }
+
+    fn iter_next(&self, cookie: u64) -> Option<(u64, DirEntry<'static>)> {
+        let i = usize::try_from(cookie).ok()?;
         let (entries, names) = self.raw_entries();
-        entries.into_iter().map(move |e| {
-            let name = unsafe { e.name(names) };
-            let name = str::from_utf8(name).expect("UTF-8");
-            DirEntry {
-                child_buf: e.child_buf,
-                child_len: e.child_len,
-                is_dir: e.is_dir,
-                name,
-            }
-        })
+        let raw = entries.get(i)?;
+        Some((cookie + 1, unsafe { self.raw_to_entry(&raw, names) }))
     }
 
-    fn raw_entries(&self) -> (&[RawDirEntry], NonNull<u8>) {
+    fn entries<'a>(&'a self) -> impl Iterator<Item = DirEntry<'static>> + 'a {
+        let (entries, names) = self.raw_entries();
+        entries
+            .into_iter()
+            .map(move |x| unsafe { self.raw_to_entry(x, names) })
+    }
+
+    fn raw_entries(&self) -> (&'static [RawDirEntry], NonNull<u8>) {
         let (num, base) = self.len_entries();
         let entries = unsafe { slice::from_raw_parts(base.as_ptr(), num) };
         let names = unsafe { base.cast::<RawDirEntry>().add(num).cast() };
@@ -103,6 +199,22 @@ impl Dir {
         let base = unsafe { self.base.cast::<usize>().add(1) };
         (num, base.cast())
     }
+
+    unsafe fn raw_to_entry(
+        &self,
+        raw: &'static RawDirEntry,
+        names: NonNull<u8>,
+    ) -> DirEntry<'static> {
+        let name = unsafe { raw.name(names) };
+        let name = str::from_utf8(name).expect("UTF-8");
+        let item = match raw.is_dir {
+            true => Item::Dir(Dir {
+                base: raw.child_buf,
+            }),
+            false => Item::File(File { data: raw }),
+        };
+        DirEntry { item, name }
+    }
 }
 
 impl RawDirEntry {
@@ -116,7 +228,8 @@ impl RawDirEntry {
 
 impl File {
     pub fn data(&self) -> &'static [u8] {
-        self.data
+        let x = self.data;
+        unsafe { slice::from_raw_parts(x.child_buf.as_ptr(), x.child_len) }
     }
 }
 
