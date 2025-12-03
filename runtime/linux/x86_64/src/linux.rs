@@ -1,4 +1,4 @@
-use core::{fmt, slice};
+use core::{fmt, mem, slice};
 
 const AT_SYSINFO_EHDR: i32 = 33;
 
@@ -27,8 +27,35 @@ pub struct LinuxDirent64 {
     name: [u8; 0],
 }
 
+#[derive(Default)]
 #[repr(C)]
-pub struct Stat {}
+pub struct Stat {
+    pub dev: u64,
+    pub inode: u64,
+    pub num_links: u64,
+    pub mode: u32,
+    pub uid: u32,
+    pub gid: u32,
+    _pad: u32,
+    pub rdev: u64,
+    pub size: u64,
+    pub blksize: u64,
+    /// Always in terms of 512-byte blocks, regardless of [`blksize`].
+    pub blocks: u64,
+    pub accessed: StatTime,
+    pub modified: StatTime,
+    pub created: StatTime,
+    _reserved: [u64; 3],
+}
+
+const _: () = assert!(mem::size_of::<Stat>() == 0x90);
+
+#[derive(Default)]
+#[repr(C)]
+pub struct StatTime {
+    pub secs: u64,
+    pub nanos: u64,
+}
 
 impl CStr {
     pub fn as_ptr(&self) -> *const u8 {
