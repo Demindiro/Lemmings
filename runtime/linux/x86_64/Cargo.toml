@@ -2,3 +2,7 @@
 name = "lemmings-runtime-linux-x86_64"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+lemmings-elf = { path = "../../../lib/elf" }
+lemmings-x86_64 = { path = "../../../lib/x86_64" }
