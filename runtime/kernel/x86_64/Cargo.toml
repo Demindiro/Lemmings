@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 critical-section = { version = "1.2.0", features = ["restore-state-u32"] }
+lemmings-elf = { path = "../../../lib/elf" }
 lemmings-qemubios = { path = "../../../lib/qemubios" }
 lemmings-x86_64 = { path = "../../../lib/x86_64" }
 lemmings-tty = { path = "../../../lib/tty" }

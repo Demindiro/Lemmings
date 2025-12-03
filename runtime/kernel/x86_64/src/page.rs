@@ -61,13 +61,16 @@ pub type Virt = NonNull<u8>;
 
 #[derive(Debug)]
 pub struct OutOfMemory;
+#[derive(Debug)]
 pub struct OutOfVirtSpace;
 
+#[derive(Debug)]
 pub enum ReserveRegionError {
     OutOfMemory,
     OutOfVirtSpace,
 }
 
+#[derive(Debug)]
 pub enum AllocGuardedError {
     OutOfMemory,
     OutOfVirtSpace,

@@ -17,7 +17,7 @@ make -C IDL
 
 mkdir -p "$databin/driver"
 
-if 0
+if true
 then
 	(cd qemubios && cargo b --release -Zbuild-std=core --target ./x86_64-qemubios.json)
 	(cd runtime/kernel/x86_64 && ./build.sh)
