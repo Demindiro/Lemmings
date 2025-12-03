@@ -111,6 +111,7 @@ macro_rules! sys {
 
 pub const SIGABRT: i32 = 6;
 pub const O_RDONLY: i32 = 0o00;
+pub const PROT_NONE: u32 = 0;
 pub const PROT_R: u32 = 0x1;
 pub const PROT_W: u32 = 0x2;
 pub const PROT_X: u32 = 0x4;
@@ -118,6 +119,7 @@ pub const PROT_RW: u32 = PROT_R | PROT_W;
 pub const PROT_RX: u32 = PROT_R | PROT_X;
 pub const PROT_RWX: u32 = PROT_RW | PROT_X;
 pub const MAP_PRIVATE: u32 = 0x02;
+pub const MAP_FIXED: u32 = 0x10;
 pub const MAP_ANON: u32 = 0x20;
 
 // implement noreturn syscalls manually
