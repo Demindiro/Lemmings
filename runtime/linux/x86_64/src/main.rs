@@ -49,6 +49,7 @@ unsafe extern "C" fn entry(env: *const usize) {
     unsafe { sys::init() };
     unsafe { archive::init() };
     archive::door::register();
+    elf::door::register();
     load_init();
     todo!("RIP harambe");
 }
