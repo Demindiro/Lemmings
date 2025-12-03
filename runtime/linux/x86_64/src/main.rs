@@ -33,9 +33,7 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
 
 unsafe extern "C" fn entry(env: *const usize) {
     unsafe { linux::init(env) };
-    dbg!(linux::args());
-    dbg!(linux::env());
-    dbg!(linux::aux());
+    unsafe { sys::init() };
     unsafe { archive::init() };
     load_init();
     todo!("RIP harambe");

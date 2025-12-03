@@ -1,5 +1,9 @@
 use crate::syscall;
-use core::fmt::{self, Write};
+use core::{
+    fmt::{self, Write},
+    ptr::NonNull,
+    slice,
+};
 
 #[macro_export]
 macro_rules! log {
@@ -59,13 +63,54 @@ macro_rules! dbg {
     };
 }
 
+macro_rules! systable {
+    ($($id:literal $fn:ident)*) => {
+        static TABLE: [SysFn; systable!(+ $($fn)*)] = [
+            $(SysFn($fn as *const ()),)*
+        ];
+    };
+    (+) => { 0 };
+    (+ $f:ident $($fn:ident)*) => { 1+systable!(+ $($fn)*) };
+}
+
+systable! {
+    0 log
+    1 panic
+    2 panic_begin
+    3 panic_push
+    4 panic_end
+    5 door_list
+    6 door_find
+    7 door_register
+}
+
 const STDIN_FD: i32 = 0;
 const STDOUT_FD: i32 = 1;
 const STDERR_FD: i32 = 2;
 
 pub struct Log(());
 
+#[allow(dead_code)]
+struct SysFn(*const ());
+
 struct Stderr;
+
+// TODO add door module
+#[repr(transparent)]
+struct Table(NonNull<()>);
+#[repr(transparent)]
+struct Cookie(u64);
+#[repr(transparent)]
+struct ApiId(u128);
+
+#[repr(C)]
+struct Slice<T> {
+    base: *const T,
+    len: usize,
+}
+
+#[repr(C)]
+struct Tuple2<A, B>(A, B);
 
 impl Log {
     #[doc(hidden)]
@@ -87,10 +132,104 @@ impl Write for Stderr {
     }
 }
 
+impl Slice<u8> {
+    unsafe fn as_str(&self) -> &str {
+        let s = unsafe { slice::from_raw_parts(self.base, self.len) };
+        unsafe { core::str::from_utf8_unchecked(s) }
+    }
+}
+
+unsafe impl Sync for SysFn {}
+
 #[doc(hidden)]
 pub fn with_log<R, F>(f: F) -> R
 where
     F: FnOnce(Log) -> R,
 {
     (f)(Log(()))
+}
+
+#[allow(dead_code)]
+pub fn hexdump(data: &[u8]) {
+    with_log(|mut log| {
+        for b in data.chunks(32) {
+            for (i, b) in b.iter().enumerate() {
+                if i % 4 == 0 {
+                    let _ = write!(&mut log, " ");
+                }
+                let _ = write!(&mut log, "{b:02x}");
+            }
+            let _ = writeln!(&mut log);
+        }
+    });
+}
+
+#[inline]
+pub unsafe fn init() {
+    unsafe { lemmings_x86_64::set_gs(TABLE.as_ptr() as *mut _) };
+}
+
+/// # Safety
+///
+/// `msg_base` and `msg_len` must point to a valid UTF-8 string.
+unsafe extern "sysv64" fn log(msg: Slice<u8>) {
+    let msg = unsafe { msg.as_str() };
+    with_log(|mut log| {
+        log.prefix_time();
+        let _ = log.write_str(msg);
+        let _ = log.write_str("\n");
+    })
+}
+
+unsafe extern "sysv64" fn panic(msg: Slice<u8>) -> ! {
+    todo!();
+}
+
+/// Begin panicking.
+///
+/// This version allows formatting a panic message in multiple steps,
+/// which is useful for printing complex structures without preallocating a large buffer.
+///
+/// # Returns
+///
+/// A handle which must be used for [`panic_push`] and [`panic_end`]
+unsafe extern "sysv64" fn panic_begin() -> *const u8 {
+    todo!();
+}
+
+/// Push part of a panic message
+///
+/// # Returns
+///
+/// A new handle.
+///
+/// # Safety
+///
+/// - `panic_begin` must have been called first.
+/// - `msg` must point to a valid UTF-8 string.
+unsafe extern "sysv64" fn panic_push(_handle: *const u8, msg: Slice<u8>) -> *const u8 {
+    todo!();
+}
+
+/// Truly start panicking.
+///
+/// # Safety
+///
+/// - `panic_begin` must have been called first.
+unsafe extern "sysv64" fn panic_end(_handle: *const u8) -> ! {
+    todo!();
+}
+
+unsafe extern "sysv64" fn door_list(cookie: Cookie) -> Tuple2<Option<Table>, Cookie> {
+    todo!();
+}
+
+// XXX: u128 ought to be FFI-safe
+#[allow(improper_ctypes_definitions)]
+unsafe extern "sysv64" fn door_find(api: Option<ApiId>) -> Option<Table> {
+    todo!("fucken nice");
+}
+
+unsafe extern "sysv64" fn door_register(table: Table) -> isize {
+    todo!();
 }
