@@ -342,13 +342,25 @@ _panic_start:
 
 
 .macro _start_enter
+	# ensure we push an odd number of times for proper stack alignment
 	push rbp
+	push rbp
+	mov rbp, rsp
 	push rbx
+	push r12
+	push r13
+	push r14
+	push r15
 	mov [rip + rsp_start], rsp
 .endm
 .macro _start_exit
 	mov rsp, [rip + rsp_start]
+	pop r15
+	pop r14
+	pop r13
+	pop r12
 	pop rbx
+	pop rbp
 	pop rbp
 .endm
 
