@@ -1220,10 +1220,14 @@ dict_end Sys
 
 dict_begin Sys.Door
 	def find
+		push rbp
+		mov rbp, rsp
+		and rsp, ~15
 		num_pop rdi # high
 		num_peek rsi # low
 		syscall_door_find
 		num_replace rax
+		pop rbp
 	enddef
 
 .macro f argc:req npop:req args:vararg
