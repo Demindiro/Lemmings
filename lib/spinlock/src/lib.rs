@@ -5,6 +5,7 @@ use critical_section::CriticalSection;
 pub mod imp {
     use core::sync::atomic::{AtomicU8, Ordering};
 
+    #[derive(Default)]
     #[repr(transparent)]
     pub struct SpinLock {
         lock: AtomicU8,
@@ -44,6 +45,7 @@ pub mod imp {
     }
 }
 
+#[derive(Default)]
 pub struct SpinLock<T> {
     lock: imp::SpinLock,
     value: UnsafeCell<T>,
