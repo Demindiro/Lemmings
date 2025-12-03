@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 lemmings-elf = { path = "../../../lib/elf" }
 lemmings-idl-archive = { path = "../../../IDL/rust/archive" }
+lemmings-idl-loader-elf = { path = "../../../IDL/rust/loader-elf" }
 lemmings-x86_64 = { path = "../../../lib/x86_64" }
