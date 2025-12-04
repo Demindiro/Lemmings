@@ -110,7 +110,9 @@ struct Tuple2<A, B>(A, B);
 impl Log {
     #[doc(hidden)]
     pub fn prefix_time(&mut self) {
-        let _ = write!(self, "[TODO time] ");
+        let us = crate::time::Monotonic::now().micros();
+        let (s, us) = (us / 1_000_000, us % 1_000_000);
+        let _ = write!(self, "[{s:>5}.{us:06}] ");
     }
 }
 

@@ -19,6 +19,7 @@ mod archive;
 mod elf;
 mod linux;
 mod page;
+mod time;
 
 fn load_init() {
     let init = match archive::root()
@@ -46,6 +47,7 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
 
 unsafe extern "C" fn entry(env: *const usize) {
     unsafe { linux::init(env) };
+    unsafe { time::init() };
     unsafe { sys::init() };
     unsafe { archive::init() };
     archive::door::register();

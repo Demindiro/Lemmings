@@ -1,4 +1,4 @@
-use crate::linux::Stat;
+use crate::linux::{Stat, TimeSpec};
 use core::arch::asm;
 
 macro_rules! sys {
@@ -145,5 +145,7 @@ sys!(10 mprotect(addr: *mut u8, len: usize, prot: u32) -> i32);
 sys!(11 munmap(addr: *mut u8, len: usize) -> i32);
 sys!(39 getpid() -> i32);
 sys!(62 kill(pid: i32, signal: i32) -> i32);
+sys!(202 time(out: *mut u64) -> u64);
 sys!(217 getdents64(fd: i32, dirent: *mut usize, count: usize) -> i32);
+sys!(228 clock_gettime(id: u32, timespec: *mut TimeSpec) -> i32);
 sys!(257 openat(dfd: i32, path: *const u8, flags: i32, mode: i32) -> i32);
