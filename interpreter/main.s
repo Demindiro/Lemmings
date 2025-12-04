@@ -1282,7 +1282,41 @@ dict_begin Immediate
 		num_pop rax
 		call asm_num_push
 	enddef
+
+	defimm_as "RAW{" Immediate.raw_opcodes
+	2:	call raw_opcodes.read_digit
+		ifltz al, 3f
+		shl al, 4
+		push rax
+		call raw_opcodes.read_digit
+		pop rcx
+		assertgez al, "(! RAW{) expected hex digit"
+		or al, cl
+		ASM_BEGIN rcx
+		ASM_PUSH8 al
+		ASM_END
+		jmp 2b
+	3:
+	enddef
 dict_end Immediate
+
+raw_opcodes.read_digit:
+2:	call read_byte
+	ifeq al, '}', 4f
+	ifeq al, ' ', 2b
+	ifeq al, '\n', 2b
+	ifeq al, '\t', 2b
+	lea edx, [eax - '0']
+	ifltu dl, 10, 3f
+	or al, 040
+	sub al, 'a'
+	assertltu al, 6, "invalid hex digit"
+	add al, 10
+	ret
+3:	mov eax, edx
+	ret
+4:	mov eax, -1
+	ret
 
 
 dict_begin String
