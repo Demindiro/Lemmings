@@ -1,5 +1,8 @@
 "Hello interpreter!" Sys log
 
+// Linux-specific
+: syscall ! RAW{ 0f 05 } ;
+
 : find-door
 	Sys Door find
 	if #dup 0 = then
