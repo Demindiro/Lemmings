@@ -1,10 +1,21 @@
-use core::{fmt, mem, slice};
+mod vdso;
 
-const AT_SYSINFO_EHDR: i32 = 33;
+use crate::syscall;
+use core::{
+    fmt,
+    mem::{self, MaybeUninit},
+    slice,
+};
 
 static mut ARGS: &'static [&'static CStr] = &[];
 static mut ENV: &'static [&'static CStr] = &[];
-static mut AUX: &'static [AuxiliaryVector] = &[];
+
+static mut TIME: unsafe extern "C" fn(*mut u64) -> u64 = syscall_time;
+static mut CLOCK_GETTIME: unsafe extern "C" fn(u32, *mut TimeSpec) -> i32 = syscall_clock_gettime;
+
+pub const CLOCK_MONOTONIC: u32 = 1;
+
+const AT_SYSINFO_EHDR: i32 = 33;
 
 pub struct CStr(u8);
 
@@ -55,6 +66,13 @@ const _: () = assert!(mem::size_of::<Stat>() == 0x90);
 pub struct StatTime {
     pub secs: u64,
     pub nanos: u64,
+}
+
+#[derive(Default)]
+#[repr(C)]
+pub struct TimeSpec {
+    pub secs: u64,
+    pub nsecs: u32,
 }
 
 impl CStr {
@@ -160,9 +178,10 @@ pub fn env() -> &'static [&'static CStr] {
     unsafe { ENV }
 }
 
-pub fn aux() -> &'static [AuxiliaryVector] {
-    // SAFETY: nothing will write to AUX at this point
-    unsafe { AUX }
+pub fn clock_gettime(id: u32) -> Option<TimeSpec> {
+    let mut x = MaybeUninit::uninit();
+    let res = unsafe { (CLOCK_GETTIME)(id, x.as_mut_ptr()) };
+    (res >= 0).then(|| unsafe { x.assume_init() })
 }
 
 pub unsafe fn init(x: *const usize) {
@@ -193,12 +212,35 @@ unsafe fn collect_env(env: *const *const CStr) -> *const AuxiliaryVector {
     }
 }
 
-unsafe fn collect_aux(aux: *const AuxiliaryVector) {
-    let mut x = aux;
-    unsafe {
-        while x.read().ty != 0 {
-            x = x.add(1);
+unsafe fn collect_aux(mut aux: *const AuxiliaryVector) {
+    loop {
+        let x = unsafe { aux.read() };
+        if x.ty == 0 {
+            break;
         }
-        AUX = slice::from_raw_parts(aux, x.offset_from(aux) as usize);
+        aux = unsafe { aux.add(1) };
+        match x.ty {
+            0 => break,
+            self::AT_SYSINFO_EHDR => unsafe { load_vdso(x.val) },
+            _ => {}
+        }
     }
+}
+
+unsafe fn load_vdso(base: *const u8) {
+    let Some(base) = core::ptr::NonNull::new(base as *mut u8) else {
+        log!("no vDSO?");
+        return;
+    };
+    let tbl = unsafe { vdso::load(base) };
+    tbl.time.map(|x| unsafe { TIME = x });
+    tbl.clock_gettime.map(|x| unsafe { CLOCK_GETTIME = x });
+}
+
+unsafe extern "C" fn syscall_time(out: *mut u64) -> u64 {
+    unsafe { syscall::time(out) }
+}
+
+unsafe extern "C" fn syscall_clock_gettime(id: u32, out: *mut TimeSpec) -> i32 {
+    unsafe { syscall::clock_gettime(id, out) }
 }
