@@ -136,7 +136,6 @@ unsafe fn load_symtab(base: NonNull<u8>, symtab: &[[u8; SYMENT_SIZE]], strings: 
             },
             b"__vdso_clock_gettime" => unsafe {
                 let addr = base.byte_add(x.value);
-                dbg!(addr);
                 tbl.clock_gettime = Some(mem::transmute(addr));
             },
             _ => {}
