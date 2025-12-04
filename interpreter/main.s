@@ -459,8 +459,16 @@ _panic_start:
 	ASM_PUSH24 0x07c749
 	ASM_PUSH32 \x
 .endm
+.macro ASM_load_r15_r64 r:req
+	ASM_PUSH24 0x078b49 | (\r << 19)
+.endm
+.macro ASM_load_r15_r64dyn r:req
+	shl \r, 19
+	or \r, 0x078b49
+	ASM_PUSH24 \r
+.endm
 .macro ASM_load_r15_rax
-	ASM_PUSH24 0x078b49
+	ASM_load_r15_r64 0
 .endm
 .macro ASM_load_r14_rax
 	ASM_PUSH24 0x068b49
@@ -473,9 +481,19 @@ _panic_start:
 	ASM_sub_r15_imm8_c 8
 	ASM_store_r15_imm32 \x
 .endm
-.macro ASM_num_pop_rax
-	ASM_load_r15_rax
+.macro ASM_num_drop
 	ASM_add_r15_imm8_c 8
+.endm
+.macro ASM_num_pop_r64 r:req
+	ASM_load_r15_r64 \r
+	ASM_num_drop
+.endm
+.macro ASM_num_pop_r64dyn r:req
+	ASM_load_r15_r64dyn \r
+	ASM_num_drop
+.endm
+.macro ASM_num_pop_rax
+	ASM_num_pop_r64 0
 .endm
 .macro ASM_obj_push_rax
 	ASM_sub_r14_imm8_c 8
@@ -1299,6 +1317,35 @@ dict_begin Immediate
 		ASM_END
 		jmp 2b
 	3:
+	enddef
+
+	defimm_as "#POP" Immediate.pop_rax
+		# FIXME read word instead!
+		call read_word
+		ifeq ecx, 1, 3f
+		ifeq ecx, 2, 4f
+	2:	panic "(! #POP) invalid register"
+	3:	mov al, [rsi]
+		xor edx, edx
+		ifeq al, 'A', 5f
+		inc dl
+		ifeq al, 'C', 5f
+		inc dl
+		ifeq al, 'D', 5f
+		inc dl
+		ifne al, 'B', 2b
+	4:	mov ax, [rsi]
+		mov edx, 4
+		ifeq ax, 'S' | ('P' << 8), 5f
+		inc dl
+		ifeq ax, 'B' | ('P' << 8), 5f
+		inc dl
+		ifeq ax, 'S' | ('I' << 8), 5f
+		inc dl
+		ifne ax, 'D' | ('I' << 8), 2b
+	5:	ASM_BEGIN rax
+		ASM_num_pop_r64dyn edx
+		ASM_END
 	enddef
 dict_end Immediate
 

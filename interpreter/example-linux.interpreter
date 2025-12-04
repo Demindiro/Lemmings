@@ -2,6 +2,9 @@
 
 // Linux-specific
 : syscall ! RAW{ 0f 05 } ;
+: syscall:0 ! #POP A syscall ;
+: syscall:1 ! #POP A ! #POP DI syscall ;
+: sys-exit 60 syscall:1 ;
 
 : find-door
 	Sys Door find
@@ -22,6 +25,9 @@
 : archive->dir_find  2 archive-door Sys Door call:3->2 ;
 // actually returns 2 values, but we don't care about the latter
 : archive->file_read 3 archive-door Sys Door call:4->1 ;
+
+0 sys-exit
+
 
 0x8f8c45677f9b9a08 0x1f5744c88b77e44e "threads" find-door
 : threads-door ! const ;
