@@ -1179,6 +1179,11 @@ dict_begin _
 		shl qword ptr [NUM_STACK_HEAD], cl
 	enddef
 
+	def_as "#srl" int_srl
+		num_pop rcx
+		shr qword ptr [NUM_STACK_HEAD], cl
+	enddef
+
 	def_as "#or" int_or
 		num_pop rax
 		or qword ptr [NUM_STACK_HEAD], rax
