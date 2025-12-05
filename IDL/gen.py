@@ -153,7 +153,7 @@ class DoorBuilder:
     def add_type(self, name: str, ty: Type):
         assert type(name) is str
         assert isinstance(ty, Type)
-        assert name not in self.types
+        assert name not in self.types, f'{name} already defined'
         self.types[name] = ty
 
     def resolve_types(self):
