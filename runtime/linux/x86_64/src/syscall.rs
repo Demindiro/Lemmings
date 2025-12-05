@@ -121,6 +121,8 @@ pub const PROT_RWX: u32 = PROT_RW | PROT_X;
 pub const MAP_PRIVATE: u32 = 0x02;
 pub const MAP_FIXED: u32 = 0x10;
 pub const MAP_ANON: u32 = 0x20;
+pub const AF_INET: u16 = 2;
+pub const SOCK_STREAM: u32 = 1;
 
 // implement noreturn syscalls manually
 pub fn exit(status: i32) -> ! {
@@ -144,6 +146,8 @@ sys!(9 mmap(addr: *mut u8, len: usize, prot: u32, flags: u32, fd: i32, offset: u
 sys!(10 mprotect(addr: *mut u8, len: usize, prot: u32) -> i32);
 sys!(11 munmap(addr: *mut u8, len: usize) -> i32);
 sys!(39 getpid() -> i32);
+sys!(41 socket(family: u32, ty: u32, protocol: u32) -> i32);
+sys!(42 connect(fd: i32, addr: *const (), addrlen: usize) -> i32);
 sys!(62 kill(pid: i32, signal: i32) -> i32);
 sys!(202 time(out: *mut u64) -> u64);
 sys!(217 getdents64(fd: i32, dirent: *mut usize, count: usize) -> i32);
