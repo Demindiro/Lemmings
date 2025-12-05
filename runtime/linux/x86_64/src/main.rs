@@ -18,6 +18,7 @@ mod door;
 mod archive;
 mod elf;
 mod linux;
+mod net;
 mod page;
 mod time;
 
@@ -52,6 +53,7 @@ unsafe extern "C" fn entry(env: *const usize) {
     unsafe { archive::init() };
     archive::door::register();
     elf::door::register();
+    net::door::register();
     load_init();
     todo!("RIP harambe");
 }

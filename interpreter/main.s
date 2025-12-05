@@ -699,6 +699,7 @@ routine parse_number
 	assertne rdi, rsi, "expected digits after prefix"
 .Lparse_number.loop:
 	movzx edx, byte ptr [rdi]
+	ifeq dl, '_', 3f
 	lea ebx, [edx - '0']
 	ifltu bl, 10, 2f
 	or edx, 040
@@ -706,7 +707,7 @@ routine parse_number
 2:	assertlt bl, dl, "digit out of range for base"
 	mul rcx
 	add rax, rbx
-	inc rdi
+3:	inc rdi
 	ifne rdi, rsi .Lparse_number.loop
 .Lparse_number.end:
 	ret
@@ -1178,6 +1179,11 @@ dict_begin _
 		shl qword ptr [NUM_STACK_HEAD], cl
 	enddef
 
+	def_as "#srl" int_srl
+		num_pop rcx
+		shr qword ptr [NUM_STACK_HEAD], cl
+	enddef
+
 	def_as "#or" int_or
 		num_pop rax
 		or qword ptr [NUM_STACK_HEAD], rax
@@ -1230,6 +1236,7 @@ dict_begin Sys
 	enddef
 
 	def panic
+		stackframe_enter
 		obj_pop rdi
 		mov esi, [rdi - 8]
 		syscall_panic

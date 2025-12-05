@@ -14,6 +14,7 @@ static mut TIME: unsafe extern "C" fn(*mut u64) -> u64 = syscall_time;
 static mut CLOCK_GETTIME: unsafe extern "C" fn(u32, *mut TimeSpec) -> i32 = syscall_clock_gettime;
 
 pub const CLOCK_MONOTONIC: u32 = 1;
+pub const ECONNREFUSED: i32 = -111;
 
 const AT_SYSINFO_EHDR: i32 = 33;
 
