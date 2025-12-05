@@ -1,0 +1,125 @@
+door Tcp {
+	listen = Listen -> ListenResult
+	connect = Connect -> ConnectResult
+	accept = Listener -> NewConnection
+	recv = Recv -> RecvResult
+	recv_full = Recv -> RecvResult
+	send = Send -> SendResult
+	shutdown = Shutdown -> ShutdownResult
+	close_listener = Listener -> Void
+	close_connection = Connection -> Void
+}
+
+record Void {
+}
+
+record Listen {
+	addr = Addr
+	port = Port
+	backlog = BackLog
+}
+record Connect {
+	addr = Addr
+	port = Port
+	timeout = Timeout
+}
+record Recv {
+	socket = Connection
+	base = BufferBase
+	length = Length
+}
+record Send {
+	socket = Connection
+	base = DataBase
+	length = Length
+}
+record Shutdown {
+	socket = Connection
+	flags = ShutdownFlags
+}
+
+u32 Addr = 0 to 0xffff_ffff
+u16 Port = 0 to 0xffff
+
+record ListenOk {
+	socket = Listener
+	error = NoError
+}
+record ListenFail {
+	socket = Listener
+	error = ListenError
+}
+sum ListenResult = ListenOk | ListenFail
+
+record ConnectOk {
+	socket = Connection
+	error = NoError
+}
+record ConnectFail {
+	socket = Connection
+	error = ConnectError
+}
+sum ConnectResult = ConnectOk | ConnectFail
+
+record NewConnection {
+	socket = Connection
+	addr = Addr
+	port = Port
+}
+
+-- TODO inefficient ABI: gets crammed into rax instead of eax,dl
+record RecvOk {
+	length = Length
+	error = NoError
+}
+record RecvFail {
+	length = Length
+	error = RecvError
+}
+record SendOk {
+	length = Length
+	error = NoError
+}
+record SendFail {
+	length = Length
+	error = SendError
+}
+sum RecvResult = RecvOk | RecvFail
+sum SendResult = SendOk | SendFail
+
+sum ShutdownResult = NoError | ConnectionReset
+
+u8 ShutdownRecv = 0x1
+u8 ShutdownSend = 0x2
+u8 ShutdownRecvSend = 0x3
+sum ShutdownFlags = ShutdownRecv | ShutdownSend | ShutdownRecvSend
+
+u32 BackLog = 1 to 0xffff_ffff
+
+u32 Listener = 0 to 0xffff_ffff
+u32 Connection = 0 to 0xffff_ffff
+
+u32 TimeoutMs = 1 to 0xffff_ffff
+u32 NoTimeout = 0
+sum Timeout = NoTimeout | TimeoutMs
+
+uptr Length = 0 to address_max
+
+pointer DataBase = constant Byte
+pointer BufferBase = unique Byte
+u8 Byte = 0 to 0xff
+
+u8 NoError = 0
+u8 Other = 1
+u8 ConnectionReset = 2
+u8 AddressNotAvailable = 3
+u8 ConnectionRefused = 4
+u8 Unreachable = 5
+u8 TimedOut = 6
+u8 AddressInUse = 7
+u8 NetworkDown = 8
+u8 IsShutdown = 9
+sum ConnectError = AddressNotAvailable | ConnectionRefused | Unreachable | TimedOut | AddressInUse | NetworkDown | ConnectionReset | Other
+sum ListenError = AddressNotAvailable | AddressInUse | Other
+sum RecvError = ConnectionReset | IsShutdown
+sum SendError = ConnectionReset | IsShutdown
