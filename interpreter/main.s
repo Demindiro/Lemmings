@@ -1238,6 +1238,7 @@ dict_begin Sys
 	enddef
 
 	def panic
+		stackframe_enter
 		obj_pop rdi
 		mov esi, [rdi - 8]
 		syscall_panic
