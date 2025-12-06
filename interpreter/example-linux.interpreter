@@ -28,15 +28,19 @@
 
 0x807d46966f2e74d3 0x8423ac4e892e226a "IPv4 TCP" find-door
 : door ! const ;
-: ip4-tcp->listen  0 door Sys Door call:3->2 ;
 // socket, err gets crammed into rax, so split up
-: ip4-tcp->connect 1 door Sys Door call:3->1 #dup 0xffff_ffff #and #swap 32 #srl ;
-// : ip4-tcp->accept  2 door Sys Door call:1->3 ;
+: f door Sys Door call:3->1 #dup 0xffff_ffff #and #swap 32 #srl ;
+: ip4-tcp->listen  0 f ;
+: ip4-tcp->connect 1 f ;
+: ip4-tcp->accept  2 door Sys Door call:1->2 ;
 : ip4-tcp->recv      3 door Sys Door call:3->2 ;
 : ip4-tcp->recv_full 4 door Sys Door call:3->2 ;
 : ip4-tcp->send      5 door Sys Door call:3->2 ;
 // ... etc
+: ip4-tcp->close_listener   7 door Sys Door call:1->0 ;
+: ip4-tcp->close_connection 8 door Sys Door call:1->0 ;
 
+: connect-example
 0x7f_00_00_01 9999 0 ip4-tcp->connect
 
 if 0 <> then "Failed to connect to 127.0.0.1:9999" Sys panic end
@@ -45,6 +49,22 @@ if 0 <> then "Failed to connect to 127.0.0.1:9999" Sys panic end
 "Hello from Linux runtime!
 " @dup String !address String len
 ip4-tcp->send
+;
+
+0x7f_00_00_01 9999 5 ip4-tcp->listen
+if 0 <> then "Failed to listen on 127.0.0.1:9999" Sys panic end
+
+if 1 then
+	#dup ip4-tcp->accept
+	#drop
+	"HTTP/1.0 200 OK
+content-length: 14
+
+Hello, world!
+"	#dup @dup String !address String len ip4-tcp->send
+	#drop #drop
+	ip4-tcp->close_connection
+repeat
 
 0 sys-exit
 
