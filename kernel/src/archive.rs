@@ -77,6 +77,7 @@ pub mod door {
 
     unsafe fn file_read(x: FileRead) -> ReadResult {
         let FileRead { file, offset, out } = x;
+        debug!("archive::file_read {file:?} {offset:?} {out:?}");
         let file = from_file(file);
         let data = file
             .data()
