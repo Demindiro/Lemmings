@@ -91,14 +91,12 @@ systable! {
     7 door_register
 }
 
-pub struct Log<'cs> {
-    fb: framebuffer::Log<'static, 'cs>,
-}
+pub struct Log {}
 
 #[allow(dead_code)]
 struct SysFn(*const ());
 
-impl Log<'_> {
+impl Log {
     pub fn prefix_time(&mut self) {
         let us = crate::time::Monotonic::now().micros();
         let (s, us) = (us / 1_000_000, us % 1_000_000);
@@ -106,10 +104,9 @@ impl Log<'_> {
     }
 }
 
-impl Write for Log<'_> {
+impl Write for Log {
     #[inline]
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        let _ = self.fb.write_str(s);
         lemmings_qemubios::sys::print(s);
         Ok(())
     }
@@ -204,7 +201,7 @@ unsafe extern "sysv64" fn door_register(table: Table) -> isize {
 
 pub fn with_log<F, R>(f: F) -> R
 where
-    F: FnOnce(Log<'_>) -> R,
+    F: FnOnce(Log) -> R,
 {
     critical_section::with(|cs| f(logger(cs)))
 }
@@ -230,12 +227,11 @@ pub fn init<'a>(token: KernelEntryToken<'a>) -> KernelEntryToken<'a> {
     token
 }
 
-fn logger(cs: CriticalSection<'_>) -> Log<'_> {
-    let fb = framebuffer::log(cs);
-    Log { fb }
+fn logger(cs: CriticalSection<'_>) -> Log {
+    Log {}
 }
 
-fn panic_halt(cs: CriticalSection<'_>, mut log: Log<'_>) -> ! {
+fn panic_halt(cs: CriticalSection<'_>, mut log: Log) -> ! {
     let _ = log.write_char('\n');
     drop(log);
     PANICKED_THREADS.lock(cs).enqueue(cs, thread::current());
