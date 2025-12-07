@@ -273,6 +273,8 @@ impl Thread {
                 // so any changes made to the thread will be visible before this store.
                 "mov byte ptr [{lock}], {UNLOCK}",
                 "mov rsp, {sp}",
+                // Likewise for RBP as for RDI: it'll get restored if not expected.
+                "xor ebp, ebp",
                 "jmp {pc}",
                 "2:",
                 "cld",
