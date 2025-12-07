@@ -179,11 +179,14 @@ pub fn load(file: &[u8]) -> Result<Entry, LoadError> {
     if entry >= virt_size {
         return Err(EntryOutOfBounds);
     }
+    let virt_base = page::reserve_region(virt_size.try_into().map_err(|_| VirtualSizeZero)?)?;
     let mapper = ElfMapper {
-        virt_base: page::reserve_region(virt_size.try_into().map_err(|_| VirtualSizeZero)?)?,
+        virt_base,
         file,
         dyn_rela,
     };
+    let va = virt_base.addr().get();
+    log!("elf: reserving {va:#x}-{:#x}", va + virt_size);
     mapper.check_segments(ph())?;
     mapper.alloc_segments(ph())?;
     mapper.copy_segments(ph());
