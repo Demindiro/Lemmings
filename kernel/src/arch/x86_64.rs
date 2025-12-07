@@ -317,7 +317,7 @@ impl<const N: usize, const WORDS: usize> BitArray<N, WORDS> {
 
 pub fn map_msi() -> Result<Msi, OutOfVectors> {
     let vector = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).alloc_vector())?;
-    debug!("map_msi {vector:?}");
+    log!("msi: allocated vector {}", vector.0);
     Ok(Msi {
         data: vector.into(),
         address: apic::local::DEVICE_LAPIC_ADDRESS.into(),
