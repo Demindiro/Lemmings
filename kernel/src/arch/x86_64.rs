@@ -413,7 +413,17 @@ unsafe extern "C" fn page_fault() {
     }
     extern "sysv64" fn handler(rip: unsafe extern "C" fn(), error_code: u32) {
         let addr = lemmings_x86_64::cr2::get();
-        panic!("Page fault! (rip: {rip:?}, code: {error_code:#08x}, address: {addr:#016x})");
+        log!("Page fault! (rip: {rip:?}, code: {error_code:#08x}, address: {addr:#016x})");
+        let mut fp = lemmings_x86_64::frame_pointer();
+        for i in 0.. {
+            if fp.is_null() {
+                break;
+            }
+            let func = unsafe { fp.add(1).read() };
+            log!("{i:>4}: {func:?} ({fp:?})");
+            fp = unsafe { fp.read().cast() };
+        }
+        todo!("resolve page fault");
     }
 }
 
