@@ -361,7 +361,9 @@ fn init_idt() {
     let idt = unsafe { &mut *(&raw mut IDT) };
 
     let ist1 = |f| IdtEntry::new(Gdt::KERNEL_CS, f, Ist::N1);
+    idt.set_handler(idt::nr::BREAKPOINT, breakpoint as _);
     idt.set(idt::nr::DOUBLE_FAULT, ist1(double_fault as _));
+    idt.set_handler(idt::nr::GP_FAULT, general_protection_fault as _);
     idt.set_handler(idt::nr::PAGE_FAULT, page_fault as _);
     idt.set_handler(VECTOR_TIMER, timer_handler as _);
     for i in VECTOR_STUB_OFFSET..=u8::MAX {
@@ -387,8 +389,16 @@ fn init_apic() {
     apic.enable();
 }
 
+extern "sysv64" fn breakpoint() {
+    panic!("Breakpoint!");
+}
+
 extern "sysv64" fn double_fault() {
     panic!("Double fault!");
+}
+
+extern "sysv64" fn general_protection_fault() {
+    panic!("Gemeral protection fault!");
 }
 
 #[naked]
