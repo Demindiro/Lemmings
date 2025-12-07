@@ -501,6 +501,8 @@ routine asm_obj_push
 routine _start
 	_start_enter
 
+	xor FLAGS, FLAGS
+
 	lea NUM_STACK_HEAD, [rip + num_stack.end]
 	lea OBJ_STACK_HEAD, [rip + obj_stack.end]
 	lea OBJ_HEAP_HEAD, [rip + obj_heap]
