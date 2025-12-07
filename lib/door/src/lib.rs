@@ -12,7 +12,7 @@ use core::{
 macro_rules! log {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        let _ = write!(Log::new(), $($arg)*);
+        let _ = write!($crate::Log::new(), $($arg)*);
     }};
 }
 
