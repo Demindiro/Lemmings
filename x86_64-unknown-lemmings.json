@@ -33,6 +33,7 @@
   "stack-probes": {
     "kind": "inline"
   },
+  "frame-pointer": "always",
   "relocation-model": "pie",
   "crt-static-respected": true,
   "static-position-independent-executables": true
