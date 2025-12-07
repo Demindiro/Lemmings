@@ -23,14 +23,15 @@ macro_rules! dbg {
     // `$val` expression could be a block (`{ .. }`), in which case the `eprintln!`
     // will be malformed.
     () => {
-        $crate::log!("[{}:{}:{}]", file!(), line!(), column!())
+        $crate::log!("[{}:{}:{}:{}]", env!("CARGO_CRATE_NAME"), file!(), line!(), column!())
     };
     ($val:expr $(,)?) => {
         // Use of `match` here is intentional because it affects the lifetimes
         // of temporaries - https://stackoverflow.com/a/48732525/1063961
         match $val {
             tmp => {
-                $crate::log!("[{}:{}:{}] {} = {:#?}",
+                $crate::log!("[{}:{}:{}:{}] {} = {:#?}",
+                    env!("CARGO_CRATE_NAME"),
                     file!(),
                     line!(),
                     column!(),
