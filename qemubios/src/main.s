@@ -151,6 +151,7 @@ fwcfg_has_dma:
 	lea rdi, [rip + boot_entry_info]
 	lea rsi, [rip + sys]
 	movabs rdx, 'L' | ('e' << 8) | ('m' << 16) | ('m' << 24) | ('i' << 32) | ('n' << 40) | ('g' << 48) | ('s' << 56)
+	xor ebp, ebp
 	jmp rax
 
 # IF=0, DF=0
