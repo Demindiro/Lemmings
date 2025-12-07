@@ -364,7 +364,7 @@ fn init_idt() {
     idt.set_handler(idt::nr::BREAKPOINT, breakpoint as _);
     idt.set(idt::nr::DOUBLE_FAULT, ist1(double_fault as _));
     idt.set_handler(idt::nr::GP_FAULT, general_protection_fault as _);
-    idt.set_handler(idt::nr::PAGE_FAULT, page_fault as _);
+    idt.set(idt::nr::PAGE_FAULT, ist1(page_fault as _));
     idt.set_handler(VECTOR_TIMER, timer_handler as _);
     for i in VECTOR_STUB_OFFSET..=u8::MAX {
         unsafe {
