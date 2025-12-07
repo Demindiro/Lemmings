@@ -703,7 +703,7 @@ routine read_archive.read_word
 	ifeqz rax, .Lread_archive.eof
 	mov rdi, rdx
 	mov rsi, rdx
-	lea rbp, [rdx + rax]
+	lea r8, [rdx + rax]
 .Lread_archive.read_word.loop:
 2:	movzx eax, byte ptr [rdi]
 	ifeq al, ' ', .Lread_archive.read_word.end
@@ -713,7 +713,7 @@ routine read_archive.read_word
 	ifeq al, ''', .Lread_archive.read_word.string
 	ifeq al, '`', .Lread_archive.read_word.string
 	inc rdi
-	ifne rdi, rbp, 2b
+	ifne rdi, r8, 2b
 .Lread_archive.read_word.end:
 	# TODO check if at 128 byte limit
 	mov ecx, edi
@@ -723,12 +723,12 @@ routine read_archive.read_word
 	mov [rsi - 8], ecx
 	ret
 .Lread_archive.read_word.string:
-	assertne rdi, rbp, "TODO unterminated string"
+	assertne rdi, r8, "TODO unterminated string"
 	inc rdi
 2:	movzx edx, byte ptr [rdi]
 	inc rdi
 	ifne al, dl, 2b
-	ifeq rdi, rbp, .Lread_archive.read_word.end
+	ifeq rdi, r8, .Lread_archive.read_word.end
 	jmp .Lread_archive.read_word.loop
 .Lread_archive.eof:
 	xor esi, esi
