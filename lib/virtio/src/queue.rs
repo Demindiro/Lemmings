@@ -1,5 +1,8 @@
 //! Implementation of **split** virtqueues.
 
+// FIXME this queue implementation does NOT use atomics properly!!
+// We MUST fix this!
+
 use crate::{PhysAddr, PhysRegion};
 use core::{
     cell::Cell,
@@ -261,6 +264,8 @@ impl<'a> Queue<'a> {
             let mut descr_index = u32::from(ring[usize::from(index & self.mask)].index) as u16;
             let base = table[usize::from(descr_index)].address.get().into();
             let size = table[usize::from(descr_index)].length.get().into();
+            // FIXME blatant leak when using chained descriptors
+            // this code... I was ignorant
             callback(Token(descr_index.into()), PhysRegion { base, size });
             loop {
                 let descr = &table[usize::from(descr_index)];
