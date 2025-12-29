@@ -62,6 +62,9 @@ def emit_ffi(outf, idl):
     def is_empty(name):
         ty = idl.types[name]
         return type(ty) is gen.RecordType and len(ty.members) == 0
+    def is_void(name):
+        # be defensive just in case
+        return name == 'Void' and is_empty(name)
     def is_bool(name):
         if name != 'Bool':
             return False
@@ -75,6 +78,24 @@ def emit_ffi(outf, idl):
         if not all(type(x) is gen.U8Type and x.start + 1 == x.until for x in (a, b)):
             return False
         return a.start == 0 and b.start == 1
+
+    def ffi_name(name, macro) -> str:
+        if is_bool(name):
+            return 'bool'
+        return name
+    def should_unpack(name) -> bool:
+        ty = idl.types[name]
+        if type(ty) is gen.SumType:
+            return should_unpack(next(iter(ty.variants)))
+        return type(ty) is gen.RecordType and not is_void(name)
+    def sysv_splat_params(name, *, macro = False) -> str:
+        if should_unpack(name):
+            ty = idl.types[name]
+            return ', '.join(f'{tr(m_name)}: {ffi_name(m_ty, macro)}' for m_name, m_ty in ty.members.items() if not is_empty(m_ty))
+        return f'x: {ffi_name(name, macro)}' if not is_empty(name) else ''
+    def sysv_splat_ret(name, *, macro = False) -> str:
+        return '' if is_empty(name) else f'-> {ffi_name(name, macro)}'
+
 
     def newtype(name, wrap):
         out('#[derive(Clone, Copy)]')
@@ -147,7 +168,9 @@ def emit_ffi(outf, idl):
             del expr
 
     def emit_routine(name, ty):
-        newtype(name, f'Option<unsafe extern "sysv64" fn()>')
+        args = sysv_splat_params(ty.input)
+        ret = sysv_splat_ret(ty.output)
+        newtype(name, f'Option<unsafe extern "sysv64" fn({args}){ret}>')
         with Impl(name):
             with Fn('is_valid', f'self', 'bool', dead_code = True):
                 out('self.0.is_some()')
@@ -424,7 +447,9 @@ def emit(outf, idl):
     def emit_routine(name, ty):
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
-        out(f'pub struct {name}(pub unsafe extern "sysv64" fn());')
+        args = sysv_splat_params(ty.input)
+        ret = sysv_splat_ret(ty.output)
+        out(f'pub struct {name}(pub unsafe extern "sysv64" fn({args})){ret};')
         with Impl(name):
             with Fn('from_ffi', f'x: ffi::{name}', 'Self'):
                 out('Self(x.0.expect("function pointer is null"))')
