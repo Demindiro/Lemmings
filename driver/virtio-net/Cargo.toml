@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+critical-section = { version = "1.2.0", features = ["restore-state-u32"] }
+lemmings-allocator = { path = "../../lib/allocator" }
+lemmings-idl-ethernet = { path = "../../IDL/rust/ethernet" }
 lemmings-idl-pci = { path = "../../IDL/rust/pci" }
-lemmings-idl-allocator = { path = "../../IDL/rust/allocator" }
 lemmings-door = { path = "../../lib/door" }
 lemmings-pci = { path = "../../lib/pci" }
+lemmings-spinlock = { path = "../../lib/spinlock" }
 lemmings-virtio-net = { path = "../../lib/virtio-net" }
-smoltcp = { version = "0.12.0", default-features = false, features = ["medium-ethernet", "proto-ipv4", "socket-dhcpv4", "socket-tcp", "socket-udp"] }
 
 [profile.release]
 lto = "fat"
