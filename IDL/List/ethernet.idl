@@ -68,10 +68,9 @@ record NoPacket {
 pointer PacketBase = unique PacketBuffer
 null NoPacketBase = PacketBase
 -- Ethernet requires the packet length to be at least 64 bytes.
---
--- The first 18 bytes are used for the header, requiring at minimum
--- 46 bytes of data.
-u16 PacketLength = 64 to 0xffff
+-- However, the driver can easily fix this up if necessary
+-- so it is not enforced here.
+u16 PacketLength = 0 to 0xffff
 
 record PacketBuffer {
 }
