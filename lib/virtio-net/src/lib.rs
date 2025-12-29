@@ -273,14 +273,15 @@ impl<'a> Device<'a> {
         // TODO check device status to ensure features were enabled correctly.
 
         // SAFETY: The caller guarantees dma_alloc returns valid physical addresses.
-        let mut create_queue = |queue_idx| unsafe {
-            queue::Queue::<'a>::new(dev.common, queue_idx, 8, msix.receive_queue, &mut dma_alloc)
-                .map_err(|e| match e {
+        let mut create_queue = |queue_idx, msix_nr| unsafe {
+            queue::Queue::<'a>::new(dev.common, queue_idx, 8, msix_nr, &mut dma_alloc).map_err(
+                |e| match e {
                     queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
-                })
+                },
+            )
         };
-        let rx_queue = create_queue(0)?;
-        let tx_queue = create_queue(1)?;
+        let rx_queue = create_queue(0, msix.receive_queue)?;
+        let tx_queue = create_queue(1, msix.transmit_queue)?;
 
         dev.common.device_status.set(
             CommonConfig::STATUS_ACKNOWLEDGE
