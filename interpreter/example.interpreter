@@ -76,6 +76,26 @@ if #dup 0 = then "Failed to load virtio-net" Sys panic end
 0 threads->spawn
 if 0 <> then "[warn] failed to spawn thread for virtio-net" Sys log end
 
+
+"looking for net" Sys log
+archive->root
+"got /" Sys log
+"service"     archive-find-dir
+"got /service/" Sys log
+"net" archive-find-file
+"got /service/net" Sys log
+"reading /service/net" Sys log
+archive-read
+"loading /service/net" Sys log
+string-as-range 1 0 loader-elf->load
+
+#drop
+if #dup 0 = then "Failed to load net" Sys panic end
+"Starting net" Sys log
+0 threads->spawn
+if 0 <> then "[warn] failed to spawn thread for net" Sys log end
+
+
 : IO_DATA    0x60 ;
 : IO_STATUS  0x64 ;
 : IO_COMMAND 0x64 ;
@@ -144,7 +164,7 @@ if 0 <> then "failed to map IRQ 1" Sys panic end
 : ps2_wait 1 interrupt->wait ;
 : ps2_done 1 interrupt->done ;
 
-"test panic" Sys panic
+// "test panic" Sys panic
 
 if 1 then
 	ps2_wait
