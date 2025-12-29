@@ -58,13 +58,11 @@ record Packet {
 	-- and must not be used for data.
 	base = PacketBase
 	length = PacketLength
-	capacity = PacketLength
 }
 
 record NoPacket {
 	base = NoPacketBase
 	length = PacketLength
-	capacity = PacketLength
 }
 
 pointer PacketBase = unique PacketBuffer
