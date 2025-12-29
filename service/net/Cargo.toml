@@ -1,0 +1,17 @@
+[package]
+name = "lemmings-service-net"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+critical-section = { version = "1.2.0", features = ["restore-state-u32"] }
+lemmings-allocator = { path = "../../lib/allocator" }
+lemmings-door = { path = "../../lib/door" }
+lemmings-idl-ethernet = { path = "../../IDL/rust/ethernet" }
+lemmings-idl-thread = { path = "../../IDL/rust/thread" }
+lemmings-spinlock = { path = "../../lib/spinlock" }
+smoltcp = { version = "0.12.0", default-features = false, features = ["medium-ethernet", "proto-ipv4", "socket-dhcpv4", "socket-tcp", "socket-udp"] }
+heapless = "0.8.0"
+
+[profile.release]
+lto = "fat"
