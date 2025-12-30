@@ -1,0 +1,8 @@
+[package]
+name = "lemmings-allocator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lemmings-door = { path = "../../lib/door" }
+lemmings-idl-allocator = { path = "../../IDL/rust/allocator" }

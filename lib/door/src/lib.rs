@@ -12,7 +12,7 @@ use core::{
 macro_rules! log {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        let _ = write!(Log::new(), $($arg)*);
+        let _ = write!($crate::Log::new(), $($arg)*);
     }};
 }
 
@@ -23,14 +23,15 @@ macro_rules! dbg {
     // `$val` expression could be a block (`{ .. }`), in which case the `eprintln!`
     // will be malformed.
     () => {
-        $crate::log!("[{}:{}:{}]", file!(), line!(), column!())
+        $crate::log!("[{}:{}:{}:{}]", env!("CARGO_CRATE_NAME"), file!(), line!(), column!())
     };
     ($val:expr $(,)?) => {
         // Use of `match` here is intentional because it affects the lifetimes
         // of temporaries - https://stackoverflow.com/a/48732525/1063961
         match $val {
             tmp => {
-                $crate::log!("[{}:{}:{}] {} = {:#?}",
+                $crate::log!("[{}:{}:{}:{}] {} = {:#?}",
+                    env!("CARGO_CRATE_NAME"),
                     file!(),
                     line!(),
                     column!(),
@@ -193,29 +194,21 @@ pub struct Log {
     buf: [u8; 127],
 }
 
-pub struct UntypedTable;
-
 #[derive(Clone, Copy)]
-pub struct Door<'a, T = UntypedTable> {
-    table: NonNull<T>,
+pub struct Door<'a> {
+    table: NonNull<()>,
     _marker: PhantomData<&'a ()>,
 }
 
 struct Panic(*const u8);
 
-impl<'a, T> Door<'a, T> {
+impl<'a> Door<'a> {
     pub fn api_id(&self) -> ApiId {
         unsafe { self.table.cast::<ApiId>().read() }
     }
 
     pub fn name(&self) -> &'a str {
         unsafe { self.table.cast::<ApiId>().add(1).cast::<&'a str>().as_ref() }
-    }
-}
-
-impl<'a, T> Door<'a, T> {
-    pub fn get(&self) -> &'a T {
-        unsafe { self.table.as_ref() }
     }
 }
 
@@ -301,7 +294,7 @@ impl fmt::Debug for ApiId {
     }
 }
 
-impl<T> fmt::Debug for Door<'_, T> {
+impl fmt::Debug for Door<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(stringify!(Door))
             .field("api", &self.api_id())
@@ -343,29 +336,27 @@ pub fn door_list(cookie: Cookie) -> Option<(Door<'static>, Cookie)> {
     let a = cookie.0;
     let [x, y] = unsafe { ffi::syscall_1_2::<{ sys::DOOR_LIST }>(a) };
     let _marker = PhantomData;
-    NonNull::new(x as *mut UntypedTable)
+    NonNull::new(x as *mut ())
         .map(|table| Door { table, _marker })
         .map(|x| (x, Cookie(y)))
 }
 
 #[inline(always)]
-pub fn door_find<T>() -> Option<Door<'static, T>>
+pub fn door_find<T>() -> Option<&'static T>
 where
     T: lemmings_idl::Api,
 {
     let [a, b] = ffi::api_to_args(Some(ApiId(T::ID)));
     let x = unsafe { ffi::syscall_2_1::<{ sys::DOOR_FIND }>(a, b) };
-    let _marker = PhantomData;
-    NonNull::new(x as *mut T).map(|table| Door { table, _marker })
+    NonNull::new(x as *mut T).map(|x| unsafe { x.as_ref() })
 }
 
 /// # Safety
 ///
 /// `table` must be valid.
 #[inline(always)]
-pub unsafe fn door_register<T>(door: Door<'static, T>) -> Result<(), HallwayIsFull> {
-    let Door { table, .. } = door;
-    let a = table.as_ptr() as u64;
+pub unsafe fn door_register<T>(door: &'static T) -> Result<(), HallwayIsFull> {
+    let a = door as *const T as u64;
     let x = unsafe { ffi::syscall_1_1::<{ sys::DOOR_REGISTER }>(a) };
     (x == 0).then_some(()).ok_or(HallwayIsFull)
 }

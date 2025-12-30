@@ -62,6 +62,40 @@ def emit_ffi(outf, idl):
     def is_empty(name):
         ty = idl.types[name]
         return type(ty) is gen.RecordType and len(ty.members) == 0
+    def is_void(name):
+        # be defensive just in case
+        return name == 'Void' and is_empty(name)
+    def is_bool(name):
+        if name != 'Bool':
+            return False
+        ty = idl.types[name]
+        if type(ty) is not gen.SumType or len(ty.variants) != 2:
+            return False
+        a, b = sorted(ty.variants)
+        if (a, b) != ('False', 'True'):
+            return False
+        a, b = idl.types[a], idl.types[b]
+        if not all(type(x) is gen.U8Type and x.start + 1 == x.until for x in (a, b)):
+            return False
+        return a.start == 0 and b.start == 1
+
+    def ffi_name(name, macro) -> str:
+        if is_bool(name):
+            return 'bool'
+        return name
+    def should_unpack(name) -> bool:
+        ty = idl.types[name]
+        if type(ty) is gen.SumType:
+            return should_unpack(next(iter(ty.variants)))
+        return type(ty) is gen.RecordType and not is_void(name)
+    def sysv_splat_params(name, *, macro = False) -> str:
+        if should_unpack(name):
+            ty = idl.types[name]
+            return ', '.join(f'{tr(m_name)}: {ffi_name(m_ty, macro)}' for m_name, m_ty in ty.members.items() if not is_empty(m_ty))
+        return f'x: {ffi_name(name, macro)}' if not is_empty(name) else ''
+    def sysv_splat_ret(name, *, macro = False) -> str:
+        return '' if is_empty(name) else f'-> {ffi_name(name, macro)}'
+
 
     def newtype(name, wrap):
         out('#[derive(Clone, Copy)]')
@@ -124,18 +158,26 @@ def emit_ffi(outf, idl):
         out(f'#[repr(C)]')
         with Scope(f'pub struct {name}'):
             for m_name, m_ty in ty.members.items():
-                out(f'pub {tr(m_name)}: {m_ty},')
+                if not is_empty(m_ty):
+                    out(f'pub {tr(m_name)}: {m_ty},')
         with Impl(name):
-            with Fn('is_valid', '&self', 'bool', dead_code = True):
-                out(' && '.join(f'self.{m_name}.is_valid()' for m_name, m_ty in members()))
+            expr = ' && '.join(f'self.{m_name}.is_valid()' for m_name, m_ty in members() if not is_empty(m_ty))
+            if expr:
+                with Fn('is_valid', '&self', 'bool', dead_code = True):
+                    out(expr)
+            del expr
 
     def emit_routine(name, ty):
-        newtype(name, f'Option<unsafe extern "sysv64" fn()>')
+        args = sysv_splat_params(ty.input)
+        ret = sysv_splat_ret(ty.output)
+        newtype(name, f'Option<unsafe extern "sysv64" fn({args}){ret}>')
         with Impl(name):
             with Fn('is_valid', f'self', 'bool', dead_code = True):
                 out('self.0.is_some()')
 
     def emit_sum(name, ty):
+        if is_bool(name):
+            return
         out(f'#[derive(Clone, Copy)]')
         out(f'#[repr(C)]')
         with Scope(f'pub union {name}'):
@@ -170,6 +212,7 @@ def emit_ffi(outf, idl):
         for name, ty in idl.types.items():
             if is_empty(name):
                 # do emit for pointers and stuff
+                out(f'#[derive(Clone, Copy)]')
                 out(f'pub struct {name};')
                 continue
             vtbl[type(ty)](name, ty)
@@ -232,6 +275,19 @@ def emit(outf, idl):
     def is_void(name):
         # be defensive just in case
         return name == 'Void' and is_empty(name)
+    def is_bool(name):
+        if name != 'Bool':
+            return False
+        ty = idl.types[name]
+        if type(ty) is not gen.SumType or len(ty.variants) != 2:
+            return False
+        a, b = sorted(ty.variants)
+        if (a, b) != ('False', 'True'):
+            return False
+        a, b = idl.types[a], idl.types[b]
+        if not all(type(x) is gen.U8Type and x.start + 1 == x.until for x in (a, b)):
+            return False
+        return a.start == 0 and b.start == 1
     def is_unit(name):
         ty = idl.types[name]
         if type(ty) is gen.NullType:
@@ -239,12 +295,16 @@ def emit(outf, idl):
         if isinstance(ty, gen.IntegerType):
             if ty.start + 1 == ty.until:
                 return True
+        if type(ty) is gen.RecordType and len(ty.members) == 0:
+            return True
         return False
 
     def ffi_name(name, macro) -> str:
+        if is_bool(name):
+            return 'bool'
         return f'{"$crate::" if macro else ""}ffi::{name}'
     def unpack_record_members(ty, *, prefix = '') -> str:
-        return ", ".join(f"{tr(m_name)}" for m_name in ty.members)
+        return ", ".join(f"{tr(m_name)}" for m_name, m_ty in ty.members.items() if not is_empty(m_ty))
     def unpack_record_pattern(name, ty) -> str:
         return f'{name} {{ {unpack_record_members(ty)} }}'
     def should_unpack(name) -> bool:
@@ -255,7 +315,7 @@ def emit(outf, idl):
     def sysv_splat_params(name, *, macro = False) -> str:
         if should_unpack(name):
             ty = idl.types[name]
-            return ', '.join(f'{tr(m_name)}: {ffi_name(m_ty, macro)}' for m_name, m_ty in ty.members.items())
+            return ', '.join(f'{tr(m_name)}: {ffi_name(m_ty, macro)}' for m_name, m_ty in ty.members.items() if not is_empty(m_ty))
         return f'x: {ffi_name(name, macro)}' if not is_empty(name) else ''
     def sysv_splat_ret(name, *, macro = False) -> str:
         return '' if is_empty(name) else f'-> {ffi_name(name, macro)}'
@@ -378,14 +438,18 @@ def emit(outf, idl):
             with Fn('to_ffi', 'self', f'ffi::{name}', macro_public = True):
                 with Scope(f'ffi::{name}'):
                     for m_name, m_ty in members():
+                        if is_empty(m_ty):
+                            continue
                         expr = f'ffi::{m_ty}::default()' if is_unit(m_ty) else f'self.{m_name}.to_ffi()'
                         out(f'{m_name}: {expr},')
-                    del m_name, m_ty, expr
+                        del m_name, m_ty, expr
 
     def emit_routine(name, ty):
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
-        out(f'pub struct {name}(pub unsafe extern "sysv64" fn());')
+        args = sysv_splat_params(ty.input)
+        ret = sysv_splat_ret(ty.output)
+        out(f'pub struct {name}(pub unsafe extern "sysv64" fn({args})){ret};')
         with Impl(name):
             with Fn('from_ffi', f'x: ffi::{name}', 'Self'):
                 out('Self(x.0.expect("function pointer is null"))')
@@ -393,6 +457,8 @@ def emit(outf, idl):
                 out(f'ffi::{name}(Some(self.0))')
 
     def emit_sum(name, ty):
+        if is_bool(name):
+            return
         emit_documentation(ty)
         out(f'#[derive(Clone, Debug)]')
         with Scope(f'pub enum {name}'):
@@ -447,23 +513,31 @@ def emit(outf, idl):
     with ImplFor('lemmings_idl::Api', idl.name, unsafe = True):
         out(f'const ID: core::num::NonZero<u128> = core::num::NonZero::new({idl.api_id:#x}).unwrap();')
 
+    def tr_ty(x):
+        if is_bool(x):
+            return 'bool'
+        return x;
+
     with Impl(idl.name):
         for name, routine in idl.routines.items():
             emit_documentation(routine)
             x = '' if is_empty(routine.input) else 'x'
-            params = '' if is_void(routine.input) else f', {x or "_"}: {routine.input}'
-            ret = '' if is_void(routine.output) else routine.output
+            params = '' if is_void(routine.input) else f', {x or "_"}: {tr_ty(routine.input)}'
+            ret = '' if is_void(routine.output) else tr_ty(routine.output)
             with Fn(name, f'&self{params}', ret, public = True):
                 if x:
                     out(f'let {sysv_splat_pattern(routine.input)} = x.to_ffi();')
                 args = sysv_splat_members(routine.input)
                 if not is_empty(routine.output):
                     out(f'let x = unsafe {{ (self.{name})({args}).into() }};')
-                    out(f'{routine.output}::from_ffi(x)')
+                    if is_bool(routine.output):
+                        out(f'x')
+                    else:
+                        out(f'{routine.output}::from_ffi(x)')
                 else:
                     out(f'unsafe {{ (self.{name})({args}) }};')
                     if not is_void(routine.output):
-                        out(f'{routine.output}')
+                        out(f'{tr_ty(routine.output)}')
         del name, routine, x
 
     out('')
@@ -475,7 +549,7 @@ def emit(outf, idl):
                 out(f'{name} = $impl_{name}:expr,')
         with Scope('', suffix = ';'):
             with Scope(f'$crate::{idl.name}'):
-                out(f'ID: <{idl.name} as lemmings_idl::Api>::ID,')
+                out(f'ID: <$crate::{idl.name} as lemmings_idl::Api>::ID,')
                 out(f'DESCRIPTION: $description,')
                 for name, routine in idl.routines.items():
                     args = sysv_splat_params(routine.input, macro = True)
@@ -492,7 +566,7 @@ def emit(outf, idl):
                                 out(f'let x = {routine.input}::from_ffi({sysv_splat_pattern(routine.input, macro = True)});')
                             else:
                                 out(f'let x = {routine.input};')
-                            if is_void(routine.output):
+                            if is_void(routine.output) or is_bool(routine.output):
                                 out(f'$impl_{name}({x})')
                             elif not is_empty(routine.output):
                                 out(f'let x: {routine.output} = $impl_{name}({x});')

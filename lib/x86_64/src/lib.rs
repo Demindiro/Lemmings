@@ -220,6 +220,17 @@ pub fn tsc() -> u64 {
     unsafe { core::arch::x86_64::_rdtsc() }
 }
 
+/// Get the value in the `RBP` register.
+///
+/// # Note
+///
+/// This value will only be sensible if frame pointers are **always** enabled!
+pub fn frame_pointer() -> *const *const () {
+    let x;
+    unsafe { asm!("mov {}, rbp", out(reg) x, options(nomem, nostack, pure, preserves_flags)) }
+    x
+}
+
 reg! {
     [cr0 "mov {}, cr0" "mov cr0, {}"]
         WRITE_PROTECT = 1 << 16;

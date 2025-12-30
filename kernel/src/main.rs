@@ -23,7 +23,6 @@ mod ffi;
 mod framebuffer;
 mod page;
 mod pci;
-mod sync;
 mod thread;
 mod time;
 

@@ -1,10 +1,14 @@
 //! Implementation of **split** virtqueues.
 
+// FIXME this queue implementation does NOT use atomics properly!!
+// We MUST fix this!
+
 use crate::{PhysAddr, PhysRegion};
 use core::{
     cell::Cell,
     convert::TryFrom,
     fmt, mem,
+    num::NonZero,
     ptr::NonNull,
     slice,
     sync::atomic::{self, Ordering},
@@ -36,6 +40,9 @@ pub struct NoBuffers;
 pub enum NewQueueError<DmaError> {
     DmaError(DmaError),
 }
+
+#[derive(Debug)]
+pub struct TooManyDescriptors;
 
 #[repr(C)]
 struct Descriptor {
@@ -261,6 +268,8 @@ impl<'a> Queue<'a> {
             let mut descr_index = u32::from(ring[usize::from(index & self.mask)].index) as u16;
             let base = table[usize::from(descr_index)].address.get().into();
             let size = table[usize::from(descr_index)].length.get().into();
+            // FIXME blatant leak when using chained descriptors
+            // this code... I was ignorant
             callback(Token(descr_index.into()), PhysRegion { base, size });
             loop {
                 let descr = &table[usize::from(descr_index)];
@@ -277,6 +286,69 @@ impl<'a> Queue<'a> {
         }
         self.last_used = index;
         usize::from(head_index.wrapping_sub(last))
+    }
+
+    /// Collect buffers from a single submission from the device.
+    ///
+    /// `store` should be appropriately sized.
+    /// If it is too small, `Err(TooManyDescriptors)` is returned and the queue is left unmodified.
+    ///
+    /// # Returns
+    ///
+    /// The amount of collected buffers `None` if no buffers are available for collection.
+    ///
+    /// # Warning
+    ///
+    /// `store` may still be modified even if `Err(TooManyDescriptors)` is returned!
+    pub fn collect_one_used(
+        &mut self,
+        store: &mut [PhysRegion],
+    ) -> Result<Option<(Token, NonZero<usize>)>, TooManyDescriptors> {
+        // TODO better reuse of code with collect_used
+        //
+        // It needs to be rewritten anyway because it is broken...
+        atomic::fence(Ordering::Acquire);
+        let (head, ring) = used_ring!(self);
+        let table = descriptors_table!(self);
+
+        let mut index @ last = self.last_used;
+        let head_index = u16::from(head.index);
+
+        if index == head_index {
+            return Ok(None);
+        }
+
+        let mut i = 0;
+        let mut put = |x: PhysRegion| -> Result<_, _> {
+            *store.get_mut(i).ok_or(TooManyDescriptors)? = x;
+            i += 1;
+            Ok(())
+        };
+
+        // TODO maybe we should use unwrap?
+        let mut descr_index = u32::from(ring[usize::from(index & self.mask)].index) as u16;
+        let token = Token(descr_index.into());
+
+        loop {
+            let base = table[usize::from(descr_index)].address.get().into();
+            let size = table[usize::from(descr_index)].length.get().into();
+            put(PhysRegion { base, size })?;
+
+            let descr = &table[usize::from(descr_index)];
+            let (flags, next) = (descr.flags.get(), descr.next.get());
+            self.alloc.push_free_descr(table, descr_index);
+            if Descriptor::NEXT & flags > 0 {
+                debug_assert_ne!(descr_index, next, "cycle | {}", self.alloc.free_count);
+                descr_index = next.into();
+            } else {
+                break;
+            }
+        }
+        self.last_used = index.wrapping_add(1);
+
+        let num = NonZero::new(i).expect("at least one descriptor");
+
+        Ok(Some((token, num)))
     }
 
     /// Return the offset relative to the notify address to flush this queue.

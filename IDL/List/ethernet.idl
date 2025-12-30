@@ -1,0 +1,102 @@
+-- !! WARNING !! This interface WILL be deprecated and removed!!
+--
+-- Door for sending and receiving packets over an Ethernet medium
+--
+-- Certain protocols such as ARP rely on Ethernet MAC addresses,
+-- hence this Ethernet-specific door should be exposed by
+-- relevant processes.
+door Ethernet {
+	-- Send a packet
+	--
+	-- This routine may block.
+	send = Send -> SendResult
+
+	-- Receive a packet
+	--
+	-- This routine may block.
+	recv = Void -> RecvResult
+
+	-- The maximum MTU of this link
+	--
+	-- This *includes* the frame header,
+	-- i.e. it indicates the maximum length of packets that may be sent and received.
+	mtu = Void -> Mtu
+
+	-- The address of this device
+	address = Void -> Mac
+}
+
+record Void {
+}
+
+u8 True = 1
+u8 False = 0
+sum Bool = True | False
+
+record Send {
+	packet = Packet
+}
+
+record RecvOk {
+	packet = Packet
+}
+
+record RecvFail {
+	packet = NoPacket
+}
+
+sum SendResult = Ok | Fail
+sum RecvResult = RecvOk | RecvFail
+sum AcquireResult = Ok | InUse
+
+u8 Ok = 0
+u8 Fail = 1
+u8 InUse = 1
+
+record Packet {
+	-- The first 18 bytes are reserved for the header.
+	-- and must not be used for data.
+	base = PacketBase
+	length = PacketLength
+}
+
+record NoPacket {
+	base = NoPacketBase
+	length = PacketLength
+}
+
+pointer PacketBase = unique PacketBuffer
+null NoPacketBase = PacketBase
+-- Ethernet requires the packet length to be at least 64 bytes.
+-- However, the driver can easily fix this up if necessary
+-- so it is not enforced here.
+u16 PacketLength = 0 to 0xffff
+
+record PacketBuffer {
+}
+
+-- Split up for more efficient use of ABI
+-- (32 bits in one register, 16 in another --> avoid shifting with 64-bit register)
+record Mac {
+	abcd = MacLow
+	ef = MacHigh
+}
+
+record MacLow {
+	a = Byte
+	b = Byte
+	c = Byte
+	d = Byte
+}
+
+record MacHigh {
+	e = Byte
+	f = Byte
+}
+
+u8 Byte = 0 to 255
+
+-- It is assumed that the MTU for Ethernet links is always 1518 at minimum.
+-- Given that the frame length is encoded as a 16-bit integer,
+-- it cannot be larger than 65'535.
+u16 Mtu = 1518 to 0xffff

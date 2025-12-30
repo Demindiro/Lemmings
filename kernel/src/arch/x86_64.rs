@@ -1,10 +1,10 @@
 use crate::{
     KernelEntryToken, page,
-    sync::{SpinLock, SpinLockGuard},
     thread::{self, RoundRobinQueue},
 };
 use core::{arch::naked_asm, mem::MaybeUninit, num::NonZero};
 use critical_section::CriticalSection;
+use lemmings_spinlock::{SpinLock, SpinLockGuard};
 use lemmings_x86_64::{
     apic::{
         self,
@@ -317,7 +317,7 @@ impl<const N: usize, const WORDS: usize> BitArray<N, WORDS> {
 
 pub fn map_msi() -> Result<Msi, OutOfVectors> {
     let vector = critical_section::with(|cs| INTERRUPT_HANDLERS.lock(cs).alloc_vector())?;
-    debug!("map_msi {vector:?}");
+    log!("msi: allocated vector {}", vector.0);
     Ok(Msi {
         data: vector.into(),
         address: apic::local::DEVICE_LAPIC_ADDRESS.into(),
@@ -361,8 +361,10 @@ fn init_idt() {
     let idt = unsafe { &mut *(&raw mut IDT) };
 
     let ist1 = |f| IdtEntry::new(Gdt::KERNEL_CS, f, Ist::N1);
+    idt.set_handler(idt::nr::BREAKPOINT, breakpoint as _);
     idt.set(idt::nr::DOUBLE_FAULT, ist1(double_fault as _));
-    idt.set_handler(idt::nr::PAGE_FAULT, page_fault as _);
+    idt.set_handler(idt::nr::GP_FAULT, general_protection_fault as _);
+    idt.set(idt::nr::PAGE_FAULT, ist1(page_fault as _));
     idt.set_handler(VECTOR_TIMER, timer_handler as _);
     for i in VECTOR_STUB_OFFSET..=u8::MAX {
         unsafe {
@@ -387,8 +389,16 @@ fn init_apic() {
     apic.enable();
 }
 
+extern "sysv64" fn breakpoint() {
+    panic!("Breakpoint!");
+}
+
 extern "sysv64" fn double_fault() {
     panic!("Double fault!");
+}
+
+extern "sysv64" fn general_protection_fault() {
+    panic!("Gemeral protection fault!");
 }
 
 #[naked]
@@ -403,7 +413,17 @@ unsafe extern "C" fn page_fault() {
     }
     extern "sysv64" fn handler(rip: unsafe extern "C" fn(), error_code: u32) {
         let addr = lemmings_x86_64::cr2::get();
-        panic!("Page fault! (rip: {rip:?}, code: {error_code:#08x}, address: {addr:#016x})");
+        log!("Page fault! (rip: {rip:?}, code: {error_code:#08x}, address: {addr:#016x})");
+        let mut fp = lemmings_x86_64::frame_pointer();
+        for i in 0.. {
+            if fp.is_null() {
+                break;
+            }
+            let func = unsafe { fp.add(1).read() };
+            log!("{i:>4}: {func:?} ({fp:?})");
+            fp = unsafe { fp.read().cast() };
+        }
+        todo!("resolve page fault");
     }
 }
 

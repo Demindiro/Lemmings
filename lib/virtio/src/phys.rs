@@ -13,11 +13,11 @@ use {
 };
 
 /// Representation of a physical address.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct PhysAddr(pub u64le);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PhysRegion {
     pub base: PhysAddr,
     pub size: u32,

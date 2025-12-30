@@ -6,7 +6,13 @@
 
 pub use lemmings_virtio::{PhysAddr, PhysRegion};
 
-use core::{alloc::Layout, convert::TryInto, fmt, mem, ptr::NonNull};
+use core::{
+    alloc::Layout,
+    convert::TryInto,
+    fmt,
+    mem::{self, MaybeUninit},
+    ptr::NonNull,
+};
 use lemmings_endian::{u16le, u32le};
 use lemmings_virtio::{pci::CommonConfig, queue};
 
@@ -82,6 +88,8 @@ const RSC_EXT: u32 = 1 << (61 - 32);
 #[allow(dead_code)]
 const STANDBY: u32 = 1 << (62 - 32);
 
+const MAX_ETH_SIZE: usize = 1514;
+
 /// A token for an active receive operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RxToken(lemmings_virtio::queue::Token);
@@ -103,13 +111,6 @@ pub enum ReceiveError {}
 
 #[derive(Clone, Debug)]
 pub struct Full;
-
-#[derive(Clone)]
-#[repr(C)]
-pub struct Packet {
-    header: PacketHeader,
-    pub data: [u8; Self::MAX_ETH_SIZE],
-}
 
 pub struct Mac(pub [u8; 6]);
 
@@ -139,7 +140,7 @@ struct Config {
 
 #[derive(Clone, Default)]
 #[repr(C)]
-struct PacketHeader {
+pub struct PacketHeader {
     flags: u8,
     gso_type: u8,
     header_length: u16le,
@@ -182,31 +183,8 @@ impl PacketHeader {
     const GSO_TCP6: u8 = 4;
     #[allow(dead_code)]
     const GSO_ECN: u8 = 0x80;
-}
 
-impl Packet {
-    const MAX_ETH_SIZE: usize = 1514;
-    /// There is no way to get the real size (_not_ stride), so this'll have to do.
-    const MAX_SIZE: usize = mem::size_of::<PacketHeader>() + Self::MAX_ETH_SIZE;
-
-    /// Calculate the total size of the packet with the given amount of data.
-    ///
-    /// # Panics
-    ///
-    /// `size` is larger than 1514.
-    pub fn size_with_data(size: usize) -> u32 {
-        assert!(size <= 1514, "size may not be larger than 1514");
-        (mem::size_of::<PacketHeader>() + size).try_into().unwrap()
-    }
-}
-
-impl Default for Packet {
-    fn default() -> Self {
-        Self {
-            header: Default::default(),
-            data: [0; Self::MAX_ETH_SIZE],
-        }
-    }
+    const SIZE: u16 = mem::size_of::<Self>() as u16;
 }
 
 impl AsRef<[u8; 6]> for Mac {
@@ -273,14 +251,15 @@ impl<'a> Device<'a> {
         // TODO check device status to ensure features were enabled correctly.
 
         // SAFETY: The caller guarantees dma_alloc returns valid physical addresses.
-        let mut create_queue = |queue_idx| unsafe {
-            queue::Queue::<'a>::new(dev.common, queue_idx, 8, msix.receive_queue, &mut dma_alloc)
-                .map_err(|e| match e {
+        let mut create_queue = |queue_idx, msix_nr| unsafe {
+            queue::Queue::<'a>::new(dev.common, queue_idx, 8, msix_nr, &mut dma_alloc).map_err(
+                |e| match e {
                     queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
-                })
+                },
+            )
         };
-        let rx_queue = create_queue(0)?;
-        let tx_queue = create_queue(1)?;
+        let rx_queue = create_queue(0, msix.receive_queue)?;
+        let tx_queue = create_queue(1, msix.transmit_queue)?;
 
         dev.common.device_status.set(
             CommonConfig::STATUS_ACKNOWLEDGE
@@ -304,26 +283,32 @@ impl<'a> Device<'a> {
     ///
     /// # Safety
     ///
-    /// `data` must remain valid for the duration of the transmission.
-    /// `data_phys` must point to the same memory region as `data`.
+    /// `header_phys` and `data_phys` must remain valid for the duration of the transmission.
+    /// `header_phys` must point to the same memory region as `header`.
+    ///
+    /// # Panics
+    ///
+    /// If 'data.len()` is greater than `2**32`.
     pub unsafe fn send(
         &mut self,
-        data: &mut Packet,
+        header: &mut PacketHeader,
+        header_phys: PhysAddr,
         data_phys: PhysRegion,
     ) -> Result<TxToken, SendError> {
-        data.header = PacketHeader {
+        *header = PacketHeader {
             flags: 0,
             gso_type: PacketHeader::GSO_NONE,
             csum_start: 0.into(),
             csum_offset: 0.into(),
             gso_size: 0.into(),
-            header_length: u16::try_from(mem::size_of::<PacketHeader>())
-                .unwrap()
-                .into(),
+            header_length: PacketHeader::SIZE.into(),
             num_buffers: 0.into(),
         };
 
-        let data = [(data_phys.base, data_phys.size, false)];
+        let data = [
+            (header_phys, PacketHeader::SIZE.into(), false),
+            (data_phys.base, data_phys.size, false),
+        ];
 
         let tk = self
             .tx_queue
@@ -354,39 +339,39 @@ impl<'a> Device<'a> {
         Ok(self.rx_queue.collect_used(|tk, p| f(RxToken(tk), p)))
     }
 
+    /// Receive at most one Ethernet packet, if any are available.
+    ///
+    /// Both the header and the data are returned.
+    pub fn receive_one(&mut self) -> Result<Option<(RxToken, [PhysRegion; 2])>, ReceiveError> {
+        let mut buf = [PhysRegion::default(); 2];
+        self.rx_queue
+            .collect_one_used(&mut buf)
+            .expect("enough buffers")
+            .inspect(|(_, num)| assert_eq!(num.get(), 2))
+            .map(|(tk, _)| (RxToken(tk), buf))
+            .map(Ok)
+            .transpose()
+    }
+
     #[inline]
     pub fn was_interrupted(&self) -> bool {
         self.isr.read().queue_update()
-    }
-
-    /// Get the layout requirements of a single packet. Useful for allocation.
-    pub fn packet_layout(&self) -> Layout {
-        Layout::new::<Packet>()
-            .extend_packed(Layout::new::<[u8; Packet::MAX_ETH_SIZE]>())
-            .unwrap()
     }
 
     /// Insert a buffer for the device to write RX data to
     ///
     /// # Safety
     ///
-    /// `data` and `data_phys` must be valid.
+    /// `header_phys` and `data_phys` must remain valid until collected.
     pub unsafe fn insert_buffer(
         &mut self,
-        data: &mut Packet,
-        data_phys: PhysAddr,
+        header_phys: PhysAddr,
+        data_phys: PhysRegion,
     ) -> Result<RxToken, Full> {
-        data.header = PacketHeader {
-            flags: 12,
-            gso_type: 34,
-            csum_start: 5678.into(),
-            csum_offset: 9012.into(),
-            gso_size: 3456.into(),
-            header_length: 7890.into(),
-            num_buffers: 1234.into(),
-        };
-
-        let data = [(data_phys, Packet::MAX_SIZE.try_into().unwrap(), true)];
+        let data = [
+            (header_phys, PacketHeader::SIZE.into(), true),
+            (data_phys.base, data_phys.size, true),
+        ];
 
         let tk = self
             .rx_queue
