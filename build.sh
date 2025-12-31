@@ -15,16 +15,22 @@ mkdir -p "$tmp"
 
 make -C IDL
 
-(cd qemubios && cargo b --release -Zbuild-std=core --target ./x86_64-qemubios.json)
-(cd kernel && ./build.sh)
-(cd interpreter && ./build.sh)
-(cd driver/virtio-net && cargo b --release -Zbuild-std=core)
-(cd service/net && cargo b --release -Zbuild-std=core)
-
-cp interpreter/example.interpreter "$databin/interpreter.init"
 mkdir -p "$databin/driver"
 mkdir -p "$databin/service"
-cp "$RUST_TARGET/release/lemmings-driver-virtio-net" "$databin/driver/virtio-net"
-cp "$RUST_TARGET/release/lemmings-service-net" "$databin/service/net"
 
-./create_archive.py "$out/data.bin" "$databin"
+if false
+then
+	(cd qemubios && cargo b --release -Zbuild-std=core --target ./x86_64-qemubios.json)
+	(cd runtime/kernel/x86_64 && ./build.sh)
+	(cd interpreter && ./build.sh)
+	(cd driver/virtio-net && cargo b --release -Zbuild-std=core)
+	(cd service/net && cargo b --release -Zbuild-std=core)
+	cp interpreter/example.interpreter "$databin/interpreter.init"
+	cp "$RUST_TARGET/release/lemmings-driver-virtio-net" "$databin/driver/virtio-net"
+	cp "$RUST_TARGET/release/lemmings-service-net" "$databin/service/net"
+	./create_archive.py "$out/data.bin" "$databin"
+else
+	(cd runtime/linux/x86_64 && cargo b --release -Zbuild-std=core)
+	(cd interpreter && ./build.sh)
+	cp interpreter/example-linux.interpreter "$databin/interpreter.init"
+fi

@@ -1,5 +1,7 @@
-use crate::page;
-use core::{fmt, ptr::NonNull};
+#![no_std]
+#![feature(slice_as_chunks)] // stabilized in 1.88
+
+use core::{fmt, num::NonZero, ops::Range, ptr::NonNull};
 
 const ET_DYN: [u8; 2] = [3, 0];
 const ARCH: [u8; 2] = [0x3e, 0];
@@ -12,68 +14,34 @@ const RELA: u64 = 7;
 const RELASZ: u64 = 8;
 const RELAENT: u64 = 9;
 
-pub mod door {
-    use core::slice;
-    use lemmings_idl_loader_elf::*;
+pub trait Allocator {
+    type ReserveError;
+    type MapError;
 
-    door! {
-        [lemmings_idl_loader_elf Loader "ELF loader"]
-        load
-    }
+    const PAGE_SIZE: usize;
 
-    unsafe fn load(x: Load) -> LoadResult {
-        let Load {
-            elf_base,
-            elf_len,
-            reason_base,
-            reason_len,
-        } = x;
-        let elf =
-            unsafe { slice::from_raw_parts(elf_base.0.as_ptr().cast::<u8>(), elf_len.into()) };
-        let reason = unsafe {
-            slice::from_raw_parts_mut(
-                reason_base.0.as_ptr().cast::<u8>(),
-                u16::from(reason_len).into(),
-            )
-        };
-        match super::load(elf) {
-            Ok(entry) => LoadOk {
-                entry: unsafe { core::mem::transmute(entry) },
-                reason_len: 0.into(),
-            }
-            .into(),
-            Err(err) => {
-                use super::LoadError as E;
-                // TODO write reason string.
-                let reason_len = 0;
-                let _ = reason;
-                LoadFail {
-                    reason: match err {
-                        E::Not64Bit
-                        | E::NotLittleEndian
-                        | E::NotRelocatable
-                        | E::UnsupportedArchitecture
-                        | E::UnsupportedVersion
-                        | E::UnsupportedSegmentFlags => Reason::Unsupported,
-                        E::BadMagic
-                        | E::EntryOutOfBounds
-                        | E::ProgramHeadersTruncated
-                        | E::SegmentNotAligned
-                        | E::TruncatedHeader
-                        | E::UnexpectedProgramHeaderSize
-                        | E::VirtualSizeZero => Reason::Malformed,
-                        E::OutOfMemory => Reason::OutOfMemory,
-                        E::OutOfVirtSpace => Reason::OutOfVirtualSpace,
-                    },
-                    reason_len: reason_len.into(),
-                }
-                .into()
-            }
-        }
-    }
+    fn reserve(&mut self, len: NonZero<usize>) -> Result<NonNull<u8>, Self::ReserveError>;
+    /// Fill the region with *zeroed* pages.
+    unsafe fn alloc_region(
+        &mut self,
+        range: Range<NonNull<u8>>,
+        attr: PageAttr,
+        will_write: bool,
+    ) -> Result<(), Self::MapError>;
+    unsafe fn copy_to_region(&mut self, va: NonNull<u8>, src: &[u8]);
 }
 
-pub enum LoadError {
+pub enum PageAttr {
+    R,
+    RW,
+    RX,
+    RWX,
+}
+
+pub enum LoadError<A>
+where
+    A: Allocator,
+{
     BadMagic,
     EntryOutOfBounds,
     Not64Bit,
@@ -87,17 +55,18 @@ pub enum LoadError {
     UnsupportedVersion,
     UnsupportedSegmentFlags,
     VirtualSizeZero,
-    OutOfMemory,
-    OutOfVirtSpace,
+    ReserveRegion(A::ReserveError),
+    MapRegion(A::MapError),
 }
 
 #[allow(dead_code)]
 pub struct Entry(NonNull<u8>);
 
-struct ElfMapper<'a> {
-    virt_base: page::Virt,
+struct ElfMapper<'a, A> {
+    virt_base: NonNull<u8>,
     file: &'a [u8],
     dyn_rela: &'a [[u8; 24]],
+    alloc: A,
 }
 
 struct ProgramHeader {
@@ -110,16 +79,12 @@ struct ProgramHeader {
     align: usize,
 }
 
-impl From<page::ReserveRegionError> for LoadError {
-    fn from(err: page::ReserveRegionError) -> Self {
-        match err {
-            page::ReserveRegionError::OutOfMemory => Self::OutOfMemory,
-            page::ReserveRegionError::OutOfVirtSpace => Self::OutOfVirtSpace,
-        }
-    }
-}
-
-impl fmt::Debug for LoadError {
+impl<A> fmt::Debug for LoadError<A>
+where
+    A: Allocator,
+    A::ReserveError: fmt::Debug,
+    A::MapError: fmt::Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             Self::BadMagic => "bad magic",
@@ -135,8 +100,8 @@ impl fmt::Debug for LoadError {
             Self::UnsupportedVersion => "unsupported version",
             Self::UnsupportedSegmentFlags => "unsupported segment flags",
             Self::VirtualSizeZero => "virtual size is zero",
-            Self::OutOfMemory => "out of memory",
-            Self::OutOfVirtSpace => "out of virtual memory space",
+            Self::ReserveRegion(e) => return e.fmt(f),
+            Self::MapRegion(e) => return e.fmt(f),
         };
         f.write_str(s)
     }
@@ -156,7 +121,10 @@ impl ProgramHeader {
     }
 }
 
-pub fn load(file: &[u8]) -> Result<Entry, LoadError> {
+pub fn load<A>(file: &[u8], mut alloc: A) -> Result<Entry, LoadError<A>>
+where
+    A: Allocator,
+{
     use LoadError::*;
     let header: &[u8; 64] = file
         .get(..64)
@@ -179,14 +147,14 @@ pub fn load(file: &[u8]) -> Result<Entry, LoadError> {
     if entry >= virt_size {
         return Err(EntryOutOfBounds);
     }
-    let virt_base = page::reserve_region(virt_size.try_into().map_err(|_| VirtualSizeZero)?)?;
-    let mapper = ElfMapper {
-        virt_base,
+    let mut mapper = ElfMapper {
+        virt_base: alloc
+            .reserve(virt_size.try_into().map_err(|_| VirtualSizeZero)?)
+            .map_err(LoadError::ReserveRegion)?,
         file,
         dyn_rela,
+        alloc,
     };
-    let va = virt_base.addr().get();
-    log!("elf: reserving {va:#x}-{:#x}", va + virt_size);
     mapper.check_segments(ph())?;
     mapper.alloc_segments(ph())?;
     mapper.copy_segments(ph());
@@ -198,10 +166,13 @@ pub fn load(file: &[u8]) -> Result<Entry, LoadError> {
     Ok(Entry(entry))
 }
 
-fn program_headers<'a>(
+fn program_headers<'a, A>(
     file: &'a [u8],
     header: &'a [u8; 64],
-) -> Result<&'a [[u8; PH_ENTSIZE]], LoadError> {
+) -> Result<&'a [[u8; PH_ENTSIZE]], LoadError<A>>
+where
+    A: Allocator,
+{
     let offt = u64_to_usize(&header[32..40]);
     let entsize = usize::from(u16(&header[54..56]));
     assert(
@@ -215,12 +186,13 @@ fn program_headers<'a>(
         .ok_or(LoadError::ProgramHeadersTruncated)
 }
 
-fn parse_program_headers<'a, I>(
+fn parse_program_headers<'a, I, A>(
     file: &'a [u8],
     program_headers: I,
-) -> Result<(usize, &'a [[u8; 24]]), LoadError>
+) -> Result<(usize, &'a [[u8; 24]]), LoadError<A>>
 where
     I: Iterator<Item = ProgramHeader>,
+    A: Allocator,
 {
     let mut virt_size = 0;
     let mut dynamic = &[][..];
@@ -247,7 +219,13 @@ where
     Ok((virt_size, rela_dyn))
 }
 
-fn parse_dynamic<'a>(file: &'a [u8], dynamic: &[[u8; 16]]) -> Result<&'a [[u8; 24]], LoadError> {
+fn parse_dynamic<'a, A>(
+    file: &'a [u8],
+    dynamic: &[[u8; 16]],
+) -> Result<&'a [[u8; 24]], LoadError<A>>
+where
+    A: Allocator,
+{
     let mut rela @ mut relasz @ mut relaent = 0;
     for e in dynamic {
         let val = u64(&e[8..16]).try_into().expect("u64 == usize");
@@ -262,8 +240,11 @@ fn parse_dynamic<'a>(file: &'a [u8], dynamic: &[[u8; 16]]) -> Result<&'a [[u8; 2
     Ok(file[rela..rela + relasz].as_chunks().0)
 }
 
-impl<'a> ElfMapper<'a> {
-    fn check_segments<I>(&self, program_headers: I) -> Result<(), LoadError>
+impl<'a, A> ElfMapper<'a, A>
+where
+    A: Allocator,
+{
+    fn check_segments<I>(&self, program_headers: I) -> Result<(), LoadError<A>>
     where
         I: Iterator<Item = ProgramHeader>,
     {
@@ -284,7 +265,7 @@ impl<'a> ElfMapper<'a> {
         Ok(())
     }
 
-    fn alloc_segments<I>(&self, program_headers: I) -> Result<(), LoadError>
+    fn alloc_segments<I>(&mut self, program_headers: I) -> Result<(), LoadError<A>>
     where
         I: Iterator<Item = ProgramHeader>,
     {
@@ -304,7 +285,7 @@ impl<'a> ElfMapper<'a> {
         Ok(())
     }
 
-    fn copy_segments<I>(&self, program_headers: I)
+    fn copy_segments<I>(&mut self, program_headers: I)
     where
         I: Iterator<Item = ProgramHeader>,
     {
@@ -313,7 +294,7 @@ impl<'a> ElfMapper<'a> {
             .for_each(|ph| self.copy_one_segment(ph));
     }
 
-    fn alloc_one_segment(&self, ph: ProgramHeader) -> Result<(), LoadError> {
+    fn alloc_one_segment(&mut self, ph: ProgramHeader) -> Result<(), LoadError<A>> {
         let ProgramHeader {
             flags,
             vaddr,
@@ -321,20 +302,23 @@ impl<'a> ElfMapper<'a> {
             ..
         } = ph;
 
-        let floor = |x| floor_p2(x, page::PAGE_SIZE);
-        let ceil = |x| ceil_p2(x, page::PAGE_SIZE);
+        let floor = |x| floor_p2(x, A::PAGE_SIZE);
+        let ceil = |x| ceil_p2(x, A::PAGE_SIZE);
         let va = floor(vaddr);
         let va_end = ceil(vaddr + memsz);
 
         let [va, va_end] = [va, va_end].map(|x| unsafe { self.virt_base.byte_add(x) });
 
         let attr = flags_to_attr(flags).ok_or(LoadError::UnsupportedSegmentFlags)?;
-        debug!("elf: segment {:?} {:?}", va..va_end, attr);
-        unsafe { page::map_region_zero(va..va_end, attr, true)? };
+        unsafe {
+            self.alloc
+                .alloc_region(va..va_end, attr, true)
+                .map_err(LoadError::MapRegion)?
+        };
         Ok(())
     }
 
-    fn copy_one_segment(&self, ph: ProgramHeader) {
+    fn copy_one_segment(&mut self, ph: ProgramHeader) {
         let ProgramHeader {
             offset,
             vaddr,
@@ -344,7 +328,7 @@ impl<'a> ElfMapper<'a> {
         let va = unsafe { self.virt_base.byte_add(vaddr) };
         let src = &self.file[offset..offset + filesz];
         unsafe {
-            page::copy_to_region(va, src);
+            self.alloc.copy_to_region(va, src);
         }
     }
 
@@ -360,12 +344,6 @@ impl<'a> ElfMapper<'a> {
                 p.write_unaligned(self.virt_base.as_ptr().addr() + addend);
             }
         }
-    }
-}
-
-impl From<page::OutOfMemory> for LoadError {
-    fn from(_: page::OutOfMemory) -> Self {
-        Self::OutOfMemory
     }
 }
 
@@ -406,12 +384,12 @@ fn floor_p2(x: usize, n: usize) -> usize {
     x & !(n - 1)
 }
 
-fn flags_to_attr(flags: u32) -> Option<page::PageAttr> {
+fn flags_to_attr(flags: u32) -> Option<PageAttr> {
     Some(match flags {
-        0b100 => page::PageAttr::R,
-        0b101 => page::PageAttr::RX,
-        0b110 => page::PageAttr::RW,
-        0b111 => page::PageAttr::RWX,
+        0b100 => PageAttr::R,
+        0b101 => PageAttr::RX,
+        0b110 => PageAttr::RW,
+        0b111 => PageAttr::RWX,
         _ => return None,
     })
 }

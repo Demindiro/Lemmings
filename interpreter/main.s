@@ -313,6 +313,17 @@ find_door archive 0x12586ddb4350e1b6, 0xc469fb24bb9a89c6
 .purgem f
 
 
+.macro stackframe_enter
+	push rbp
+	mov rbp, rsp
+	and rsp, ~15
+.endm
+.macro stackframe_leave
+	mov rsp, rbp
+	pop rbp
+.endm
+
+
 .section .rodata.panic
 _panic_reasons:
 
@@ -342,13 +353,25 @@ _panic_start:
 
 
 .macro _start_enter
+	# ensure we push an odd number of times for proper stack alignment
 	push rbp
+	push rbp
+	mov rbp, rsp
 	push rbx
+	push r12
+	push r13
+	push r14
+	push r15
 	mov [rip + rsp_start], rsp
 .endm
 .macro _start_exit
 	mov rsp, [rip + rsp_start]
+	pop r15
+	pop r14
+	pop r13
+	pop r12
 	pop rbx
+	pop rbp
 	pop rbp
 .endm
 
@@ -436,8 +459,16 @@ _panic_start:
 	ASM_PUSH24 0x07c749
 	ASM_PUSH32 \x
 .endm
+.macro ASM_load_r15_r64 r:req
+	ASM_PUSH24 0x078b49 | (\r << 19)
+.endm
+.macro ASM_load_r15_r64dyn r:req
+	shl \r, 19
+	or \r, 0x078b49
+	ASM_PUSH24 \r
+.endm
 .macro ASM_load_r15_rax
-	ASM_PUSH24 0x078b49
+	ASM_load_r15_r64 0
 .endm
 .macro ASM_load_r14_rax
 	ASM_PUSH24 0x068b49
@@ -450,9 +481,19 @@ _panic_start:
 	ASM_sub_r15_imm8_c 8
 	ASM_store_r15_imm32 \x
 .endm
-.macro ASM_num_pop_rax
-	ASM_load_r15_rax
+.macro ASM_num_drop
 	ASM_add_r15_imm8_c 8
+.endm
+.macro ASM_num_pop_r64 r:req
+	ASM_load_r15_r64 \r
+	ASM_num_drop
+.endm
+.macro ASM_num_pop_r64dyn r:req
+	ASM_load_r15_r64dyn \r
+	ASM_num_drop
+.endm
+.macro ASM_num_pop_rax
+	ASM_num_pop_r64 0
 .endm
 .macro ASM_obj_push_rax
 	ASM_sub_r14_imm8_c 8
@@ -660,6 +701,7 @@ routine parse_number
 	assertne rdi, rsi, "expected digits after prefix"
 .Lparse_number.loop:
 	movzx edx, byte ptr [rdi]
+	ifeq dl, '_', 3f
 	lea ebx, [edx - '0']
 	ifltu bl, 10, 2f
 	or edx, 040
@@ -667,7 +709,7 @@ routine parse_number
 2:	assertlt bl, dl, "digit out of range for base"
 	mul rcx
 	add rax, rbx
-	inc rdi
+3:	inc rdi
 	ifne rdi, rsi .Lparse_number.loop
 .Lparse_number.end:
 	ret
@@ -1139,6 +1181,11 @@ dict_begin _
 		shl qword ptr [NUM_STACK_HEAD], cl
 	enddef
 
+	def_as "#srl" int_srl
+		num_pop rcx
+		shr qword ptr [NUM_STACK_HEAD], cl
+	enddef
+
 	def_as "#or" int_or
 		num_pop rax
 		or qword ptr [NUM_STACK_HEAD], rax
@@ -1191,6 +1238,7 @@ dict_begin Sys
 	enddef
 
 	def panic
+		stackframe_enter
 		obj_pop rdi
 		mov esi, [rdi - 8]
 		syscall_panic
@@ -1210,16 +1258,20 @@ dict_end Sys
 
 dict_begin Sys.Door
 	def find
+		stackframe_enter
 		num_pop rdi # high
 		num_peek rsi # low
 		syscall_door_find
 		num_replace rax
+		stackframe_leave
 	enddef
 
 .macro f argc:req npop:req args:vararg
 	def_as "call:\argc->0" call_\argc\()_0
+		stackframe_enter
 		num_pop\npop rbx rax \args
 		call [rbx + 32 + rax * 8]
+		stackframe_leave
 	enddef
 	def_as "call:\argc->1" call_\argc\()_1
 		call call_\argc\()_0
@@ -1257,7 +1309,70 @@ dict_begin Immediate
 		num_pop rax
 		call asm_num_push
 	enddef
+
+	defimm_as "RAW{" Immediate.raw_opcodes
+	2:	call raw_opcodes.read_digit
+		ifltz al, 3f
+		shl al, 4
+		push rax
+		call raw_opcodes.read_digit
+		pop rcx
+		assertgez al, "(! RAW{) expected hex digit"
+		or al, cl
+		ASM_BEGIN rcx
+		ASM_PUSH8 al
+		ASM_END
+		jmp 2b
+	3:
+	enddef
+
+	defimm_as "#POP" Immediate.pop_rax
+		# FIXME read word instead!
+		call read_word
+		ifeq ecx, 1, 3f
+		ifeq ecx, 2, 4f
+	2:	panic "(! #POP) invalid register"
+	3:	mov al, [rsi]
+		xor edx, edx
+		ifeq al, 'A', 5f
+		inc dl
+		ifeq al, 'C', 5f
+		inc dl
+		ifeq al, 'D', 5f
+		inc dl
+		ifne al, 'B', 2b
+	4:	mov ax, [rsi]
+		mov edx, 4
+		ifeq ax, 'S' | ('P' << 8), 5f
+		inc dl
+		ifeq ax, 'B' | ('P' << 8), 5f
+		inc dl
+		ifeq ax, 'S' | ('I' << 8), 5f
+		inc dl
+		ifne ax, 'D' | ('I' << 8), 2b
+	5:	ASM_BEGIN rax
+		ASM_num_pop_r64dyn edx
+		ASM_END
+	enddef
 dict_end Immediate
+
+raw_opcodes.read_digit:
+2:	call read_byte
+	ifeq al, '}', 4f
+	ifeq al, ' ', 2b
+	ifeq al, '\n', 2b
+	ifeq al, '\t', 2b
+	lea edx, [eax - '0']
+	ifltu dl, 10, 3f
+	or al, 040
+	sub al, 'a'
+	assertltu al, 6, "invalid hex digit"
+	add al, 10
+	ret
+3:	mov eax, edx
+	ret
+4:	mov eax, -1
+	ret
 
 
 dict_begin String
